@@ -384,8 +384,8 @@ run {
         uploadApk = true,
         runAndroidInstrumentedTests = false,
         composeResourceTriple = "linux-x64",
-        runTests = true,
-        uploadDesktopInstallers = true,
+        runTests = false,
+        uploadDesktopInstallers = false,
         extraGradleArgs = listOf(
         ),
         buildAllAndroidAbis = true,
@@ -453,15 +453,15 @@ run {
     )
 
     releaseMatrixInstances = listOf(
-        ghWin, // win installer
-        selfMac15.copy(
-            buildAllAndroidAbis = true,
-            uploadApk = false,
-            uploadDesktopInstallers = false,
-            extraGradleArgs = selfMac15.extraGradleArgs.filterNot { it.startsWith("-P$ANI_ANDROID_ABIS=") },
-        ), // android apks
-        ghMac15AppleSilicon, // macos AArch64 installer
-        ghMac15Intel, // macos x64 portable
+//        ghWin, // win installer
+//        selfMac15.copy(
+//            buildAllAndroidAbis = true,
+//            uploadApk = false,
+//            uploadDesktopInstallers = false,
+//            extraGradleArgs = selfMac15.extraGradleArgs.filterNot { it.startsWith("-P$ANI_ANDROID_ABIS=") },
+//        ), // android apks
+//        ghMac15AppleSilicon, // macos AArch64 installer
+//        ghMac15Intel, // macos x64 portable
         ghUbuntu2404, // linux app image + Android APKs
     )
 }
@@ -1838,7 +1838,7 @@ object Secrets {
 /// EXTENSIONS
 
 val GitHubContext.isAnimekoRepository
-    get() = """$repository == 'open-ani/animeko'"""
+    get() = "true"
 
 val GitHubContext.isPullRequest
     get() = """$event_name == 'pull_request'"""

@@ -1,4 +1,4 @@
-Automatically created from tag $GIT_TAG. Do not change anything until assets are
+Automatically created from tag v5.3.0-alpha03. Do not change anything until assets are
 uploaded.
 
 
@@ -8,55 +8,55 @@ uploaded.
 
 [//]: # (对于所有可用的变量列表, 参考 CI release.yml 的 step release-notes)
 
-[github-win-x64]: https://github.com/open-ani/ani/releases/download/$GIT_TAG/ani-$TAG_VERSION-windows-x86_64.zip
+[github-win-x64]: https://github.com/GrahamZen/animeko/releases/download/v5.3.0-alpha03/ani-5.3.0-alpha03-windows-x86_64.zip
 
-[github-mac-x64]: https://github.com/open-ani/ani/releases/download/$GIT_TAG/ani-$TAG_VERSION-macos-x86_64.dmg
+[github-mac-x64]: https://github.com/GrahamZen/animeko/releases/download/v5.3.0-alpha03/ani-5.3.0-alpha03-macos-x86_64.dmg
 
-[github-mac-aarch64]: https://github.com/open-ani/ani/releases/download/$GIT_TAG/ani-$TAG_VERSION-macos-aarch64.dmg
+[github-mac-aarch64]: https://github.com/GrahamZen/animeko/releases/download/v5.3.0-alpha03/ani-5.3.0-alpha03-macos-aarch64.dmg
 
-[github-android]: https://github.com/open-ani/ani/releases/download/$GIT_TAG/ani-$TAG_VERSION-universal.apk
+[github-android]: https://github.com/GrahamZen/animeko/releases/download/v5.3.0-alpha03/ani-5.3.0-alpha03-universal.apk
 
-[github-android-arm64-v8a]: https://github.com/open-ani/ani/releases/download/$GIT_TAG/ani-$TAG_VERSION-arm64-v8a.apk
+[github-android-arm64-v8a]: https://github.com/GrahamZen/animeko/releases/download/v5.3.0-alpha03/ani-5.3.0-alpha03-arm64-v8a.apk
 
-[github-android-armeabi-v7a]: https://github.com/open-ani/ani/releases/download/$GIT_TAG/ani-$TAG_VERSION-armeabi-v7a.apk
+[github-android-armeabi-v7a]: https://github.com/GrahamZen/animeko/releases/download/v5.3.0-alpha03/ani-5.3.0-alpha03-armeabi-v7a.apk
 
-[github-android-x86_64]: https://github.com/open-ani/ani/releases/download/$GIT_TAG/ani-$TAG_VERSION-x86_64.apk
+[github-android-x86_64]: https://github.com/GrahamZen/animeko/releases/download/v5.3.0-alpha03/ani-5.3.0-alpha03-x86_64.apk
 
-[cf-win-x64]: https://d.myani.org/$GIT_TAG/ani-$TAG_VERSION-windows-x86_64.zip
+[cf-win-x64]: https://d.myani.org/v5.3.0-alpha03/ani-5.3.0-alpha03-windows-x86_64.zip
 
-[cf-linux-x64]: https://d.myani.org/$GIT_TAG/ani-$TAG_VERSION-linux-x86_64.appimage
+[cf-linux-x64]: https://d.myani.org/v5.3.0-alpha03/ani-5.3.0-alpha03-linux-x86_64.appimage
 
-[cf-mac-x64]: https://d.myani.org/$GIT_TAG/ani-$TAG_VERSION-macos-x86_64.zip
+[cf-mac-x64]: https://d.myani.org/v5.3.0-alpha03/ani-5.3.0-alpha03-macos-x86_64.zip
 
-[cf-mac-aarch64]: https://d.myani.org/$GIT_TAG/ani-$TAG_VERSION-macos-aarch64.dmg
+[cf-mac-aarch64]: https://d.myani.org/v5.3.0-alpha03/ani-5.3.0-alpha03-macos-aarch64.dmg
 
-[cf-ios]: https://d.myani.org/$GIT_TAG/ani-$TAG_VERSION.ipa
+[cf-ios]: https://d.myani.org/v5.3.0-alpha03/ani-5.3.0-alpha03.ipa
 
-[cf-android]: https://d.myani.org/$GIT_TAG/ani-$TAG_VERSION-universal.apk
+[cf-android]: https://d.myani.org/v5.3.0-alpha03/ani-5.3.0-alpha03-universal.apk
 
-[cf-android-arm64-v8a]: https://d.myani.org/$GIT_TAG/ani-$TAG_VERSION-arm64-v8a.apk
+[cf-android-arm64-v8a]: https://d.myani.org/v5.3.0-alpha03/ani-5.3.0-alpha03-arm64-v8a.apk
 
-[cf-android-armeabi-v7a]: https://d.myani.org/$GIT_TAG/ani-$TAG_VERSION-armeabi-v7a.apk
+[cf-android-armeabi-v7a]: https://d.myani.org/v5.3.0-alpha03/ani-5.3.0-alpha03-armeabi-v7a.apk
 
-[cf-android-x86_64]: https://d.myani.org/$GIT_TAG/ani-$TAG_VERSION-x86_64.apk
+[cf-android-x86_64]: https://d.myani.org/v5.3.0-alpha03/ani-5.3.0-alpha03-x86_64.apk
 
-[ghproxy-win-x64]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-windows-x86_64.zip
+[ghproxy-win-x64]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2Fv5.3.0-alpha03%2Fani-5.3.0-alpha03-windows-x86_64.zip
 
-[ghproxy-mac-x64]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-macos-x86_64.zip
+[ghproxy-mac-x64]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2Fv5.3.0-alpha03%2Fani-5.3.0-alpha03-macos-x86_64.zip
 
-[ghproxy-linux-x64]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-linux-x86_64.appimage
+[ghproxy-linux-x64]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2Fv5.3.0-alpha03%2Fani-5.3.0-alpha03-linux-x86_64.appimage
 
-[ghproxy-mac-aarch64]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-macos-aarch64.dmg
+[ghproxy-mac-aarch64]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2Fv5.3.0-alpha03%2Fani-5.3.0-alpha03-macos-aarch64.dmg
 
-[ghproxy-ios]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION.ios
+[ghproxy-ios]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2Fv5.3.0-alpha03%2Fani-5.3.0-alpha03.ios
 
-[ghproxy-android]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-universal.apk
+[ghproxy-android]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2Fv5.3.0-alpha03%2Fani-5.3.0-alpha03-universal.apk
 
-[ghproxy-android-arm64-v8a]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-arm64-v8a.apk
+[ghproxy-android-arm64-v8a]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2Fv5.3.0-alpha03%2Fani-5.3.0-alpha03-arm64-v8a.apk
 
-[ghproxy-android-armeabi-v7a]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-armeabi-v7a.apk
+[ghproxy-android-armeabi-v7a]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2Fv5.3.0-alpha03%2Fani-5.3.0-alpha03-armeabi-v7a.apk
 
-[ghproxy-android-x86_64]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-x86_64.apk
+[ghproxy-android-x86_64]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2Fv5.3.0-alpha03%2Fani-5.3.0-alpha03-x86_64.apk
 
 [macOS 无法打开解决方案]: https://myani.org/wiki/macOS-%E6%97%A0%E6%B3%95%E6%89%93%E5%BC%80%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88
 
@@ -66,32 +66,17 @@ uploaded.
 
 [macOS Intel芯片版本安装教程]: https://myani.org/wiki/macOS-Intel-%E8%8A%AF%E7%89%87%E7%89%88%E6%9C%AC%E5%AE%89%E8%A3%85%E6%95%99%E7%A8%8B
 
-[macos-intel-issue]: https://github.com/open-ani/animeko/issues/1345
+[macos-intel-issue]: https://github.com/GrahamZen/animekomeko/issues/1345
 
-[linux-issue]: https://github.com/open-ani/animeko/issues/944
+[linux-issue]: https://github.com/GrahamZen/animekomeko/issues/944
 
 [iOS 自签]: https://myani.org/wiki/iOS-%E8%87%AA%E7%AD%BE
 
 |                  | 下载                                               | 常见问题                                        |
 |------------------|--------------------------------------------------|---------------------------------------------|
-| 安卓 手机/平板         | [主线][cf-android] / [备线][ghproxy-android]         |                                             |
-| 安卓 电视            | 仍在开发中                                            | 现在可以使用平板版接鼠标使用                              |
-| iOS              | [主线][cf-ios] / [备线][ghproxy-ios]                 | 需要[自签][iOS 自签]                                  |
-| Windows          | [主线][cf-win-x64] / [备线][ghproxy-win-x64]         | 1. 目录不要有中文或者空格 <br/> 2. [显示异常][Windows下字体与背景颜色异常解决方案] |
-| macOS (M 系列芯片)   | [主线][cf-mac-aarch64] / [备线][ghproxy-mac-aarch64] | ⚠️ [安装后打不开][macOS 无法打开解决方案]                      |
-| macOS (Intel 芯片) | [主线][cf-mac-x64] / [备线][ghproxy-mac-x64]         | ⚠️ [安装教程][macOS Intel芯片版本安装教程]                    |
-| Linux AppImage   | [主线][cf-linux-x64] / [备线][ghproxy-linux-x64]     | ⚠️ [安装教程][Linux 安装说明]                        |
+| 安卓 电视      | [主线](https://github.com/GrahamZen/animeko/releases/download/v5.3.0-alpha03/ani-5.3.0-alpha03-universal.apk)       |                                             |
 
-[github-android-qr]: https://github.com/open-ani/ani/releases/download/$GIT_TAG/ani-$TAG_VERSION-universal.apk.github.qrcode.png
-
-[cf-android-qr]: https://d.myani.org/$GIT_TAG/ani-$TAG_VERSION-universal.apk.cloudflare.qrcode.png
-
-[cf-ios-qr]: https://d.myani.org/$GIT_TAG/ani-$TAG_VERSION.ipa.cloudflare.qrcode.png
-
-| 安卓 手机/平板                     | iOS IPA (需要[自签][iOS 自签])     | 
-|------------------------------|--------------------------|
-| ![Cloudflare][cf-android-qr] | ![Cloudflare][cf-ios-qr] |
-
+[github-android-qr]: https://github.com/GrahamZen/animeko/releases/download/v5.3.0-alpha03/ani-5.3.0-alpha03-universal.apk.github.qrcode.png
 
 <details>
 <summary> Android 细分架构下载 </summary>
@@ -104,9 +89,25 @@ uploaded.
 
 | 处理器架构              | 适用于             | 下载                                                                                                      |
 |--------------------|-----------------|---------------------------------------------------------------------------------------------------------|
-| universal (推荐)     | 所有设备            | [主线][cf-android] / [备线][ghproxy-android] / [GitHub][github-android]                                     |
-| arm64-v8a (64 位)   | 几乎所有手机和平板       | [主线][cf-android-arm64-v8a] / [备线][ghproxy-android-arm64-v8a] / [GitHub][github-android-arm64-v8a]       |
-| armeabi-v7a (32 位) | 旧手机             | [主线][cf-android-armeabi-v7a] / [备线][ghproxy-android-armeabi-v7a] / [GitHub][github-android-armeabi-v7a] |
-| x86_64             | Chromebook 及模拟器 | [主线][cf-android-x86_64] / [备线][ghproxy-android-x86_64] / [GitHub][github-android-x86_64]                |
+| universal (推荐)     | 所有设备            | [GitHub][github-android]                                     |
+| arm64-v8a (64 位)   | 几乎所有手机和平板      | [GitHub][github-android-arm64-v8a]       |
+| armeabi-v7a (32 位) | 旧手机             | [GitHub][github-android-armeabi-v7a] |
+| x86_64             | Chromebook 及模拟器 | [GitHub][github-android-x86_64]                |
 
 </details>
+
+## 说明
+
+完成大部分Android TV遥控器适配，播放时如果焦点丢失按住确认键可以找回（在播放器界面会回到弹幕设置按钮，其他界面会回到左上角按钮）。
+
+遥控器按钮支持：
+- 播放，暂停键
+- 左右键控制后退，前进
+- 确认键唤出播放器组件，再按确认唤出焦点到弹幕设置按钮
+这些功能在焦点在播放器任意按钮的上一级才生效，焦点在播放器中任意按钮时按返回键回到上一级。
+最开始的登录部分如果焦点丢失请接鼠标完成登录，后续可以继续用遥控器。
+
+## 已知问题
+
+* 右侧数据源侧边栏可能会出现按返回键不关闭等问题，建议只使用播放器内的选择数据源按钮。
+* 在安卓10及以下版本的系统里很可能无法正确请求焦点，导致无法使用遥控器功能，遇到问题时请确认系统版本。
