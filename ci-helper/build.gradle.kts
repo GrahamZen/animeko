@@ -131,39 +131,39 @@ tasks.register("uploadAndroidApk") {
     }
 }
 
-tasks.register("uploadAndroidApkQR") {
-    doLast {
-        ReleaseEnvironment().run {
-            uploadReleaseAsset(
-                name = namer.androidAppQR(fullVersion, "universal", "github"),
-                contentType = "image/png",
-                file = rootProject.file("apk-qrcode-github.png"),
-            )
-            uploadReleaseAsset(
-                name = namer.androidAppQR(fullVersion, "universal", "cloudflare"),
-                contentType = "image/png",
-                file = rootProject.file("apk-qrcode-cloudflare.png"),
-            )
-        }
-    }
-}
+//tasks.register("uploadAndroidApkQR") {
+//    doLast {
+//        ReleaseEnvironment().run {
+//            uploadReleaseAsset(
+//                name = namer.androidAppQR(fullVersion, "universal", "github"),
+//                contentType = "image/png",
+//                file = rootProject.file("apk-qrcode-github.png"),
+//            )
+//            uploadReleaseAsset(
+//                name = namer.androidAppQR(fullVersion, "universal", "cloudflare"),
+//                contentType = "image/png",
+//                file = rootProject.file("apk-qrcode-cloudflare.png"),
+//            )
+//        }
+//    }
+//}
 
-tasks.register("uploadIosIpaQR") {
-    doLast {
-        ReleaseEnvironment().run {
-            uploadReleaseAsset(
-                name = namer.iosIpaQR(fullVersion, "github"),
-                contentType = "image/png",
-                file = rootProject.file("ipa-qrcode-github.png"),
-            )
-            uploadReleaseAsset(
-                name = namer.iosIpaQR(fullVersion, "cloudflare"),
-                contentType = "image/png",
-                file = rootProject.file("ipa-qrcode-cloudflare.png"),
-            )
-        }
-    }
-}
+//tasks.register("uploadIosIpaQR") {
+//    doLast {
+//        ReleaseEnvironment().run {
+//            uploadReleaseAsset(
+//                name = namer.iosIpaQR(fullVersion, "github"),
+//                contentType = "image/png",
+//                file = rootProject.file("ipa-qrcode-github.png"),
+//            )
+//            uploadReleaseAsset(
+//                name = namer.iosIpaQR(fullVersion, "cloudflare"),
+//                contentType = "image/png",
+//                file = rootProject.file("ipa-qrcode-cloudflare.png"),
+//            )
+//        }
+//    }
+//}
 
 val zipDesktopDistribution = tasks.register("zipDesktopDistribution", Zip::class) {
     dependsOn(
