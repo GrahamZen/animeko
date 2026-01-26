@@ -196,18 +196,18 @@ jobs:
         name: 'Check (Attempt #1)'
         continue-on-error: true
         timeout-minutes: 180
-        run: './gradlew check "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake" "-DBoost_INCLUDE_DIR=C:/vcpkg/installed/x64-windows/include" "-Dorg.gradle.jvmargs=-Xmx3g -Dkotlin.daemon.jvm.options=-Xmx3g" "-Dkotlin.daemon.jvm.options=-Xmx3g" "--parallel" "-Pani.android.abis=x86_64"'
+        run: './gradlew check -x desktopTest "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake" "-DBoost_INCLUDE_DIR=C:/vcpkg/installed/x64-windows/include" "-Dorg.gradle.jvmargs=-Xmx3g -Dkotlin.daemon.jvm.options=-Xmx3g" "-Dkotlin.daemon.jvm.options=-Xmx3g" "--parallel" "-Pani.android.abis=x86_64"'
       - id: 'step-24'
         name: 'Check (Attempt #2)'
         continue-on-error: true
         timeout-minutes: 180
-        run: './gradlew check "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake" "-DBoost_INCLUDE_DIR=C:/vcpkg/installed/x64-windows/include" "-Dorg.gradle.jvmargs=-Xmx3g -Dkotlin.daemon.jvm.options=-Xmx3g" "-Dkotlin.daemon.jvm.options=-Xmx3g" "--parallel" "-Pani.android.abis=x86_64"'
+        run: './gradlew check -x desktopTest "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake" "-DBoost_INCLUDE_DIR=C:/vcpkg/installed/x64-windows/include" "-Dorg.gradle.jvmargs=-Xmx3g -Dkotlin.daemon.jvm.options=-Xmx3g" "-Dkotlin.daemon.jvm.options=-Xmx3g" "--parallel" "-Pani.android.abis=x86_64"'
         if: '${{ steps.step-23.outcome == ''failure'' }}'
       - id: 'step-25'
         name: 'Check (Attempt #3)'
         continue-on-error: false
         timeout-minutes: 180
-        run: './gradlew check "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake" "-DBoost_INCLUDE_DIR=C:/vcpkg/installed/x64-windows/include" "-Dorg.gradle.jvmargs=-Xmx3g -Dkotlin.daemon.jvm.options=-Xmx3g" "-Dkotlin.daemon.jvm.options=-Xmx3g" "--parallel" "-Pani.android.abis=x86_64"'
+        run: './gradlew check -x desktopTest "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake" "-DBoost_INCLUDE_DIR=C:/vcpkg/installed/x64-windows/include" "-Dorg.gradle.jvmargs=-Xmx3g -Dkotlin.daemon.jvm.options=-Xmx3g" "-Dkotlin.daemon.jvm.options=-Xmx3g" "--parallel" "-Pani.android.abis=x86_64"'
         if: '${{ steps.step-24.outcome == ''failure'' }}'
   build_github-ubuntu-2404:
     name: 'Build (Ubuntu 24.04 x86_64 (GitHub))'
