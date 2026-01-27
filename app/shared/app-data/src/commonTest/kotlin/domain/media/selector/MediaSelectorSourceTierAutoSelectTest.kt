@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2024-2025 OpenAni and contributors.
+ * Copyright (C) 2024-2026 OpenAni and contributors.
  *
  * 此源代码的使用受 GNU AFFERO GENERAL PUBLIC LICENSE version 3 许可证的约束, 可以在以下链接找到该许可证.
  * Use of this source code is governed by the GNU AGPLv3 license, which can be found at the following link.
@@ -15,24 +15,23 @@ import app.cash.turbine.test
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.asFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import me.him188.ani.app.data.models.preference.MediaPreference
 import me.him188.ani.app.domain.media.fetch.MediaFetchSession
 import me.him188.ani.app.domain.media.selector.testFramework.FetchMediaSelectorTestSuite
 import me.him188.ani.app.domain.media.selector.testFramework.MediaSelectorTestSuite
-import me.him188.ani.app.domain.media.selector.testFramework.TestMediaFetchSession
 import me.him188.ani.app.domain.media.selector.testFramework.assert
 import me.him188.ani.app.domain.media.selector.testFramework.runFetchMediaSelectorTestSuite
 import me.him188.ani.app.domain.media.selector.testFramework.tier
 import me.him188.ani.datasources.api.Media
-import me.him188.ani.datasources.api.source.MediaSourceKind
 import me.him188.ani.datasources.api.source.MediaSourceKind.BitTorrent
 import me.him188.ani.datasources.api.source.MediaSourceKind.WEB
 import me.him188.ani.test.DisabledOnNative
 import kotlin.test.Test
 import kotlin.test.assertNotNull
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * @see DefaultMediaSelector.filteredCandidates
@@ -57,9 +56,7 @@ class MediaSelectorSourceTierAutoSelectTest {
             }
         }
 
-        createFastSelectFlow(
-            session, handles,
-        ).test {
+        createFastSelectFlow(session).test {
             // Initially no sources are completed
             expectNoEvents()
 
@@ -95,11 +92,32 @@ class MediaSelectorSourceTierAutoSelectTest {
                 val web2 by web { tier = 2 }
             }
         }
-        createFastSelectFlow(
-            session, handles,
-        ).test {
+        createFastSelectFlow(session).test {
             expectNoEvents()
             sources.web1.complete(media(kind = WEB, subjectName = initApi.subjectName))
+            testScope().runCurrent()
+            listOf(assertNotNull(awaitItem())).assert {
+                single().assert(source = sources.web1)
+            }
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `auto select t0 when t0 and t1 completed`() = runFetchMediaSelectorTestSuite {
+        initSubject()
+        val (handles, session, sources) = configureFetchSession {
+            object {
+                val bt1 by bt()
+
+                val web1 by web { tier = 0 }
+                val web2 by web { tier = 2 }
+            }
+        }
+        createFastSelectFlow(session).test {
+            expectNoEvents()
+            sources.web1.complete(media(kind = WEB, subjectName = initApi.subjectName))
+            sources.web2.complete(media(kind = WEB, subjectName = initApi.subjectName))
             testScope().runCurrent()
             listOf(assertNotNull(awaitItem())).assert {
                 single().assert(source = sources.web1)
@@ -119,9 +137,7 @@ class MediaSelectorSourceTierAutoSelectTest {
                 val web2 by web { tier = 2 }
             }
         }
-        createFastSelectFlow(
-            session, handles,
-        ).test {
+        createFastSelectFlow(session).test {
             expectNoEvents()
             sources.web1.complete(media(kind = WEB, subjectName = initApi.subjectName))
             testScope().runCurrent()
@@ -141,13 +157,38 @@ class MediaSelectorSourceTierAutoSelectTest {
                 val web2 by web { tier = 2 }
             }
         }
-        createFastSelectFlow(
-            session, handles,
-        ).test {
+        createFastSelectFlow(session).test {
             expectNoEvents()
             sources.web2.complete(media(kind = WEB, subjectName = initApi.subjectName))
             testScope().runCurrent()
             expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `auto select t2 after timeout`() = runFetchMediaSelectorTestSuite {
+        initSubject()
+        val (handles, session, sources) = configureFetchSession {
+            object {
+                val bt1 by bt()
+
+                val web1 by web { tier = 0 }
+                val web2 by web { tier = 2 }
+            }
+        }
+        createFastSelectFlow(session).test {
+            expectNoEvents()
+            sources.web2.complete(media(kind = WEB, subjectName = initApi.subjectName))
+            testScope().runCurrent() // Should not select yet
+            expectNoEvents()
+
+            testScope().advanceTimeBy(5.seconds) // Wait for timeout
+            testScope().runCurrent()
+
+            listOf(assertNotNull(awaitItem())).assert {
+                single().assert(source = sources.web2)
+            }
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -163,9 +204,7 @@ class MediaSelectorSourceTierAutoSelectTest {
                 val web2 by web { tier = 2 }
             }
         }
-        createFastSelectFlow(
-            session, handles,
-        ).test {
+        createFastSelectFlow(session).test {
             expectNoEvents()
             sources.web1.complete(media(kind = WEB, subjectName = "Invalid subject name"))
             testScope().runCurrent()
@@ -183,13 +222,9 @@ class MediaSelectorSourceTierAutoSelectTest {
 
     private fun FetchMediaSelectorTestSuite.createFastSelectFlow(
         session: MediaFetchSession,
-        handles: TestMediaFetchSession<*>,
-        preferKind: MediaSourceKind? = WEB,
     ): Flow<Media?> = suspend {
-        selector.autoSelect.fastSelectSources(
+        selector.autoSelect.fastSelectWebSources(
             session,
-            fastMediaSourceIdOrder = handles.allSourceIds,
-            preferKind = flowOf(preferKind),
             sourceTiers = preferenceApi.sourceTiers!!,
         )
     }.asFlow()

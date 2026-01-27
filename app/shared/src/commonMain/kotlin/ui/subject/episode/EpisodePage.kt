@@ -1000,10 +1000,11 @@ private fun EpisodeVideo(
                 )
             }
         },
+        isFullscreen = vm.isFullscreen,
         fullscreenSwitchButton = {
             EpisodeVideoDefaults.FloatingFullscreenSwitchButton(
                 vm.videoScaffoldConfig.fullscreenSwitchMode,
-                isFullscreen = expanded,
+                isFullscreen = vm.isFullscreen,
                 onClickFullScreen,
             )
         },

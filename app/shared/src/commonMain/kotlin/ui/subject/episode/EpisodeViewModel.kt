@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2024-2025 OpenAni and contributors.
+ * Copyright (C) 2024-2026 OpenAni and contributors.
  *
  * 此源代码的使用受 GNU AFFERO GENERAL PUBLIC LICENSE version 3 许可证的约束, 可以在以下链接找到该许可证.
  * Use of this source code is governed by the GNU AGPLv3 license, which can be found at the following link.
@@ -84,12 +84,14 @@ import me.him188.ani.app.domain.media.cache.MediaCacheManager
 import me.him188.ani.app.domain.media.fetch.MediaSourceManager
 import me.him188.ani.app.domain.media.fetch.MediaSourceResultsFilterer
 import me.him188.ani.app.domain.media.resolver.MediaResolver
+import me.him188.ani.app.domain.mediasource.GetPreferredWebMediaSourceUseCase
 import me.him188.ani.app.domain.mediasource.instance.GetMediaSourceInstancesUseCase
 import me.him188.ani.app.domain.player.CacheProgressProvider
 import me.him188.ani.app.domain.player.extension.AnalyticsExtension
 import me.him188.ani.app.domain.player.extension.AutoSelectExtension
 import me.him188.ani.app.domain.player.extension.CacheOnBtPlayExtension
 import me.him188.ani.app.domain.player.extension.MarkAsWatchedExtension
+import me.him188.ani.app.domain.player.extension.ObserveWebMediaSourcePreferenceExtension
 import me.him188.ani.app.domain.player.extension.RememberPlayProgressExtension
 import me.him188.ani.app.domain.player.extension.SaveMediaPreferenceExtension
 import me.him188.ani.app.domain.player.extension.SwitchMediaOnPlayerErrorExtension
@@ -259,6 +261,7 @@ class EpisodeViewModel(
     private val getSubjectRecommendations: GetSubjectRecommendationUseCase by inject()
     private val getDanmakuRegexFilterListFlowUseCase: GetDanmakuRegexFilterListFlowUseCase by inject()
     private val setSubjectCollectionTypeOrDeleteUseCase: SetSubjectCollectionTypeOrDeleteUseCase by inject()
+    private val getPreferredWebMediaSource: GetPreferredWebMediaSourceUseCase by inject()
     // endregion
 
     private val tasker = SingleTaskExecutor(backgroundScope.coroutineContext)
@@ -295,6 +298,7 @@ class EpisodeViewModel(
             SwitchMediaOnPlayerErrorExtension,
             AutoSelectExtension,
             SaveMediaPreferenceExtension,
+            ObserveWebMediaSourcePreferenceExtension,
         ),
         koin,
         sharingStarted = SharingStarted.WhileSubscribed(5_000),
@@ -739,6 +743,7 @@ class EpisodeViewModel(
 
         val mediaSourceResultsFlow = MediaSourceResultListPresenter(
             filteredSourceResults,
+            getPreferredWebMediaSource(subjectId),
         ).presentationFlow
             .shareIn(this, SharingStarted.Lazily, replay = 1)
 
@@ -783,8 +788,8 @@ class EpisodeViewModel(
                         fetchSelect.mediaSelector,
                         filteredSourceResults,
                         mediaSourceInfoProvider,
+                        getPreferredWebMediaSource(subjectId),
                         backgroundScope,
-                        koin.get(),
                     )
                 } else {
                     // TODO: 2025/1/22 We should not use createTestMediaSelectorState
