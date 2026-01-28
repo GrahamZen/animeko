@@ -62,6 +62,8 @@ import me.him188.ani.app.ui.foundation.layout.plus
 import me.him188.ani.app.ui.foundation.navigation.BackHandler
 import me.him188.ani.app.ui.foundation.widgets.BackNavigationIconButton
 import me.him188.ani.app.ui.search.collectHasQueryAsState
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import me.him188.ani.utils.platform.isDesktop
 
 @Composable
@@ -73,6 +75,7 @@ fun SearchPage(
     navigator: ThreePaneScaffoldNavigator<*> = rememberListDetailPaneScaffoldNavigator(),
     contentWindowInsets: WindowInsets = AniWindowInsets.forPageContent(),
     navigationIcon: @Composable () -> Unit = {},
+    onSearch: () -> Unit = {},
 ) {
     val coroutineScope = rememberCoroutineScope()
     BackHandler(navigator.canNavigateBack()) {
@@ -81,6 +84,7 @@ fun SearchPage(
         }
     }
     val scope = rememberCoroutineScope()
+    val chipsFocusRequester = remember { FocusRequester() }
 
     val items = state.items
     SearchPageListDetailScaffold(
@@ -96,6 +100,14 @@ fun SearchPage(
                 Modifier.padding(bottom = 16.dp),
                 placeholder = { Text("关键词") },
                 windowInsets = contentWindowInsets.only(WindowInsetsSides.Horizontal),
+                onSearchConfirmed = {
+                    onSearch()
+                    // 延迟以等待 UI 更新 (例如 chips 可能需要重组)
+                    scope.launch {
+                        kotlinx.coroutines.delay(100)
+                        chipsFocusRequester.requestFocus()
+                    }
+                },
             )
         },
         searchResultColumn = { nestedScrollConnection ->
@@ -163,6 +175,7 @@ fun SearchPage(
                                     state.toggleTagSelection(chip, value, unselectOthersOfSameKind = false)
                                 },
                                 Modifier.fillMaxWidth(),
+                                firstItemModifier = Modifier.focusRequester(chipsFocusRequester),
                             )
                         }
                     },
