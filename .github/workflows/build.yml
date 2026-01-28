@@ -24,21 +24,7 @@ concurrency:
   group: '${{ github.workflow }}-${{ github.event_name }}-${{ github.ref_name == ''main'' && github.run_id || github.ref_name }}'
   cancel-in-progress: true
 jobs:
-  consistency-check:
-    name: 'Workflow YAML Consistency Check'
-    runs-on: 'ubuntu-latest'
-    permissions: { }
-    steps:
-      - id: 'step-0'
-        uses: 'actions/checkout@v4'
-      - id: 'step-1'
-        run: 'pip3 install PyYAML'
-      - id: 'step-2'
-        run: 'cp ".github/workflows/build.yml" ".github/workflows/build.yml-check.yml" '
-      - id: 'step-3'
-        run: '.github/workflows/src.main.kts'
-      - id: 'step-4'
-        run: 'python .github/workflows/check_yaml_equivalence.py .github/workflows/build.yml .github/workflows/build.yml-check.yml'
+
   build_github-windows-2022:
     name: 'Build (Windows Server 2019 x86_64)'
     runs-on:

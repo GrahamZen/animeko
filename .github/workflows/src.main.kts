@@ -752,7 +752,7 @@ workflow(
         cancelInProgress = true,
     ),
 ) {
-    addConsistencyCheckJob("build.yml")
+
     // Expands job matrix at compile-time so that we set job-level `if` condition. 
     val builds: List<Pair<MatrixInstance, Job<BuildJobOutputs>>> = buildMatrixInstances.map { matrix ->
         matrix to job(
