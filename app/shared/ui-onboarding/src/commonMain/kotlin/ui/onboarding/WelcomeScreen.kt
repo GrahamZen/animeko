@@ -29,6 +29,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
 import me.him188.ani.app.ui.foundation.animation.WithContentEnterAnimation
 import me.him188.ani.app.ui.foundation.layout.AniWindowInsets
 import me.him188.ani.app.ui.foundation.layout.currentWindowAdaptiveInfo1
@@ -65,6 +70,12 @@ internal fun WelcomeScene(
     modifier: Modifier = Modifier,
     windowInsets: WindowInsets = AniWindowInsets.forPageContent(),
 ) {
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        delay(500)
+        focusRequester.requestFocus()
+    }
+
     Box(
         modifier = modifier, 
         contentAlignment = Alignment.Center
@@ -116,7 +127,7 @@ internal fun WelcomeScene(
                 ) {
                     Button(
                         onClick = onClickContinue,
-                        modifier = Modifier.widthIn(300.dp),
+                        modifier = Modifier.widthIn(300.dp).focusRequester(focusRequester),
                     ) {
                         Text("继续")
                     }
