@@ -11,8 +11,6 @@ package me.him188.ani.app.ui.exploration.search
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SharedTransitionLayout
-import androidx.compose.foundation.focusGroup
-import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.FlowRow
@@ -56,6 +54,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.onSizeChanged
@@ -74,8 +73,6 @@ import me.him188.ani.app.ui.foundation.animation.SharedTransitionKeys
 import me.him188.ani.app.ui.foundation.icons.BackgroundDotLarge
 import me.him188.ani.app.ui.foundation.icons.GalleryThumbnail
 import me.him188.ani.app.ui.foundation.ifNotNullThen
-import me.him188.ani.app.ui.foundation.interaction.keyboardDirectionToSelectItem
-import me.him188.ani.app.ui.foundation.interaction.keyboardPageToScroll
 import me.him188.ani.app.ui.foundation.layout.currentWindowAdaptiveInfo1
 import me.him188.ani.app.ui.foundation.layout.paneHorizontalPadding
 import me.him188.ani.app.ui.foundation.layout.paneVerticalPadding
@@ -122,17 +119,7 @@ internal fun SearchResultColumn(
             )
         },
         modifier
-            .focusGroup()
-            .onSizeChanged { height = it.height }
-            .keyboardDirectionToSelectItem(
-                selectedItemIndex,
-            ) {
-                state.animateScrollToItem(it)
-                onSelect(it)
-            }
-            .keyboardPageToScroll({ height.toFloat() }) {
-                state.animateScrollBy(it)
-            },
+            .onSizeChanged { height = it.height },
         cells = layoutParams.grid.gridCells,
         state = state,
         horizontalArrangement = layoutParams.grid.horizontalArrangement,
@@ -178,6 +165,11 @@ internal fun SearchResultColumn(
                                     isPlaceholder = info == null,
                                     onClick = { onSelect(index) },
                                     Modifier
+                                        .onFocusChanged {
+                                            if (it.isFocused) {
+                                                onSelect(index)
+                                            }
+                                        }
                                         .ifNotNullThen(info) {
                                             sharedElement(
                                                 rememberSharedContentState(
@@ -216,6 +208,11 @@ internal fun SearchResultColumn(
                                         onClick = { onSelect(index) },
                                         onPlay = onPlay,
                                         Modifier
+                                            .onFocusChanged {
+                                                if (it.isFocused) {
+                                                    onSelect(index)
+                                                }
+                                            }
                                             .animateItem(
                                                 aniMotionScheme.feedItemFadeInSpec,
                                                 aniMotionScheme.feedItemPlacementSpec,
@@ -242,7 +239,7 @@ internal fun SearchResultColumn(
     LaunchedEffect(Unit) {
         snapshotFlow(selectedItemIndex)
             .collectLatest {
-                bringIntoViewRequesters[items.itemSnapshotList.getOrNull(it)?.subjectId]?.bringIntoView()
+                // bringIntoViewRequesters[items.itemSnapshotList.getOrNull(it)?.subjectId]?.bringIntoView()
             }
     }
 }
