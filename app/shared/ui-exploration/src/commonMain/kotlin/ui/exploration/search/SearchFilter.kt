@@ -83,13 +83,15 @@ fun SearchFilterChipsRow(
     onClickItemText: (SearchFilterChipState, value: String) -> Unit,
     onCheckedChange: (SearchFilterChipState, value: String) -> Unit,
     modifier: Modifier = Modifier,
+    firstItemModifier: Modifier = Modifier,
 ) {
     FlowRow(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        for (chipState in state.chips) {
+        state.chips.forEachIndexed { index, chipState ->
             SearchFilterChip(
                 chipState,
                 { onClickItemText(chipState, it) },
-                { onCheckedChange(chipState, it) }
+                { onCheckedChange(chipState, it) },
+                if (index == 0) firstItemModifier else Modifier
             )
         }
     }
@@ -116,7 +118,7 @@ fun SearchFilterChip(
             ).size.width.toDp()
         }
     }
-    Box(modifier) {
+    Box {
         InputChip(
             state.hasSelection,
             onClick = { showDropdown = true },

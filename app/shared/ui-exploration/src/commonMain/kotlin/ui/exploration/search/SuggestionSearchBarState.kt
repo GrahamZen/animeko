@@ -147,6 +147,7 @@ fun <T : Any> SuggestionSearchBar(
     inputFieldModifier: Modifier = Modifier,
     windowInsets: WindowInsets = AniWindowInsets.forSearchBar(),
     placeholder: @Composable (() -> Unit)? = null,
+    onSearchConfirmed: () -> Unit = {},
 ) {
     BackHandler(state.expanded) {
         state.expanded = false
@@ -161,11 +162,13 @@ fun <T : Any> SuggestionSearchBar(
                 onSearch = {
                     state.expanded = false
                     state.startSearch()
+                    onSearchConfirmed()
                 },
                 expanded = state.expanded,
                 onExpandedChange = { state.expanded = it },
                 inputFieldModifier.fillMaxWidth().onEnterKeyEvent {
                     state.startSearch()
+                    onSearchConfirmed()
                     true
                 },
                 placeholder = placeholder,
@@ -206,6 +209,7 @@ fun <T : Any> SuggestionSearchBar(
                     modifier = Modifier.animateItem().clickable {
                         state.setQuery(text)
                         state.startSearch()
+                        onSearchConfirmed()
                     },
                     colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
                     trailingContent = if (presentation.previewType == SuggestionSearchPreviewType.HISTORY) {
