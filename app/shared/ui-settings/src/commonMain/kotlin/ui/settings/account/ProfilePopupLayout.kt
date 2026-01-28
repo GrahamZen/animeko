@@ -9,6 +9,9 @@
 
 package me.him188.ani.app.ui.settings.account
 
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import me.him188.ani.app.ui.foundation.ifThen
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -64,6 +67,7 @@ internal fun ProfilePopupLayout(
     onClickSettings: () -> Unit,
     onClickLogout: () -> Unit,
     modifier: Modifier = Modifier,
+    focusRequester: FocusRequester? = null,
 ) {
     val isLogin = remember(state) { state.selfInfo.isSessionValid == true }
     Column(modifier) {
@@ -125,6 +129,7 @@ internal fun ProfilePopupLayout(
             Column {
                 if (isLogin) {
                     TextItem(
+                        modifier = Modifier.ifThen(focusRequester != null) { focusRequester(focusRequester!!) },
                         icon = { Icon(Icons.Outlined.Edit, contentDescription = "Edit profile settings") },
                         onClick = onClickEditProfile,
                     ) {
@@ -132,6 +137,7 @@ internal fun ProfilePopupLayout(
                     }
                 } else {
                     TextItem(
+                        modifier = Modifier.ifThen(focusRequester != null) { focusRequester(focusRequester!!) },
                         icon = { Icon(Icons.AutoMirrored.Outlined.Login, contentDescription = "Login") },
                         onClick = onClickLogin,
                     ) {
