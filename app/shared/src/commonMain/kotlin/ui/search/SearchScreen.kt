@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.only
 import androidx.compose.material3.adaptive.layout.ListDetailPaneScaffoldRole
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.material3.adaptive.navigation.BackNavigationBehavior
 import androidx.compose.material3.adaptive.navigation.rememberListDetailPaneScaffoldNavigator
 import androidx.compose.runtime.Composable
@@ -47,6 +48,7 @@ fun SearchScreen(
     val listDetailNavigator = rememberListDetailPaneScaffoldNavigator()
     val coroutineScope = rememberCoroutineScope()
     val toast = LocalToaster.current
+    val detailsFocusRequester = remember { FocusRequester() }
 
     SearchPage(
         vm.searchPageState,
@@ -94,6 +96,7 @@ fun SearchScreen(
                         )
                     }
                 },
+                detailsFocusRequester = detailsFocusRequester,
             )
         },
         modifier.fillMaxSize(),
@@ -110,6 +113,11 @@ fun SearchScreen(
         navigator = listDetailNavigator,
         navigationIcon = {
             BackNavigationIconButton(onNavigateBack)
+        },
+        onRequestDetailsFocus = {
+             coroutineScope.launch {
+                detailsFocusRequester.requestFocus()
+            }
         },
     )
     SideEffect {

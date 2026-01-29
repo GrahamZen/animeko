@@ -107,7 +107,7 @@ fun PreviewSearchPageResultColumn() = ProvideCompositionLocalsForPreview {
                 )
             },
             selectedItemIndex = { 1 },
-            onSelect = {},
+            onSelect = { _, _ -> },
             onPlay = {},
             headers = {},
         )
