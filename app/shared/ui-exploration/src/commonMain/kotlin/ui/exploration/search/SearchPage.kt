@@ -64,6 +64,7 @@ import me.him188.ani.app.ui.foundation.widgets.BackNavigationIconButton
 import me.him188.ani.app.ui.search.collectHasQueryAsState
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalFocusManager
 import me.him188.ani.utils.platform.isDesktop
 
 @Composable
@@ -76,6 +77,7 @@ fun SearchPage(
     contentWindowInsets: WindowInsets = AniWindowInsets.forPageContent(),
     navigationIcon: @Composable () -> Unit = {},
     onSearch: () -> Unit = {},
+    onRequestDetailsFocus: () -> Unit = {},
 ) {
     val coroutineScope = rememberCoroutineScope()
     BackHandler(navigator.canNavigateBack()) {
@@ -85,6 +87,7 @@ fun SearchPage(
     }
     val scope = rememberCoroutineScope()
     val chipsFocusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
 
     val items = state.items
     SearchPageListDetailScaffold(
@@ -101,6 +104,7 @@ fun SearchPage(
                 placeholder = { Text("关键词") },
                 windowInsets = contentWindowInsets.only(WindowInsetsSides.Horizontal),
                 onSearchConfirmed = {
+                    focusManager.clearFocus()
                     onSearch()
                     // 延迟以等待 UI 更新 (例如 chips 可能需要重组)
                     scope.launch {
@@ -130,7 +134,10 @@ fun SearchPage(
                         }
                     },
                     selectedItemIndex = { state.selectedItemIndex },
-                    onSelect = { index ->
+                    onSelect = { index, isExplicitAction ->
+                        if (isExplicitAction) {
+                            onRequestDetailsFocus()
+                        }
                         items[index]?.let {
                             onSelect(index, it)
                         }

@@ -138,7 +138,10 @@ import me.him188.ani.app.ui.subject.episode.list.EpisodeListDialog
 import me.him188.ani.app.ui.user.SelfInfoUiState
 import me.him188.ani.datasources.api.PackedDate
 import me.him188.ani.datasources.api.topic.toggleCollected
+import me.him188.ani.datasources.api.topic.toggleCollected
 import me.him188.ani.utils.platform.isMobile
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 
 // region screen
 
@@ -153,6 +156,7 @@ fun SubjectDetailsScreen(
     showBlurredBackground: Boolean = true,
     windowInsets: WindowInsets = TopAppBarDefaults.windowInsets,
     navigationIcon: @Composable () -> Unit = {},
+    detailsFocusRequester: FocusRequester? = null,
 ) {
     val state by vm.state.collectAsStateWithLifecycle(null)
     val selfInfo by vm.authState.collectAsStateWithLifecycle()
@@ -181,6 +185,7 @@ fun SubjectDetailsScreen(
         showBlurredBackground,
         windowInsets,
         navigationIcon,
+        detailsFocusRequester,
     )
 }
 
@@ -197,6 +202,7 @@ fun SubjectDetailsScreen(
     showBlurredBackground: Boolean = true,
     windowInsets: WindowInsets = TopAppBarDefaults.windowInsets,
     navigationIcon: @Composable () -> Unit = {},
+    detailsFocusRequester: FocusRequester? = null,
 ) {
     val navigator = LocalNavigator.current
     val uriHandler = LocalUriHandler.current
@@ -227,6 +233,7 @@ fun SubjectDetailsScreen(
             windowInsets,
             navigationIcon,
             onClickOpenExternal,
+            detailsFocusRequester,
         )
 
         is SubjectDetailsUIState.Err -> ErrorSubjectDetailsPage(
@@ -260,6 +267,7 @@ private fun SubjectDetailsPage(
     windowInsets: WindowInsets = TopAppBarDefaults.windowInsets,
     navigationIcon: @Composable () -> Unit = {},
     onClickOpenExternal: () -> Unit = {},
+    detailsFocusRequester: FocusRequester? = null,
 ) {
     val toaster = LocalToaster.current
     val browserNavigator = LocalUriHandler.current
@@ -323,6 +331,7 @@ private fun SubjectDetailsPage(
                     state.subjectProgressState,
                     onShowEpisodeList = { showSelectEpisode = true },
                     onPlay = onPlay,
+                    modifier = Modifier.ifThen(detailsFocusRequester != null) { focusRequester(detailsFocusRequester!!) },
                 )
             },
             connectedScrollState = connectedScrollState,

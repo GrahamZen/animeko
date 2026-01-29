@@ -94,7 +94,7 @@ internal fun SearchResultColumn(
     layoutKind: SearchResultLayoutKind,
     summary: @Composable SearchResultColumnScope.() -> Unit, // 可在还没发起任何搜索时不展示
     selectedItemIndex: () -> Int,
-    onSelect: (index: Int) -> Unit,
+    onSelect: (index: Int, isExplicitAction: Boolean) -> Unit,
     onPlay: (info: SubjectPreviewItemInfo) -> Unit,
     highlightSelected: Boolean = true,
     modifier: Modifier = Modifier,
@@ -163,11 +163,11 @@ internal fun SearchResultColumn(
                                     info?.title,
                                     info?.imageUrl,
                                     isPlaceholder = info == null,
-                                    onClick = { onSelect(index) },
+                                    onClick = { onSelect(index, true) },
                                     Modifier
                                         .onFocusChanged {
                                             if (it.isFocused) {
-                                                onSelect(index)
+                                                onSelect(index, false)
                                             }
                                         }
                                         .ifNotNullThen(info) {
@@ -205,12 +205,12 @@ internal fun SearchResultColumn(
                                         info = info,
                                         selected = highlightSelected && index == selectedItemIndex(),
                                         shape = layoutParams.previewItem.shape,
-                                        onClick = { onSelect(index) },
+                                        onClick = { onSelect(index, true) },
                                         onPlay = onPlay,
                                         Modifier
                                             .onFocusChanged {
                                                 if (it.isFocused) {
-                                                    onSelect(index)
+                                                    onSelect(index, false)
                                                 }
                                             }
                                             .animateItem(
