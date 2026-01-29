@@ -10,6 +10,7 @@
 package me.him188.ani.app.ui.mediafetch
 
 import androidx.compose.foundation.clickable
+import kotlinx.coroutines.flow.first
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -56,10 +57,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import me.him188.ani.app.ui.foundation.LocalPlatform
-import me.him188.ani.app.ui.foundation.dialogs.PlatformPopupProperties
-import me.him188.ani.app.ui.foundation.FOCUS_REQ_DELAY_MILLIS
 import me.him188.ani.app.ui.foundation.isTv
 import me.him188.ani.app.ui.media.renderSubtitleLanguage
+import me.him188.ani.app.ui.foundation.dialogs.PlatformPopupProperties
+import me.him188.ani.app.domain.usecase.GlobalKoin
+import me.him188.ani.app.data.repository.user.SettingsRepository
 
 
 private inline val minWidth get() = 60.dp
@@ -162,6 +164,8 @@ private fun <T : Any> MediaSelectorFilterChip(
     // Create FocusRequester for the chip button
     val chipFocusRequester = remember { FocusRequester() }
     val isTv = LocalPlatform.current.isTv()
+    val settingsRepository = remember { GlobalKoin.get<SettingsRepository>() }
+    val focusSettings by settingsRepository.focusSettings.flow.collectAsStateWithLifecycle(initialValue = null)
 
     Box {
         val chipSelected = isSingleValue || selected != null
@@ -242,7 +246,8 @@ private fun <T : Any> MediaSelectorFilterChip(
                 if (isTv && index == 0) {
                     LaunchedEffect(showDropdown) {
                         if (showDropdown) {
-                            kotlinx.coroutines.delay(FOCUS_REQ_DELAY_MILLIS) // Wait for popup to render
+                            val delay = settingsRepository.focusSettings.flow.first().globalFocusDelay
+                            kotlinx.coroutines.delay(delay) // Wait for popup to render
                             itemFocusRequester?.requestFocus()
                         }
                     }

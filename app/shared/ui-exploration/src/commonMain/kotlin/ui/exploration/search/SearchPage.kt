@@ -59,6 +59,8 @@ import me.him188.ani.app.ui.foundation.layout.AniWindowInsets
 import me.him188.ani.app.ui.foundation.layout.currentWindowAdaptiveInfo1
 import me.him188.ani.app.ui.foundation.layout.paneVerticalPadding
 import me.him188.ani.app.ui.foundation.layout.plus
+import me.him188.ani.app.data.repository.user.SettingsRepository
+import me.him188.ani.app.domain.usecase.GlobalKoin
 import me.him188.ani.app.ui.foundation.navigation.BackHandler
 import me.him188.ani.app.ui.foundation.widgets.BackNavigationIconButton
 import me.him188.ani.app.ui.search.collectHasQueryAsState
@@ -88,6 +90,8 @@ fun SearchPage(
     val scope = rememberCoroutineScope()
     val chipsFocusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
+    val settingsRepository = remember { GlobalKoin.get<SettingsRepository>() }
+    val focusSettings by settingsRepository.focusSettings.flow.collectAsStateWithLifecycle(initialValue = null)
 
     val items = state.items
     SearchPageListDetailScaffold(
@@ -108,7 +112,7 @@ fun SearchPage(
                     onSearch()
                     // 延迟以等待 UI 更新 (例如 chips 可能需要重组)
                     scope.launch {
-                        kotlinx.coroutines.delay(100)
+                        kotlinx.coroutines.delay(focusSettings?.shortFocusDelay ?: 100L)
                         chipsFocusRequester.requestFocus()
                     }
                 },

@@ -295,6 +295,7 @@ fun SettingsScreen(
 
                     SettingsTab.DEBUG -> DebugTab(
                         vm.debugSettingsState,
+                        vm.focusSettingsState,
                         vm.uiSettings,
                         tabModifier,
                     )
@@ -311,7 +312,7 @@ fun SettingsScreen(
                                 onNavigateToBangumiOAuth = onNavigateToBangumiOAuth,
                             )
 
-                            SettingsTab.APPEARANCE -> AppearanceGroup(vm.uiSettings)
+                            SettingsTab.APPEARANCE -> AppearanceGroup(vm.uiSettings, vm.focusSettingsState)
                             SettingsTab.THEME -> ThemeGroup(vm.themeSettings)
                             SettingsTab.UPDATE -> SoftwareUpdateGroup(vm.softwareUpdateGroupState)
                             SettingsTab.PLAYER -> PlayerGroup(

@@ -68,6 +68,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextFieldColors
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import me.him188.ani.app.ui.foundation.isTv
+import me.him188.ani.app.data.repository.user.SettingsRepository
+import me.him188.ani.app.domain.usecase.GlobalKoin
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -108,6 +112,7 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import me.him188.ani.app.data.models.preference.DarkMode
 import me.him188.ani.app.domain.media.player.MediaCacheProgressInfo
 import me.him188.ani.app.ui.foundation.dialogs.PlatformPopupProperties
@@ -608,10 +613,14 @@ object PlayerControllerDefaults {
                     // Create FocusRequester for first item
                     val itemFocusRequester = if (index == 0) remember { FocusRequester() } else null
                     
+                    val settingsRepository = remember { GlobalKoin.get<SettingsRepository>() }
+                    val focusSettings by settingsRepository.focusSettings.flow.collectAsStateWithLifecycle(initialValue = null)
+
                     // Auto-request focus for first item when dropdown opens
                     if (index == 0) {
                         LaunchedEffect(Unit) {
-                            kotlinx.coroutines.delay(FOCUS_REQ_DELAY_MILLIS) // Increase delay to ensure popup is fully rendered and animated
+                            val delay = settingsRepository.focusSettings.flow.first().globalFocusDelay
+                            kotlinx.coroutines.delay(delay) // Increase delay to ensure popup is fully rendered and animated
                             itemFocusRequester?.requestFocus()
                         }
                     }

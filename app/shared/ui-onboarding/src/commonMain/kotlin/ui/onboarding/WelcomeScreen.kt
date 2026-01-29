@@ -37,6 +37,9 @@ import kotlinx.coroutines.delay
 import me.him188.ani.app.ui.foundation.animation.WithContentEnterAnimation
 import me.him188.ani.app.ui.foundation.layout.AniWindowInsets
 import me.him188.ani.app.ui.foundation.layout.currentWindowAdaptiveInfo1
+import kotlinx.coroutines.flow.first
+import me.him188.ani.app.data.repository.user.SettingsRepository
+import me.him188.ani.app.domain.usecase.GlobalKoin
 import me.him188.ani.app.ui.foundation.theme.AniThemeDefaults
 
 @Composable
@@ -71,8 +74,10 @@ internal fun WelcomeScene(
     windowInsets: WindowInsets = AniWindowInsets.forPageContent(),
 ) {
     val focusRequester = remember { FocusRequester() }
+    val settingsRepository = remember { GlobalKoin.get<SettingsRepository>() }
     LaunchedEffect(Unit) {
-        delay(500)
+        val delay = settingsRepository.focusSettings.flow.first().globalFocusDelay
+        delay(delay)
         focusRequester.requestFocus()
     }
 

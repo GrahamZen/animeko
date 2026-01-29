@@ -39,6 +39,8 @@ import me.him188.ani.app.ui.onboarding.step.ConfigureProxyStep
 import me.him188.ani.app.ui.onboarding.step.GrantNotificationPermissionState
 import me.him188.ani.app.ui.onboarding.step.ThemeSelectStep
 import me.him188.ani.app.ui.onboarding.step.ThemeSelectUIState
+import me.him188.ani.app.ui.onboarding.step.FocusDelayStep
+import me.him188.ani.app.ui.onboarding.step.FocusDelayUIState
 import me.him188.ani.app.ui.settings.framework.SettingsState
 import me.him188.ani.app.ui.settings.tabs.network.ConfigureProxyState
 import me.him188.ani.app.ui.settings.tabs.network.ConfigureProxyUIState
@@ -135,6 +137,19 @@ fun OnboardingScreen(
                 onUpdateUseDarkMode = { state.themeSelectState.onUpdateUseDarkMode(it) },
                 onUpdateUseDynamicTheme = { state.themeSelectState.onUpdateUseDynamicTheme(it) },
                 onUpdateSeedColor = { state.themeSelectState.onUpdateSeedColor(it) },
+            )
+        }
+        step(
+            "focus_delay",
+            { Text("焦点延迟") },
+            navigationIcon = navigationIcon,
+        ) {
+            val focusDelayUiState by state.focusDelayState.state
+                .collectAsStateWithLifecycle(FocusDelayUIState.Placeholder)
+
+            FocusDelayStep(
+                uiState = focusDelayUiState,
+                onUpdateConfig = state.focusDelayState.onUpdateConfig,
             )
         }
         step(
@@ -245,6 +260,10 @@ internal fun createTestOnboardingPresentationState(scope: CoroutineScope): Onboa
             onUpdateUseDarkMode = { },
             onUpdateUseDynamicTheme = { },
             onUpdateSeedColor = { },
+        ),
+        focusDelayState = FocusDelayStepState(
+            state = flowOf(FocusDelayUIState.Placeholder),
+            onUpdateConfig = {},
         ),
         configureProxyState = ConfigureProxyState(
             state = flowOf(

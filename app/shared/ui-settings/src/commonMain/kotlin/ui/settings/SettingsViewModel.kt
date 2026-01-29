@@ -27,6 +27,7 @@ import me.him188.ani.app.data.models.preference.AnalyticsSettings
 import me.him188.ani.app.data.models.preference.AnitorrentConfig
 import me.him188.ani.app.data.models.preference.DanmakuSettings
 import me.him188.ani.app.data.models.preference.DebugSettings
+import me.him188.ani.app.data.models.preference.FocusSettings
 import me.him188.ani.app.data.models.preference.MediaCacheSettings
 import me.him188.ani.app.data.models.preference.MediaPreference
 import me.him188.ani.app.data.models.preference.MediaSelectorSettings
@@ -159,6 +160,7 @@ class SettingsViewModel : AbstractSettingsViewModel(), KoinComponent {
     )
 
     val debugSettingsState = settingsRepository.debugSettings.stateInBackground(DebugSettings(_placeHolder = -1))
+    val focusSettingsState = settingsRepository.focusSettings.stateInBackground(FocusSettings())
     val isInDebugMode by derivedStateOf {
         debugSettingsState.value.enabled
     }
@@ -342,6 +344,7 @@ class SettingsViewModel : AbstractSettingsViewModel(), KoinComponent {
             oneshotActionConfig = settingsRepository.oneshotActionConfig.flow.first(),
             analyticsSettings = settingsRepository.analyticsSettings.flow.first(),
             debugSettings = settingsRepository.debugSettings.flow.first(),
+            focusSettings = settingsRepository.focusSettings.flow.first(),
             tokenStore = tokenRepository.getTokenSaveSnapshot(),
         )
 
@@ -370,7 +373,9 @@ class SettingsViewModel : AbstractSettingsViewModel(), KoinComponent {
         backup.torrentPeerConfig?.let { settingsRepository.torrentPeerConfig.set(it) }
         backup.oneshotActionConfig?.let { settingsRepository.oneshotActionConfig.set(it) }
         backup.analyticsSettings?.let { settingsRepository.analyticsSettings.set(it) }
+        backup.analyticsSettings?.let { settingsRepository.analyticsSettings.set(it) }
         backup.debugSettings?.let { settingsRepository.debugSettings.set(it) }
+        backup.focusSettings?.let { settingsRepository.focusSettings.set(it) }
         backup.tokenStore?.let { tokenRepository.restoreFromTokenSave(it) }
 
         return true
@@ -419,5 +424,6 @@ private data class SettingsBackup(
     val oneshotActionConfig: OneshotActionConfig?,
     val analyticsSettings: AnalyticsSettings?,
     val debugSettings: DebugSettings?,
+    val focusSettings: FocusSettings?,
     val tokenStore: TokenSave?
 )

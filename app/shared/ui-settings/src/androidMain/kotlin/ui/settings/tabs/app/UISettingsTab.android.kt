@@ -37,6 +37,7 @@ import me.him188.ani.app.data.models.preference.UISettings
 import me.him188.ani.app.data.models.preference.UpdateSettings
 import me.him188.ani.app.data.models.preference.VideoScaffoldConfig
 import me.him188.ani.app.ui.foundation.LocalIsPreviewing
+import me.him188.ani.app.data.models.preference.FocusSettings
 import me.him188.ani.app.ui.settings.danmaku.createTestDanmakuRegexFilterState
 import me.him188.ani.app.ui.settings.framework.components.RowButtonItem
 import me.him188.ani.app.ui.settings.framework.components.SettingsScope
@@ -57,6 +58,7 @@ private fun PreviewAppSettingsTab() {
         videoScaffoldConfig = rememberTestSettingsState(VideoScaffoldConfig.Default),
         danmakuFilterConfig = rememberTestSettingsState(DanmakuFilterConfig.Default),
         danmakuRegexFilterState = createTestDanmakuRegexFilterState(),
+        focusSettingsState = rememberTestSettingsState(FocusSettings.Default),
         showDebug = true,
     )
 }

@@ -64,7 +64,11 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import me.him188.ani.app.data.repository.user.SettingsRepository
+import me.him188.ani.app.domain.usecase.GlobalKoin
 import me.him188.ani.app.domain.foundation.VersionExpiryService
 import me.him188.ani.app.navigation.LocalNavigator
 import me.him188.ani.app.navigation.MainScreenPage
@@ -175,8 +179,11 @@ private fun MainScreenContent(
     val isTv = LocalPlatform.current.isTv()
     
     // Request focus on initial launch
+    val settingsRepository = remember { GlobalKoin.get<SettingsRepository>() }
     if (isTv) {
         LaunchedEffect(Unit) {
+            val delay = settingsRepository.focusSettings.flow.first().globalFocusDelay
+            delay(delay)
             focusRequester.requestFocus()
         }
     }
@@ -184,6 +191,8 @@ private fun MainScreenContent(
     // Restore focus when page changes (fallback for when focus is lost)
     if (isTv) {
         LaunchedEffect(page) {
+            val delay = settingsRepository.focusSettings.flow.first().globalFocusDelay
+            delay(delay)
             focusRequester.requestFocus()
         }
     }

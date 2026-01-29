@@ -37,6 +37,8 @@ import me.him188.ani.app.platform.PermissionManager
 import me.him188.ani.app.ui.foundation.launchInBackground
 import me.him188.ani.app.ui.onboarding.navigation.WizardController
 import me.him188.ani.app.ui.onboarding.step.GrantNotificationPermissionState
+import me.him188.ani.app.data.models.preference.FocusSettings
+import me.him188.ani.app.ui.onboarding.step.FocusDelayUIState
 import me.him188.ani.app.ui.onboarding.step.ThemeSelectUIState
 import me.him188.ani.app.ui.settings.framework.AbstractSettingsViewModel
 import me.him188.ani.app.ui.settings.framework.SettingsState
@@ -59,6 +61,7 @@ class OnboardingViewModel : AbstractSettingsViewModel(), KoinComponent {
     private val settingsRepository: SettingsRepository by inject()
 
     private val themeSettings = settingsRepository.themeSettings
+    private val focusSettings = settingsRepository.focusSettings
     private val proxySettings = settingsRepository.proxySettings
     private val bitTorrentEnabled = mutableStateOf(true)
 
@@ -92,6 +95,25 @@ class OnboardingViewModel : AbstractSettingsViewModel(), KoinComponent {
                 themeSettings.update { copy(useDynamicTheme = false, seedColorValue = seedColor.value) }
             }
         },
+    )
+    // endregion
+    
+    // region FocusDelay
+    private val focusDelayFlow = focusSettings.flow.map {
+        FocusDelayUIState(it)
+    }
+        .stateInBackground(
+            FocusDelayUIState.Placeholder,
+            SharingStarted.WhileSubscribed(),
+        )
+
+    private val focusDelayState = FocusDelayStepState(
+        state = focusDelayFlow,
+        onUpdateConfig = { newSettings ->
+            launchInBackground {
+                focusSettings.update { newSettings }
+            }
+        }
     )
     // endregion
 
@@ -183,6 +205,7 @@ class OnboardingViewModel : AbstractSettingsViewModel(), KoinComponent {
     val wizardController = WizardController()
     val onboardingState = OnboardingPresentationState(
         themeSelectState = themeSelectState,
+        focusDelayState = focusDelayState,
         configureProxyState = configureProxyState,
         bitTorrentFeatureState = bitTorrentFeatureState,
     )
@@ -227,6 +250,7 @@ class OnboardingViewModel : AbstractSettingsViewModel(), KoinComponent {
 @Stable
 class OnboardingPresentationState(
     val themeSelectState: ThemeSelectStepState,
+    val focusDelayState: FocusDelayStepState,
     val configureProxyState: ConfigureProxyState,
     val bitTorrentFeatureState: BitTorrentFeatureStepState,
 )
@@ -237,6 +261,12 @@ class ThemeSelectStepState(
     val onUpdateUseDarkMode: (DarkMode) -> Unit,
     val onUpdateUseDynamicTheme: (Boolean) -> Unit,
     val onUpdateSeedColor: (Color) -> Unit,
+)
+
+@Stable
+class FocusDelayStepState(
+    val state: Flow<FocusDelayUIState>,
+    val onUpdateConfig: (FocusSettings) -> Unit,
 )
 
 @Stable

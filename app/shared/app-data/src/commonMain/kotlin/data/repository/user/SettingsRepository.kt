@@ -26,6 +26,7 @@ import me.him188.ani.app.data.models.preference.AnalyticsSettings
 import me.him188.ani.app.data.models.preference.AnitorrentConfig
 import me.him188.ani.app.data.models.preference.DanmakuSettings
 import me.him188.ani.app.data.models.preference.DebugSettings
+import me.him188.ani.app.data.models.preference.FocusSettings
 import me.him188.ani.app.data.models.preference.MediaCacheSettings
 import me.him188.ani.app.data.models.preference.MediaPreference
 import me.him188.ani.app.data.models.preference.MediaSelectorSettings
@@ -81,6 +82,7 @@ interface SettingsRepository {
 
     val analyticsSettings: Settings<AnalyticsSettings>
     val debugSettings: Settings<DebugSettings>
+    val focusSettings: Settings<FocusSettings>
 }
 
 @Stable
@@ -246,6 +248,11 @@ class PreferencesRepositoryImpl(
         "debugSettings",
         DebugSettings.serializer(),
         default = { DebugSettings.Default },
+    )
+    override val focusSettings: Settings<FocusSettings> = SerializablePreference(
+        "focusSettings",
+        FocusSettings.serializer(),
+        default = { FocusSettings.Default },
     )
 
     private companion object {

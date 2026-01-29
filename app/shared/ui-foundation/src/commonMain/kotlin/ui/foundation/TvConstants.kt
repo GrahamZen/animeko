@@ -15,6 +15,7 @@ package me.him188.ani.app.ui.foundation
  * 
  * Commonly used on Android TV.
  */
+@Deprecated("Use FocusSettings.globalFocusDelay instead")
 const val FOCUS_REQ_DELAY_MILLIS = 300L
 
 /**

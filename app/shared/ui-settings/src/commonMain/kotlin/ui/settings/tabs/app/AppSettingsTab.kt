@@ -39,6 +39,15 @@ import me.him188.ani.app.navigation.MainScreenPage
 import me.him188.ani.app.navigation.getIcon
 import me.him188.ani.app.navigation.getText
 import me.him188.ani.app.platform.currentAniBuildConfig
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import me.him188.ani.app.data.models.preference.FocusSettings
+
 import me.him188.ani.app.ui.foundation.LocalPlatform
 import me.him188.ani.app.ui.foundation.animation.AniAnimatedVisibility
 import me.him188.ani.app.ui.lang.Lang
@@ -142,12 +151,14 @@ fun AppSettingsTab(
     videoScaffoldConfig: SettingsState<VideoScaffoldConfig>,
     danmakuFilterConfig: SettingsState<DanmakuFilterConfig>,
     danmakuRegexFilterState: DanmakuRegexFilterState,
+    focusSettingsState: SettingsState<FocusSettings>,
     showDebug: Boolean,
     modifier: Modifier = Modifier
 ) {
     SettingsTab(modifier) {
         SoftwareUpdateGroup(softwareUpdateGroupState)
-        AppearanceGroup(uiSettings)
+        SoftwareUpdateGroup(softwareUpdateGroupState)
+        AppearanceGroup(uiSettings, focusSettingsState)
         ThemeGroup(themeSettings)
         PlayerGroup(
             videoScaffoldConfig,
@@ -162,8 +173,10 @@ fun AppSettingsTab(
 @Composable
 fun SettingsScope.AppearanceGroup(
     state: SettingsState<UISettings>,
+    focusSettingsState: SettingsState<FocusSettings>,
 ) {
     val uiSettings by state
+    val focusSettings by focusSettingsState
 
     if (LocalPlatform.current.isDesktop() || LocalPlatform.current.isAndroid()) {
         DropdownItem(
@@ -276,6 +289,57 @@ fun SettingsScope.AppearanceGroup(
             },
             title = { Text(stringResource(Lang.settings_app_light_up_mode)) },
             description = { Text(stringResource(Lang.settings_app_light_up_mode_description)) },
+        )
+    }
+
+    Group(title = { Text("Focus Delays (ms)") }, useThinHeader = true) {
+        var editingDelay by remember { mutableStateOf<Pair<String, Long>?>(null) }
+        var onConfirmDelay by remember { mutableStateOf<((Long) -> Unit)?>(null) }
+
+        if (editingDelay != null && onConfirmDelay != null) {
+            EditDelayDialog(
+                title = editingDelay!!.first,
+                initialValue = editingDelay!!.second,
+                onDismiss = { editingDelay = null },
+                onConfirm = {
+                    onConfirmDelay?.invoke(it)
+                    editingDelay = null
+                }
+            )
+        }
+
+        TextItem(
+            title = { Text("Global Focus Delay") },
+            description = { Text("Standard delay for general UI interactions (e.g. popup open). Default: 300") },
+            onClick = {
+                editingDelay = "Global Focus Delay" to focusSettings.globalFocusDelay
+                onConfirmDelay = { newDelay ->
+                    focusSettingsState.update(focusSettings.copy(globalFocusDelay = newDelay))
+                }
+            },
+            action = { Text("${focusSettings.globalFocusDelay} ms") }
+        )
+        TextItem(
+            title = { Text("Animated Focus Delay") },
+            description = { Text("Delay when waiting for animations (e.g. side sheets). Default: 300") },
+            onClick = {
+                editingDelay = "Animated Focus Delay" to focusSettings.animatedFocusDelay
+                onConfirmDelay = { newDelay ->
+                    focusSettingsState.update(focusSettings.copy(animatedFocusDelay = newDelay))
+                }
+            },
+            action = { Text("${focusSettings.animatedFocusDelay} ms") }
+        )
+        TextItem(
+            title = { Text("Short Focus Delay") },
+            description = { Text("Short delay for quick updates (e.g. search results). Default: 100") },
+            onClick = {
+                editingDelay = "Short Focus Delay" to focusSettings.shortFocusDelay
+                onConfirmDelay = { newDelay ->
+                    focusSettingsState.update(focusSettings.copy(shortFocusDelay = newDelay))
+                }
+            },
+            action = { Text("${focusSettings.shortFocusDelay} ms") }
         )
     }
 }
@@ -560,4 +624,39 @@ private fun renderLocale(it: Locale?): String {
 
         else -> """${it.language}-${it.region}"""
     }
+}
+
+@Composable
+private fun EditDelayDialog(
+    title: String,
+    initialValue: Long,
+    onDismiss: () -> Unit,
+    onConfirm: (Long) -> Unit,
+) {
+    var text by remember { mutableStateOf(initialValue.toString()) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { if (it.all { char -> char.isDigit() }) text = it },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                text.toLongOrNull()?.let { onConfirm(it) }
+                onDismiss()
+            }) {
+                Text("OK")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }

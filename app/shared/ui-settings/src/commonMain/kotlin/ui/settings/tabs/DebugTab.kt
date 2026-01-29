@@ -19,6 +19,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.toRoute
 import kotlinx.coroutines.launch
 import me.him188.ani.app.data.models.preference.DebugSettings
+import me.him188.ani.app.data.models.preference.FocusSettings
 import me.him188.ani.app.data.models.preference.UISettings
 import me.him188.ani.app.data.models.preference.supportsLimitUploadOnMeteredNetwork
 import me.him188.ani.app.data.repository.user.AccessTokenSession
@@ -28,6 +29,14 @@ import me.him188.ani.app.domain.usecase.GlobalKoin
 import me.him188.ani.app.navigation.LocalNavigator
 import me.him188.ani.app.navigation.NavRoutes
 import me.him188.ani.app.navigation.findLast
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import me.him188.ani.app.platform.MeteredNetworkDetector
 import me.him188.ani.app.ui.foundation.LocalPlatform
 import me.him188.ani.app.ui.foundation.setClipEntryText
@@ -61,11 +70,13 @@ import org.koin.mp.KoinPlatform
 @Composable
 fun DebugTab(
     debugSettingsState: SettingsState<DebugSettings>,
+    focusSettingsState: SettingsState<FocusSettings>,
     uiSettingsState: SettingsState<UISettings>,
     modifier: Modifier = Modifier,
     onDisableDebugMode: () -> Unit = {}
 ) {
     val debugSettings by debugSettingsState
+    val focusSettings by focusSettingsState
     val toaster = LocalToaster.current
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
@@ -163,7 +174,43 @@ fun DebugTab(
                 },
             )
         }
+
     }
+}
+
+@Composable
+private fun EditDelayDialog(
+    title: String,
+    initialValue: Long,
+    onDismiss: () -> Unit,
+    onConfirm: (Long) -> Unit,
+) {
+    var text by remember { mutableStateOf(initialValue.toString()) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { if (it.all { char -> char.isDigit() }) text = it },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                text.toLongOrNull()?.let { onConfirm(it) }
+                onDismiss()
+            }) {
+                Text("OK")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 private class ManualCrashException : Throwable("Manual crash for testing")

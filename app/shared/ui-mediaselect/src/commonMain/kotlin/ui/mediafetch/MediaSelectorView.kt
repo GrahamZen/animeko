@@ -99,6 +99,8 @@ import me.him188.ani.utils.platform.annotations.TestOnly
 import me.him188.ani.utils.platform.isMobile
 import org.jetbrains.compose.resources.stringResource
 import org.jetbrains.compose.ui.tooling.preview.PreviewLightDark
+import me.him188.ani.app.data.repository.user.SettingsRepository
+import me.him188.ani.app.domain.usecase.GlobalKoin
 
 
 private inline val WINDOW_VERTICAL_PADDING get() = 8.dp
@@ -227,11 +229,13 @@ private fun ViewKindAndMoreRow(
 
     
     val isTv = LocalPlatform.current.isTv()
+    val settingsRepository = remember { GlobalKoin.get<SettingsRepository>() }
+    val focusSettings by settingsRepository.focusSettings.flow.collectAsStateWithLifecycle(initialValue = null)
     
     // Auto-request focus on the first button when the row appears (TV only)
     if (isTv) {
         LaunchedEffect(Unit) {
-            kotlinx.coroutines.delay(FOCUS_REQ_DELAY_MILLIS) // Wait for layout to complete
+            kotlinx.coroutines.delay(focusSettings?.globalFocusDelay ?: 300L) // Wait for layout to complete
             firstButtonFocusRequester.requestFocus()
         }
     }

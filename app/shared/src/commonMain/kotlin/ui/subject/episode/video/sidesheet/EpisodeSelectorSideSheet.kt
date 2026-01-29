@@ -10,6 +10,7 @@
 package me.him188.ani.app.ui.subject.episode.video.sidesheet
 
 import androidx.compose.foundation.clickable
+import kotlinx.coroutines.flow.first
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.focus.FocusRequester
@@ -61,6 +62,9 @@ import me.him188.ani.datasources.api.topic.UnifiedCollectionType
 import me.him188.ani.utils.platform.annotations.TestOnly
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
+import me.him188.ani.app.data.repository.user.SettingsRepository
+import me.him188.ani.app.domain.usecase.GlobalKoin
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 private typealias Item = EpisodePresentation
 
@@ -148,6 +152,10 @@ fun EpisodeVideoSideSheets.EpisodeSelectorSheet(
         val isTv = LocalPlatform.current.isTv()
 
         // 自动滚动到当前选中的剧集并请求焦点 (TV only)
+        val settingsRepository = remember { GlobalKoin.get<SettingsRepository>() }
+        val focusSettings by settingsRepository.focusSettings.flow.collectAsStateWithLifecycle(initialValue = null)
+
+        // 自动滚动到当前选中的剧集并请求焦点 (TV only)
         if (isTv) {
             LaunchedEffect(true) {
                 val currentIndex = snapshotFlow { state.currentIndex }
@@ -162,7 +170,8 @@ fun EpisodeVideoSideSheets.EpisodeSelectorSheet(
                     )
                 }
                 // 延迟以等待布局完成，然后请求焦点
-                kotlinx.coroutines.delay(FOCUS_REQ_DELAY_MILLIS)
+                val delay = settingsRepository.focusSettings.flow.first().animatedFocusDelay
+                kotlinx.coroutines.delay(delay)
                 focusRequester.requestFocus()
             }
         }

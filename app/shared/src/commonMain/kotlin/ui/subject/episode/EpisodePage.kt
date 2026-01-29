@@ -11,6 +11,10 @@ package me.him188.ani.app.ui.subject.episode
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import me.him188.ani.app.data.repository.user.SettingsRepository
+import me.him188.ani.app.domain.usecase.GlobalKoin
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -759,7 +763,10 @@ private fun EpisodeScreenContentPhone(
                 focusRequester,
                 Modifier.imePadding(),
             )
+            val settingsRepository = remember { GlobalKoin.get<SettingsRepository>() }
             LaunchedEffect(true) {
+                val delay = settingsRepository.focusSettings.flow.first().globalFocusDelay
+                delay(delay)
                 focusRequester.requestFocus()
             }
         }
