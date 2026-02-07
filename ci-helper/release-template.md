@@ -1,4 +1,4 @@
-Automatically created from tag v5.3.0-alpha03. Do not change anything until assets are
+Automatically created from tag $GIT_TAG. Do not change anything until assets are
 uploaded.
 
 
@@ -8,55 +8,55 @@ uploaded.
 
 [//]: # (对于所有可用的变量列表, 参考 CI release.yml 的 step release-notes)
 
-[github-win-x64]: https://github.com/GrahamZen/animeko/releases/download/v5.3.0-alpha03/ani-5.3.0-alpha03-windows-x86_64.zip
+[github-win-x64]: https://github.com/GrahamZen/animeko/releases/download/$GIT_TAG/ani-$TAG_VERSION-windows-x86_64.zip
 
-[github-mac-x64]: https://github.com/GrahamZen/animeko/releases/download/v5.3.0-alpha03/ani-5.3.0-alpha03-macos-x86_64.dmg
+[github-mac-x64]: https://github.com/GrahamZen/animeko/releases/download/$GIT_TAG/ani-$TAG_VERSION-macos-x86_64.dmg
 
-[github-mac-aarch64]: https://github.com/GrahamZen/animeko/releases/download/v5.3.0-alpha03/ani-5.3.0-alpha03-macos-aarch64.dmg
+[github-mac-aarch64]: https://github.com/GrahamZen/animeko/releases/download/$GIT_TAG/ani-$TAG_VERSION-macos-aarch64.dmg
 
-[github-android]: https://github.com/GrahamZen/animeko/releases/download/v5.3.0-alpha03/ani-5.3.0-alpha03-universal.apk
+[github-android]: https://github.com/GrahamZen/animeko/releases/download/$GIT_TAG/ani-$TAG_VERSION-universal.apk
 
-[github-android-arm64-v8a]: https://github.com/GrahamZen/animeko/releases/download/v5.3.0-alpha03/ani-5.3.0-alpha03-arm64-v8a.apk
+[github-android-arm64-v8a]: https://github.com/GrahamZen/animeko/releases/download/$GIT_TAG/ani-$TAG_VERSION-arm64-v8a.apk
 
-[github-android-armeabi-v7a]: https://github.com/GrahamZen/animeko/releases/download/v5.3.0-alpha03/ani-5.3.0-alpha03-armeabi-v7a.apk
+[github-android-armeabi-v7a]: https://github.com/GrahamZen/animeko/releases/download/$GIT_TAG/ani-$TAG_VERSION-armeabi-v7a.apk
 
-[github-android-x86_64]: https://github.com/GrahamZen/animeko/releases/download/v5.3.0-alpha03/ani-5.3.0-alpha03-x86_64.apk
+[github-android-x86_64]: https://github.com/GrahamZen/animeko/releases/download/$GIT_TAG/ani-$TAG_VERSION-x86_64.apk
 
-[cf-win-x64]: https://d.myani.org/v5.3.0-alpha03/ani-5.3.0-alpha03-windows-x86_64.zip
+[cf-win-x64]: https://d.myani.org/$GIT_TAG/ani-$TAG_VERSION-windows-x86_64.zip
 
-[cf-linux-x64]: https://d.myani.org/v5.3.0-alpha03/ani-5.3.0-alpha03-linux-x86_64.appimage
+[cf-linux-x64]: https://d.myani.org/$GIT_TAG/ani-$TAG_VERSION-linux-x86_64.appimage
 
-[cf-mac-x64]: https://d.myani.org/v5.3.0-alpha03/ani-5.3.0-alpha03-macos-x86_64.zip
+[cf-mac-x64]: https://d.myani.org/$GIT_TAG/ani-$TAG_VERSION-macos-x86_64.zip
 
-[cf-mac-aarch64]: https://d.myani.org/v5.3.0-alpha03/ani-5.3.0-alpha03-macos-aarch64.dmg
+[cf-mac-aarch64]: https://d.myani.org/$GIT_TAG/ani-$TAG_VERSION-macos-aarch64.dmg
 
-[cf-ios]: https://d.myani.org/v5.3.0-alpha03/ani-5.3.0-alpha03.ipa
+[cf-ios]: https://d.myani.org/$GIT_TAG/ani-$TAG_VERSION.ipa
 
-[cf-android]: https://d.myani.org/v5.3.0-alpha03/ani-5.3.0-alpha03-universal.apk
+[cf-android]: https://d.myani.org/$GIT_TAG/ani-$TAG_VERSION-universal.apk
 
-[cf-android-arm64-v8a]: https://d.myani.org/v5.3.0-alpha03/ani-5.3.0-alpha03-arm64-v8a.apk
+[cf-android-arm64-v8a]: https://d.myani.org/$GIT_TAG/ani-$TAG_VERSION-arm64-v8a.apk
 
-[cf-android-armeabi-v7a]: https://d.myani.org/v5.3.0-alpha03/ani-5.3.0-alpha03-armeabi-v7a.apk
+[cf-android-armeabi-v7a]: https://d.myani.org/$GIT_TAG/ani-$TAG_VERSION-armeabi-v7a.apk
 
-[cf-android-x86_64]: https://d.myani.org/v5.3.0-alpha03/ani-5.3.0-alpha03-x86_64.apk
+[cf-android-x86_64]: https://d.myani.org/$GIT_TAG/ani-$TAG_VERSION-x86_64.apk
 
-[ghproxy-win-x64]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2Fv5.3.0-alpha03%2Fani-5.3.0-alpha03-windows-x86_64.zip
+[ghproxy-win-x64]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2FGrahamZen%2Fanimeko%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-windows-x86_64.zip
 
-[ghproxy-mac-x64]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2Fv5.3.0-alpha03%2Fani-5.3.0-alpha03-macos-x86_64.zip
+[ghproxy-mac-x64]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2FGrahamZen%2Fanimeko%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-macos-x86_64.zip
 
-[ghproxy-linux-x64]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2Fv5.3.0-alpha03%2Fani-5.3.0-alpha03-linux-x86_64.appimage
+[ghproxy-linux-x64]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2FGrahamZen%2Fanimeko%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-linux-x86_64.appimage
 
-[ghproxy-mac-aarch64]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2Fv5.3.0-alpha03%2Fani-5.3.0-alpha03-macos-aarch64.dmg
+[ghproxy-mac-aarch64]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2FGrahamZen%2Fanimeko%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-macos-aarch64.dmg
 
-[ghproxy-ios]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2Fv5.3.0-alpha03%2Fani-5.3.0-alpha03.ios
+[ghproxy-ios]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2FGrahamZen%2Fanimeko%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION.ipa
 
-[ghproxy-android]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2Fv5.3.0-alpha03%2Fani-5.3.0-alpha03-universal.apk
+[ghproxy-android]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2FGrahamZen%2Fanimeko%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-universal.apk
 
-[ghproxy-android-arm64-v8a]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2Fv5.3.0-alpha03%2Fani-5.3.0-alpha03-arm64-v8a.apk
+[ghproxy-android-arm64-v8a]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2FGrahamZen%2Fanimeko%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-arm64-v8a.apk
 
-[ghproxy-android-armeabi-v7a]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2Fv5.3.0-alpha03%2Fani-5.3.0-alpha03-armeabi-v7a.apk
+[ghproxy-android-armeabi-v7a]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2FGrahamZen%2Fanimeko%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-armeabi-v7a.apk
 
-[ghproxy-android-x86_64]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2Fv5.3.0-alpha03%2Fani-5.3.0-alpha03-x86_64.apk
+[ghproxy-android-x86_64]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2FGrahamZen%2Fanimeko%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-x86_64.apk
 
 [macOS 无法打开解决方案]: https://myani.org/wiki/macOS-%E6%97%A0%E6%B3%95%E6%89%93%E5%BC%80%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88
 
@@ -66,17 +66,17 @@ uploaded.
 
 [macOS Intel芯片版本安装教程]: https://myani.org/wiki/macOS-Intel-%E8%8A%AF%E7%89%87%E7%89%88%E6%9C%AC%E5%AE%89%E8%A3%85%E6%95%99%E7%A8%8B
 
-[macos-intel-issue]: https://github.com/GrahamZen/animekomeko/issues/1345
+[macos-intel-issue]: https://github.com/GrahamZen/animeko/issues/1345
 
-[linux-issue]: https://github.com/GrahamZen/animekomeko/issues/944
+[linux-issue]: https://github.com/GrahamZen/animeko/issues/944
 
 [iOS 自签]: https://myani.org/wiki/iOS-%E8%87%AA%E7%AD%BE
 
 |                  | 下载                                               | 常见问题                                        |
 |------------------|--------------------------------------------------|---------------------------------------------|
-| 安卓 电视      | [主线](https://github.com/GrahamZen/animeko/releases/download/v5.3.0-alpha03/ani-5.3.0-alpha03-universal.apk)       |                                             |
+| 安卓 电视      | [主线](https://github.com/GrahamZen/animeko/releases/download/$GIT_TAG/ani-$TAG_VERSION-universal.apk)       |                                             |
 
-[github-android-qr]: https://github.com/GrahamZen/animeko/releases/download/v5.3.0-alpha03/ani-5.3.0-alpha03-universal.apk.github.qrcode.png
+[github-android-qr]: https://github.com/GrahamZen/animeko/releases/download/$GIT_TAG/ani-$TAG_VERSION-universal.apk.github.qrcode.png
 
 <details>
 <summary> Android 细分架构下载 </summary>
