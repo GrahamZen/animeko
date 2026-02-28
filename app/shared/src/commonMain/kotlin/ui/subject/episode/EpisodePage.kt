@@ -69,8 +69,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.coerceIn
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -101,7 +99,6 @@ import me.him188.ani.app.ui.foundation.ImageViewer
 import me.him188.ani.app.ui.foundation.LocalImageViewerHandler
 import me.him188.ani.app.ui.foundation.LocalIsPreviewing
 import me.him188.ani.app.ui.foundation.LocalPlatform
-import me.him188.ani.app.ui.foundation.ProvideCompositionLocalsForPreview
 import me.him188.ani.app.ui.foundation.animation.AniAnimatedVisibility
 import me.him188.ani.app.ui.foundation.effects.DarkStatusBarAppearance
 import me.him188.ani.app.ui.foundation.effects.OnLifecycleEvent
@@ -481,11 +478,12 @@ private fun EpisodeScreenTabletVeryWide(
                         ),
                 )
 
-                // ExternalContent("", Modifier.fillMaxWidth().height(128.dp))
+                val commentTabFocusRequester = remember { FocusRequester() }
 
                 TabRow(
                     pagerState, scope, { vm.episodeCommentState.count }, Modifier.fillMaxWidth(),
                     containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                    commentTabFocusRequester = commentTabFocusRequester,
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.weaken())
 
@@ -558,6 +556,7 @@ private fun EpisodeScreenTabletVeryWide(
                                 setShowEditCommentSheet = setShowEditCommentSheet,
                                 pauseOnPlaying = pauseOnPlaying,
                                 gridState = vm.commentLazyGirdState,
+                                commentTabFocusRequester = commentTabFocusRequester,
                             )
                         }
                     }
@@ -574,6 +573,7 @@ private fun TabRow(
     commentCount: () -> Int?,
     modifier: Modifier = Modifier,
     containerColor: Color = MaterialTheme.colorScheme.surface,
+    commentTabFocusRequester: FocusRequester? = null,
 ) {
     ScrollableTabRow(
         selectedTabIndex = pagerState.currentPage,
@@ -609,6 +609,9 @@ private fun TabRow(
             },
             selectedContentColor = MaterialTheme.colorScheme.primary,
             unselectedContentColor = MaterialTheme.colorScheme.onSurface,
+            modifier = if (commentTabFocusRequester != null) {
+                Modifier.focusRequester(commentTabFocusRequester)
+            } else Modifier,
         )
     }
 }
@@ -648,17 +651,6 @@ private fun EpisodeScreenContentPhone(
                 danmakuHostState,
                 danmakuEditorState, vm.playerControllerState, vm.isFullscreen,
                 windowInsets = videoWindowInsets,
-            )
-        },
-        headlineContent = {
-            // ExternalContent("", Modifier.fillMaxWidth().height(64.dp))
-        },
-        tabRowContent = {
-            DummyDanmakuEditor(
-                onClick = {
-                    showDanmakuEditor = true
-                    pauseOnPlaying()
-                },
             )
         },
         episodeDetails = {
@@ -716,6 +708,8 @@ private fun EpisodeScreenContentPhone(
             }
         },
         commentColumn = {
+            val commentTabFocusRequester = remember { FocusRequester() }
+
             EpisodeCommentColumn(
                 commentState = vm.episodeCommentState,
                 commentEditorState = vm.commentEditorState,
@@ -724,15 +718,24 @@ private fun EpisodeScreenContentPhone(
                 setShowEditCommentSheet = setShowEditCommentSheet,
                 pauseOnPlaying = pauseOnPlaying,
                 gridState = vm.commentLazyGirdState,
+                commentTabFocusRequester = commentTabFocusRequester,
             )
         },
-        modifier = modifier.then(
+        modifier.then(
             if (vm.isFullscreen) {
                 Modifier.fillMaxSize()
             } else {
                 Modifier.windowInsetsPadding(columnInsets)
             },
         ),
+        tabRowContent = {
+            DummyDanmakuEditor(
+                onClick = {
+                    showDanmakuEditor = true
+                    pauseOnPlaying()
+                },
+            )
+        },
     )
 
     if (showDanmakuEditor) {
@@ -800,9 +803,8 @@ fun EpisodeScreenContentPhoneScaffold(
     commentCount: () -> Int?,
     video: @Composable () -> Unit,
     episodeDetails: @Composable () -> Unit,
-    commentColumn: @Composable () -> Unit,
+    commentColumn: @Composable (FocusRequester) -> Unit,
     modifier: Modifier = Modifier,
-    headlineContent: @Composable () -> Unit = {},
     tabRowContent: @Composable () -> Unit = {},
 ) {
     Column(modifier) {
@@ -814,14 +816,15 @@ fun EpisodeScreenContentPhoneScaffold(
 
         val pagerState = rememberPagerState(initialPage = 0) { 2 }
         val scope = rememberCoroutineScope()
+        val commentTabFocusRequester = remember { FocusRequester() }
 
         Column(Modifier.fillMaxSize()) {
-            headlineContent()
             Surface(color = MaterialTheme.colorScheme.surfaceContainerLow) {
                 Row {
                     TabRow(
                         pagerState, scope, commentCount, Modifier.weight(1f),
                         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                        commentTabFocusRequester = commentTabFocusRequester,
                     )
                     Box(
                         modifier = Modifier.weight(0.618f) // width
@@ -844,7 +847,7 @@ fun EpisodeScreenContentPhoneScaffold(
                         }
 
                         1 -> {
-                            commentColumn()
+                            commentColumn(commentTabFocusRequester)
                         }
                     }
                 }
@@ -1079,6 +1082,7 @@ private fun EpisodeCommentColumn(
     pauseOnPlaying: () -> Unit,
     modifier: Modifier = Modifier,
     gridState: LazyGridState = rememberLazyGridState(),
+    commentTabFocusRequester: FocusRequester? = null,
 ) {
     val toaster = LocalToaster.current
     val browserNavigator = LocalUriHandler.current
@@ -1102,6 +1106,7 @@ private fun EpisodeCommentColumn(
         },
         modifier = modifier.fillMaxSize(),
         gridState = gridState,
+        commentTabFocusRequester = commentTabFocusRequester,
     )
 }
 
@@ -1164,46 +1169,5 @@ class MediampAudioLevelController(
         val targetIsMute = !muteFlow.value
         controller.toggleMute()
         onVolumeStateChanged(level, targetIsMute)
-    }
-}
-
-@Composable
-@Preview(widthDp = 1080 / 3, heightDp = 2400 / 3, showBackground = true)
-@Preview(device = "spec:width=1280dp,height=800dp,dpi=240", showBackground = true)
-internal fun PreviewEpisodePage() {
-    ProvideCompositionLocalsForPreview {
-        val context = LocalContext.current
-        EpisodeScreen(
-            remember {
-                EpisodeViewModel(
-                    424663,
-                    1277147,
-                    context = context,
-                )
-            },
-        )
-    }
-}
-
-@Composable
-@PreviewLightDark
-fun PreviewEpisodeSceneContentPhoneScaffoldTabs() {
-    ProvideCompositionLocalsForPreview {
-        EpisodeScreenContentPhoneScaffold(
-            videoOnly = false,
-            commentCount = { 100 },
-            video = {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(200.dp),
-                )
-            },
-            episodeDetails = { },
-            commentColumn = { },
-            tabRowContent = {
-                DummyDanmakuEditor({ })
-            },
-        )
     }
 }
