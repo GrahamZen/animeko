@@ -27,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -56,6 +57,7 @@ fun EpisodeCommentColumn(
     onClickUrl: (url: String) -> Unit,
     modifier: Modifier = Modifier,
     gridState: LazyGridState = rememberLazyGridState(),
+    commentTabFocusRequester: FocusRequester? = null,
 ) {
     val imageViewer = LocalImageViewerHandler.current
 
@@ -79,6 +81,7 @@ fun EpisodeCommentColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 72.dp)
                 .plus(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom).asPaddingValues()), // 允许滚动到 FAB 上面
+            commentTabFocusRequester = commentTabFocusRequester,
         ) { _, comment ->
             EpisodeComment(
                 comment = comment,

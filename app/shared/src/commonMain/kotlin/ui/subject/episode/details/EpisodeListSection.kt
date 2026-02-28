@@ -13,6 +13,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.combinedClickable
+import me.him188.ani.app.ui.foundation.tvCombinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -241,7 +242,7 @@ private fun WideEpisodeListSection(
                 colors = ListItemDefaults.colors(
                     containerColor = Color.Transparent,
                 ),
-                modifier = Modifier.combinedClickable { onToggleExpanded() },
+                modifier = Modifier.tvCombinedClickable { onToggleExpanded() },
             )
         }
     }
@@ -277,7 +278,7 @@ private fun NarrowEpisodeListSection(
                 Text(
                     "剧集列表",
                     style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.combinedClickable(
+                    modifier = Modifier.tvCombinedClickable(
                         onClick = {},
                         onDoubleClick = {
                             val playingIndex = episodeCarouselState.episodes.indexOfFirst {
@@ -414,7 +415,7 @@ private fun EpisodeCard(
         modifier = modifier
             .width(120.dp)
             .height(80.dp)
-            .combinedClickable(
+            .tvCombinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick,
             ),
@@ -501,7 +502,7 @@ private fun EpisodeListSectionItem(
         modifier = modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.small)
-            .combinedClickable(
+            .tvCombinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick,
             ),
