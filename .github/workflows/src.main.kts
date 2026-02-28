@@ -1386,7 +1386,7 @@ class WithMatrix(
         return if (matrix.uploadApk) {
             uses(
                 name = "Prepare signing key",
-                `if` = expr { github.isAnimekoRepository and !github.isPullRequest },
+                `if` = expr { !github.isPullRequest },
                 action = Base64ToFile_Untyped(
                     fileName_Untyped = "android_signing_key",
                     fileDir_Untyped = "./",
@@ -1485,7 +1485,7 @@ class WithMatrix(
         if (matrix.uploadApk) {
             runGradle(
                 name = "Build Android Release APKs",
-                `if` = expr { github.isAnimekoRepository and !github.isPullRequest },
+                `if` = expr { !github.isPullRequest },
                 tasks = arrayOf("assembleDefaultRelease"),
                 env = mapOf(
                     "signing_release_storeFileFromRoot" to expr { prepareSigningKey.outputs.filePath },
