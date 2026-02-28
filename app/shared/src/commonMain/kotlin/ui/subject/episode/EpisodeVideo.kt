@@ -13,6 +13,7 @@ import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
@@ -25,34 +26,27 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import me.him188.ani.app.data.models.preference.DarkMode
-import me.him188.ani.app.data.models.preference.VideoScaffoldConfig
-import me.him188.ani.app.domain.media.player.ChunkState
 import me.him188.ani.app.domain.media.player.MediaCacheProgressInfo
-import me.him188.ani.app.domain.media.player.staticMediaCacheProgressState
 import me.him188.ani.app.domain.player.VideoLoadingState
 import me.him188.ani.app.tools.rememberUiMonoTasker
 import me.him188.ani.app.ui.foundation.LocalIsPreviewing
 import me.him188.ani.app.ui.foundation.LocalPlatform
-import me.him188.ani.app.ui.foundation.ProvideCompositionLocalsForPreview
+import me.him188.ani.app.ui.foundation.navigation.LocalBackDispatcher
 import me.him188.ani.app.ui.foundation.TextWithBorder
 import me.him188.ani.app.ui.foundation.animation.AniAnimatedVisibility
 import me.him188.ani.app.ui.foundation.effects.cursorVisibility
@@ -62,27 +56,13 @@ import me.him188.ani.app.ui.foundation.icons.RightPanelClose
 import me.him188.ani.app.ui.foundation.icons.RightPanelOpen
 import me.him188.ani.app.ui.foundation.ifThen
 import me.him188.ani.app.ui.foundation.interaction.WindowDragArea
+import me.him188.ani.app.ui.foundation.isTv
+import me.him188.ani.app.ui.foundation.FOCUS_REQ_DELAY_MILLIS
 import me.him188.ani.app.ui.foundation.rememberDebugSettingsViewModel
 import me.him188.ani.app.ui.foundation.theme.AniTheme
-import me.him188.ani.app.ui.mediafetch.TestMediaSourceResultListPresentation
-import me.him188.ani.app.ui.mediafetch.ViewKind
-import me.him188.ani.app.ui.mediafetch.rememberTestMediaSelectorState
-import me.him188.ani.app.ui.mediafetch.request.TestMediaFetchRequest
-import me.him188.ani.app.ui.settings.danmaku.createTestDanmakuRegexFilterState
 import me.him188.ani.app.ui.subject.episode.video.components.EpisodeVideoSideSheetPage
-import me.him188.ani.app.ui.subject.episode.video.components.EpisodeVideoSideSheets
-import me.him188.ani.app.ui.subject.episode.video.components.FloatingFullscreenSwitchButton
-import me.him188.ani.app.ui.subject.episode.video.components.SideSheets
 import me.him188.ani.app.ui.subject.episode.video.components.rememberStatusBarHeightAsState
 import me.him188.ani.app.ui.subject.episode.video.loading.EpisodeVideoLoadingIndicator
-import me.him188.ani.app.ui.subject.episode.video.sidesheet.DanmakuRegexFilterSettings
-import me.him188.ani.app.ui.subject.episode.video.sidesheet.EpisodeSelectorSheet
-import me.him188.ani.app.ui.subject.episode.video.sidesheet.MediaSelectorSheet
-import me.him188.ani.app.ui.subject.episode.video.sidesheet.rememberTestEpisodeSelectorState
-import me.him188.ani.app.ui.subject.episode.video.topbar.EpisodePlayerTitle
-import me.him188.ani.app.videoplayer.ui.ControllerVisibility
-import me.him188.ani.app.videoplayer.ui.NoOpPlaybackSpeedController
-import me.him188.ani.app.videoplayer.ui.NoOpVideoAspectRatio
 import me.him188.ani.app.videoplayer.ui.PlaybackSpeedControllerState
 import me.him188.ani.app.videoplayer.ui.PlayerControllerState
 import me.him188.ani.app.videoplayer.ui.VideoAspectRatioControllerState
@@ -93,7 +73,6 @@ import me.him188.ani.app.videoplayer.ui.gesture.GestureFamily
 import me.him188.ani.app.videoplayer.ui.gesture.GestureLock
 import me.him188.ani.app.videoplayer.ui.gesture.LevelController
 import me.him188.ani.app.videoplayer.ui.gesture.LockableVideoGestureHost
-import me.him188.ani.app.videoplayer.ui.gesture.NoOpLevelController
 import me.him188.ani.app.videoplayer.ui.gesture.ScreenshotButton
 import me.him188.ani.app.videoplayer.ui.gesture.mouseFamily
 import me.him188.ani.app.videoplayer.ui.gesture.rememberGestureIndicatorState
@@ -107,19 +86,30 @@ import me.him188.ani.app.videoplayer.ui.progress.PlayerControllerDefaults.SpeedS
 import me.him188.ani.app.videoplayer.ui.progress.PlayerControllerDefaults.VideoAspectRatioSelector
 import me.him188.ani.app.videoplayer.ui.progress.PlayerProgressSliderState
 import me.him188.ani.app.videoplayer.ui.progress.SubtitleSwitcher
-import me.him188.ani.app.videoplayer.ui.progress.rememberMediaProgressSliderState
 import me.him188.ani.app.videoplayer.ui.rememberAlwaysOnRequester
-import me.him188.ani.app.videoplayer.ui.rememberVideoControllerState
 import me.him188.ani.app.videoplayer.ui.rememberVideoSideSheetsController
 import me.him188.ani.app.videoplayer.ui.top.PlayerTopBar
 import me.him188.ani.app.videoplayer.ui.top.SystemTime
 import me.him188.ani.utils.platform.annotations.TestOnly
 import me.him188.ani.utils.platform.isDesktop
 import me.him188.ani.utils.platform.isMobile
-import org.openani.mediamp.DummyMediampPlayer
 import org.openani.mediamp.MediampPlayer
 import org.openani.mediamp.features.audioTracks
 import org.openani.mediamp.features.subtitleTracks
+import org.openani.mediamp.features.PlaybackSpeed
+
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
+import me.him188.ani.app.videoplayer.ui.gesture.rememberPlayerFastSkipState
+
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusEvent
+import androidx.compose.foundation.focusable
 import org.openani.mediamp.togglePause
 
 internal const val TAG_EPISODE_VIDEO_TOP_BAR = "EpisodeVideoTopBar"
@@ -171,11 +161,53 @@ internal fun EpisodeVideoImpl(
     gestureFamily: GestureFamily = LocalPlatform.current.mouseFamily,
     fastForwardSpeed: Float = 3f,
     contentWindowInsets: WindowInsets = WindowInsets(0.dp),
+
+
 ) {
+    BoxWithConstraints(modifier) {
     // Don't rememberSavable. 刻意让每次切换都是隐藏的
     var isLocked by remember { mutableStateOf(false) }
     val sheetsController = rememberVideoSideSheetsController<EpisodeVideoSideSheetPage>()
     val anySideSheetVisible by sheetsController.hasPageAsState()
+
+    // Focus management for Key Events (Media Keys & D-pad Seeking)
+    val internalFocusRequester = remember { FocusRequester() }
+    val requestFocus = { internalFocusRequester.requestFocus() }
+
+    // Request focus ONLY ONCE when entering the composition (Fixes #FocusLoss on UI hide)
+    LaunchedEffect(Unit) {
+        requestFocus()
+    }
+
+    // Default Focus for Overlay
+    // User requested "Detail" button (Likely Sidebar on Desktop, or Settings on TV)
+    val settingsFocusRequester = remember { FocusRequester() }
+    val sidebarFocusRequester = remember { FocusRequester() }
+    val selectEpisodeFocusRequester = remember { FocusRequester() }
+    val mediaSelectorFocusRequester = remember { FocusRequester() }
+    
+    // Track which FocusRequester should receive focus when side sheet closes
+    var lastSideSheetFocusRequester by remember { mutableStateOf<FocusRequester?>(null) }
+    
+    val isBottomBarVisible = playerControllerState.visibility.bottomBar
+    val isDesktop = LocalPlatform.current.isDesktop()
+    val focusManager = LocalFocusManager.current
+    val backDispatcher = LocalBackDispatcher.current
+    
+    // Track if any button currently has focus
+    var topBarButtonHasFocus by remember { mutableStateOf(false) }
+    var bottomBarButtonHasFocus by remember { mutableStateOf(false) }
+    val anyButtonHasFocus by remember { derivedStateOf { topBarButtonHasFocus || bottomBarButtonHasFocus } }
+    
+    // Auto-focus settings button on Enter key press (only if no button has focus) (TV only)
+    val isTv = LocalPlatform.current.isTv()
+    LaunchedEffect(isBottomBarVisible, isTv, expanded) {
+        if (isBottomBarVisible && isTv && expanded) {
+            // Small delay to avoid frequent calls during rapid visibility changes
+            kotlinx.coroutines.delay(FOCUS_REQ_DELAY_MILLIS)
+            sidebarFocusRequester.requestFocus()
+        }
+    }
 
     // auto hide cursor
     val videoInteractionSource = remember { MutableInteractionSource() }
@@ -188,12 +220,109 @@ internal fun EpisodeVideoImpl(
         }
     }
 
+    // Hoisted state for finding seek/skip controller
+    val indicatorTasker = rememberUiMonoTasker()
+    val indicatorState = rememberGestureIndicatorState()
+    val fastSkipState = rememberPlayerFastSkipState(
+        requireNotNull(playerState.features[PlaybackSpeed]) {
+            "PlaybackSpeed feature is required to initialize fast skip state"
+        },
+        indicatorState,
+        fastForwardSpeed
+    )
+
+    // Swipe Seeker State (reused for keyboard seeking)
+    val swipeSeekerState = rememberSwipeSeekerState(constraints.maxWidth) {
+        playerState.skip(it * 1000L)
+    }
+
     AniTheme(darkModeOverride = DarkMode.DARK) {
         VideoScaffold(
             expanded = expanded,
-            modifier = modifier
+            modifier = Modifier
+                .matchParentSize()
                 .hoverable(videoInteractionSource)
-                .cursorVisibility(showCursor),
+                .cursorVisibility(showCursor)
+                // Apply Focus and Key Listeners here
+                .focusRequester(internalFocusRequester)
+                .focusable()
+                .onKeyEvent { keyEvent ->
+                    // Handle Android TV remote Media Keys (play/pause) and navigation
+                    
+                    // Specific handling for Back key to support KeyUp (prevent repeat)
+                    if (keyEvent.key == Key.Back) {
+                        if (keyEvent.type == KeyEventType.KeyUp) {
+                            // Priority 1: Close side sheet if open and return focus to the button that opened it
+                            if (anySideSheetVisible) {
+                                sheetsController.close()
+                                // Request focus back to the button that opened the side sheet
+                                lastSideSheetFocusRequester?.requestFocus()
+                                lastSideSheetFocusRequester = null
+                                true
+                            }
+                            // Priority 2: Handle Back key to return focus to video player
+                            else if (anyButtonHasFocus) {
+                                focusManager.clearFocus()
+                                requestFocus()
+                                true
+                            } else {
+                                backDispatcher.onBackPressed()
+                                true
+                            }
+                        } else {
+                            // Consume KeyDown to prevent system back action while holding
+                            true
+                        }
+                    } else if (keyEvent.type == KeyEventType.KeyDown) {
+                        when (keyEvent.key) {
+                            Key.DirectionLeft -> {
+                                // Seek backward when no button has focus and no side sheet is open
+                                if (!anyButtonHasFocus && !anySideSheetVisible) {
+                                    swipeSeekerState.onSeek(-5)
+                                    true
+                                } else {
+                                    false
+                                }
+                            }
+                            Key.DirectionRight -> {
+                                // Seek forward when no button has focus and no side sheet is open
+                                if (!anyButtonHasFocus && !anySideSheetVisible) {
+                                    swipeSeekerState.onSeek(5)
+                                    true
+                                } else {
+                                    false
+                                }
+                            }
+                            Key.Enter, Key.DirectionCenter -> {
+                                // Show controller and request focus to settings button if no button currently has focus
+                                if (!anyButtonHasFocus) {
+                                    // First show the controller
+                                    playerControllerState.toggleFullVisible(true)
+                                    // Then request focus to settings button after a short delay to allow UI to appear
+                                    settingsFocusRequester.requestFocus()
+                                    true
+                                } else {
+                                    false
+                                }
+                            }
+                            Key.MediaPlayPause -> {
+                                playerState.togglePause()
+                                true
+                            }
+                            Key.MediaPlay -> {
+                                playerState.togglePause()
+                                true
+                            }
+                            Key.MediaPause -> {
+                                playerState.togglePause()
+                                true
+                            }
+                            else -> false
+                        }
+                    } else {
+                        false
+                    }
+                },
             contentWindowInsets = contentWindowInsets,
             maintainAspectRatio = maintainAspectRatio,
             controllerState = playerControllerState,
@@ -201,7 +330,14 @@ internal fun EpisodeVideoImpl(
             topBar = {
                 WindowDragArea {
                     PlayerTopBar(
-                        Modifier.testTag(TAG_EPISODE_VIDEO_TOP_BAR),
+                        Modifier
+                            .testTag(TAG_EPISODE_VIDEO_TOP_BAR)
+                            .onFocusEvent { focusState ->
+                                if (topBarButtonHasFocus != focusState.hasFocus) {
+                                    topBarButtonHasFocus = focusState.hasFocus
+                                }
+                            },
+
                         title = if (expanded) {
                             { title() }
                         } else {
@@ -213,22 +349,30 @@ internal fun EpisodeVideoImpl(
                             }
                             if (expanded) {
                                 IconButton(
-                                    { sheetsController.navigateTo(EpisodeVideoSideSheetPage.MEDIA_SELECTOR) },
-                                    Modifier.testTag(TAG_SHOW_MEDIA_SELECTOR),
+                                    {
+                                        lastSideSheetFocusRequester = mediaSelectorFocusRequester
+                                        sheetsController.navigateTo(EpisodeVideoSideSheetPage.MEDIA_SELECTOR)
+                                    },
+                                    Modifier
+                                        .testTag(TAG_SHOW_MEDIA_SELECTOR)
+                                        .focusRequester(mediaSelectorFocusRequester),
                                 ) {
                                     Icon(Icons.Rounded.DisplaySettings, contentDescription = "数据源")
                                 }
                             }
                             IconButton(
-                                { sheetsController.navigateTo(EpisodeVideoSideSheetPage.PLAYER_SETTINGS) },
-                                Modifier.testTag(TAG_SHOW_SETTINGS),
+                                {
+                                    lastSideSheetFocusRequester = settingsFocusRequester
+                                    sheetsController.navigateTo(EpisodeVideoSideSheetPage.PLAYER_SETTINGS)
+                                },
+                                Modifier.testTag(TAG_SHOW_SETTINGS).focusRequester(settingsFocusRequester),
                             ) {
                                 Icon(Icons.Rounded.Settings, contentDescription = "设置")
                             }
                             if (expanded && LocalPlatform.current.isDesktop()) {
                                 IconButton(
                                     { onToggleSidebar(!sidebarVisible) },
-                                    Modifier.testTag(TAG_COLLAPSE_SIDEBAR),
+                                    Modifier.testTag(TAG_COLLAPSE_SIDEBAR).focusRequester(sidebarFocusRequester),
                                 ) {
                                     if (sidebarVisible) {
                                         Icon(AniIcons.RightPanelClose, contentDescription = "折叠侧边栏")
@@ -274,18 +418,16 @@ internal fun EpisodeVideoImpl(
                 }
             },
             gestureHost = {
-                val swipeSeekerState = rememberSwipeSeekerState(constraints.maxWidth) {
-                    playerState.skip(it * 1000L)
-                }
+                // Moved swipeSeekerState up
                 val videoPropertiesState by playerState.mediaProperties.collectAsState(null)
+
                 val enableSwipeToSeek by remember {
                     derivedStateOf {
                         videoPropertiesState?.let { it.durationMillis != 0L } == true
                     }
                 }
 
-                val indicatorTasker = rememberUiMonoTasker()
-                val indicatorState = rememberGestureIndicatorState()
+                // Moved indicatorTasker, indicatorState up
                 LockableVideoGestureHost(
                     playerControllerState,
                     swipeSeekerState,
@@ -307,6 +449,8 @@ internal fun EpisodeVideoImpl(
                                 indicatorState.showResumedLong()
                             }
                         }
+
+                        requestFocus()
                         playerState.togglePause()
                     },
                     onToggleFullscreen = onClickFullScreen,
@@ -360,12 +504,21 @@ internal fun EpisodeVideoImpl(
             },
             bottomBar = {
                 PlayerControllerBar(
+                    controllerState = playerControllerState,
+                    onButtonFocusChanged = { hasFocus -> 
+                        if (bottomBarButtonHasFocus != hasFocus) {
+                            bottomBarButtonHasFocus = hasFocus
+                        }
+                    },
                     startActions = {
                         val isPlaying by remember(playerState) { playerState.playbackState.map { it.isPlaying } }
                             .collectAsStateWithLifecycle(false)
                         PlayerControllerDefaults.PlaybackIcon(
                             isPlaying = { isPlaying },
-                            onClick = { playerState.togglePause() },
+                            onClick = {
+                                requestFocus()
+                                playerState.togglePause()
+                            },
                         )
 
                         if (hasNextEpisode && expanded) {
@@ -411,7 +564,11 @@ internal fun EpisodeVideoImpl(
                     endActions = {
                         if (expanded) {
                             PlayerControllerDefaults.SelectEpisodeIcon(
-                                onClick = { sheetsController.navigateTo(EpisodeVideoSideSheetPage.EPISODE_SELECTOR) },
+                                onClick = {
+                                    lastSideSheetFocusRequester = selectEpisodeFocusRequester
+                                    sheetsController.navigateTo(EpisodeVideoSideSheetPage.EPISODE_SELECTOR)
+                                },
+                                modifier = Modifier.focusRequester(selectEpisodeFocusRequester)
                             )
 
                             if (LocalPlatform.current.isDesktop()) {
@@ -462,167 +619,8 @@ internal fun EpisodeVideoImpl(
             leftBottomTips = leftBottomTips,
         )
     }
+    }
 }
 
 @Stable
 object EpisodeVideoDefaults
-
-@PreviewLightDark
-@Preview(name = "Landscape Fullscreen", device = "spec:width=1280dp,height=800dp,dpi=240")
-@Composable
-private fun PreviewVideoScaffoldFullscreen() {
-    PreviewVideoScaffoldImpl(expanded = true)
-}
-
-@PreviewLightDark
-@Preview(name = "Portrait", heightDp = 300)
-@Composable
-private fun PreviewVideoScaffold() {
-    PreviewVideoScaffoldImpl(expanded = false)
-}
-
-@PreviewLightDark
-@Preview(name = "Detached Slider Fullscreen", device = "spec:width=1280dp,height=800dp,dpi=240")
-@Composable
-private fun PreviewDetachedSliderFullscreen() {
-    PreviewVideoScaffoldImpl(expanded = true, controllerVisibility = ControllerVisibility.DetachedSliderOnly)
-}
-
-@PreviewLightDark
-@Preview(name = "Detached Slider", heightDp = 300)
-@Composable
-private fun PreviewDetachedSlider() {
-    PreviewVideoScaffoldImpl(expanded = false, controllerVisibility = ControllerVisibility.DetachedSliderOnly)
-}
-
-@OptIn(TestOnly::class)
-@Composable
-private fun PreviewVideoScaffoldImpl(
-    expanded: Boolean,
-    controllerVisibility: ControllerVisibility = ControllerVisibility.Visible
-) = ProvideCompositionLocalsForPreview {
-    val scope = rememberCoroutineScope()
-    val playerState = remember {
-        DummyMediampPlayer(scope.coroutineContext)
-    }
-
-    val controllerState = rememberVideoControllerState(initialVisibility = controllerVisibility)
-    var isMediaSelectorVisible by remember { mutableStateOf(false) }
-    var isEpisodeSelectorVisible by remember { mutableStateOf(false) }
-    var danmakuEnabled by remember { mutableStateOf(true) }
-
-    val progressSliderState = rememberMediaProgressSliderState(
-        playerState,
-        onPreview = {
-            // not yet supported
-        },
-        onPreviewFinished = {
-            playerState.seekTo(it)
-        },
-    )
-    val videoScaffoldConfig = VideoScaffoldConfig.Default
-    val onClickFullScreen = { }
-    val cacheProgressInfoFlow = staticMediaCacheProgressState(ChunkState.NONE).flow
-    EpisodeVideoImpl(
-        playerState = playerState,
-        expanded = expanded,
-        hasNextEpisode = true,
-        onClickNextEpisode = {},
-        playerControllerState = controllerState,
-        onClickSkip85 = { playerState.skip(85_000L) },
-        title = {
-            EpisodePlayerTitle(
-                "28",
-                "因为下次再见的时候就会很难为情",
-                "葬送的芙莉莲",
-            )
-        },
-        danmakuHost = {},
-        danmakuEnabled = danmakuEnabled,
-        onToggleDanmaku = { danmakuEnabled = !danmakuEnabled },
-        videoLoadingStateFlow = MutableStateFlow(VideoLoadingState.Succeed(isBt = true)),
-        onClickFullScreen = onClickFullScreen,
-        onExitFullscreen = { },
-        danmakuEditor = {
-            val (value, onValueChange) = remember { mutableStateOf("") }
-            PlayerControllerDefaults.DanmakuTextField(
-                value = value,
-                onValueChange = onValueChange,
-                Modifier.weight(1f),
-            )
-        },
-        onClickScreenshot = {},
-        detachedProgressSlider = {
-            PlayerControllerDefaults.MediaProgressSlider(
-                progressSliderState,
-                cacheProgressInfoFlow = cacheProgressInfoFlow,
-                enabled = false,
-            )
-        },
-        sidebarVisible = true,
-        onToggleSidebar = {},
-        progressSliderState = progressSliderState,
-        cacheProgressInfoFlow = cacheProgressInfoFlow,
-        audioController = NoOpLevelController,
-        brightnessController = NoOpLevelController,
-        playbackSpeedControllerState = remember {
-            PlaybackSpeedControllerState(NoOpPlaybackSpeedController, scope = scope)
-        },
-        videoAspectRatioControllerState = remember {
-            VideoAspectRatioControllerState(NoOpVideoAspectRatio, scope)
-        },
-        leftBottomTips = {
-            PlayerControllerDefaults.LeftBottomTips(onClick = {})
-        },
-        fullscreenSwitchButton = {
-            EpisodeVideoDefaults.FloatingFullscreenSwitchButton(
-                videoScaffoldConfig.fullscreenSwitchMode,
-                isFullscreen = expanded,
-                onClickFullScreen,
-            )
-        },
-        sideSheets = { sheetsController ->
-            EpisodeVideoDefaults.SideSheets(
-                sheetsController,
-                controllerState,
-                playerSettingsPage = {
-                    EpisodeVideoSideSheets.DanmakuSettingsNavigatorSheet(
-                        expanded = expanded,
-                        state = createTestDanmakuRegexFilterState(),
-                        onDismissRequest = { goBack() },
-                        onNavigateToFilterSettings = {
-                            sheetsController.navigateTo(EpisodeVideoSideSheetPage.EDIT_DANMAKU_REGEX_FILTER)
-                        },
-                    )
-                },
-                editDanmakuRegexFilterPage = {
-                    DanmakuRegexFilterSettings(
-                        state = createTestDanmakuRegexFilterState(),
-                        onDismissRequest = { goBack() },
-                        expanded = expanded,
-                    )
-                },
-                mediaSelectorPage = {
-                    val (viewKind, onViewKindChange) = rememberSaveable { mutableStateOf(ViewKind.WEB) }
-                    EpisodeVideoSideSheets.MediaSelectorSheet(
-                        mediaSelectorState = rememberTestMediaSelectorState(),
-                        mediaSourceResultListPresentation = TestMediaSourceResultListPresentation,
-                        viewKind = viewKind,
-                        onViewKindChange = onViewKindChange,
-                        fetchRequest = TestMediaFetchRequest,
-                        onFetchRequestChange = {},
-                        onDismissRequest = { goBack() },
-                        onRefresh = {},
-                        onRestartSource = {},
-                    )
-                },
-                episodeSelectorPage = {
-                    EpisodeVideoSideSheets.EpisodeSelectorSheet(
-                        state = rememberTestEpisodeSelectorState(),
-                        onDismissRequest = { goBack() },
-                    )
-                },
-            )
-        },
-    )
-}

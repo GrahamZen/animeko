@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2024-2026 OpenAni and contributors.
+ * Copyright (C) 2024-2025 OpenAni and contributors.
  *
  * 此源代码的使用受 GNU AFFERO GENERAL PUBLIC LICENSE version 3 许可证的约束, 可以在以下链接找到该许可证.
  * Use of this source code is governed by the GNU AGPLv3 license, which can be found at the following link.
@@ -9,15 +9,22 @@
 
 package me.him188.ani.app.ui.subject.episode.video.sidesheet
 
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import me.him188.ani.app.ui.foundation.FOCUS_REQ_DELAY_MILLIS
+import me.him188.ani.app.ui.foundation.LocalPlatform
+import me.him188.ani.app.ui.foundation.isTv
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -34,13 +41,9 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -49,7 +52,6 @@ import kotlinx.coroutines.flow.first
 import me.him188.ani.app.ui.cache.subject.contentColorForWatchStatus
 import me.him188.ani.app.ui.foundation.BackgroundScope
 import me.him188.ani.app.ui.foundation.HasBackgroundScope
-import me.him188.ani.app.ui.foundation.ProvideCompositionLocalsForPreview
 import me.him188.ani.app.ui.foundation.icons.PlayingIcon
 import me.him188.ani.app.ui.subject.episode.EpisodePresentation
 import me.him188.ani.app.ui.subject.episode.TAG_EPISODE_SELECTOR_SHEET
@@ -142,29 +144,55 @@ fun EpisodeVideoSideSheets.EpisodeSelectorSheet(
         },
     ) {
         val lazyListState = rememberLazyListState()
-        // 自动滚动到当前选中的剧集
-        LaunchedEffect(true) {
-            val currentIndex = snapshotFlow { state.currentIndex }
-                .filter { it != -1 }
-                .first()
-            if (currentIndex != -1) {
-                lazyListState.scrollToItem(
-                    currentIndex,
-                    // 显示半个上个元素
-                    scrollOffset = -(lazyListState.layoutInfo.visibleItemsInfo.getOrNull(0)?.size?.div(2) ?: 0),
-                )
+        val focusRequester = remember { FocusRequester() }
+        val isTv = LocalPlatform.current.isTv()
+
+        // 自动滚动到当前选中的剧集并请求焦点 (TV only)
+        if (isTv) {
+            LaunchedEffect(true) {
+                val currentIndex = snapshotFlow { state.currentIndex }
+                    .filter { it != -1 }
+                    .first()
+
+                if (currentIndex != -1) {
+                    lazyListState.scrollToItem(
+                        currentIndex,
+                        // 显示半个上个元素
+                        scrollOffset = -(lazyListState.layoutInfo.visibleItemsInfo.getOrNull(0)?.size?.div(2) ?: 0),
+                    )
+                }
+                // 延迟以等待布局完成，然后请求焦点
+                kotlinx.coroutines.delay(FOCUS_REQ_DELAY_MILLIS)
+                focusRequester.requestFocus()
             }
         }
+
         LazyColumn(state = lazyListState) {
             itemsIndexed(state.items, key = { _, item -> item.episodeId }) { index, item ->
                 val selected = index == state.currentIndex
                 val color = contentColorForWatchStatus(item.collectionType, item.isKnownBroadcast)
+                
+                // 确定此项是否应该作为初始焦点目标 (TV only)
+                // 如果有选中的剧集，则聚焦于该项；否则聚焦第一项
+                val isInitialFocusTarget = isTv && (
+                    index == if (state.currentIndex != -1) state.currentIndex else 0
+                )
+
+                var isFocused by remember { mutableStateOf(false) }
+
                 ListItem(
                     headlineContent = { Text(item.title, color = color) },
-                    Modifier.clickable {
-                        state.select(item)
-                        onDismissRequest()
-                    },
+                    modifier = Modifier
+                        .then(if (isInitialFocusTarget) Modifier.focusRequester(focusRequester) else Modifier)
+                        .onFocusChanged { isFocused = it.isFocused }
+                        .background(
+                            if (isFocused) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f) 
+                            else Color.Transparent
+                        )
+                        .clickable {
+                            state.select(item)
+                            onDismissRequest()
+                        },
                     leadingContent = {
                         ProvideTextStyle(MaterialTheme.typography.bodyLarge) {
                             Text(item.sort, fontFamily = FontFamily.Monospace, color = color)
@@ -232,28 +260,4 @@ fun rememberTestEpisodeSelectorState() = remember {
         {},
         EmptyCoroutineContext,
     )
-}
-
-@OptIn(TestOnly::class)
-@Composable
-@PreviewLightDark
-fun PreviewEpisodeSelectorSideSheet() {
-    ProvideCompositionLocalsForPreview {
-        EpisodeVideoSideSheets.EpisodeSelectorSheet(
-            state = rememberTestEpisodeSelectorState(),
-            onDismissRequest = {},
-        )
-    }
-}
-
-@Preview
-@Composable
-fun PreviewPlayingIcon() {
-    ProvideCompositionLocalsForPreview {
-        Box(Modifier.size(64.dp), contentAlignment = Alignment.Center) {
-            Box(modifier = Modifier.border(1.dp, color = Color.Magenta)) {
-                PlayingIcon(contentDescription = "正在播放")
-            }
-        }
-    }
 }
