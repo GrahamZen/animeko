@@ -12,6 +12,7 @@ package me.him188.ani.app.domain.player.extension
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.firstOrNull
@@ -63,38 +64,49 @@ class RememberPlayProgressExtension(
 
         backgroundTaskScope.launch("PlaybackStateListener") {
             val player = context.player
-            player.playbackState.collectLatest { playbackState ->
-                when (playbackState) {
-                    // 加载播放进度
-                    PlaybackState.READY -> {
-                        val positionMillis =
-                            playProgressRepository.getPositionMillisByEpisodeId(episodeSession.episodeId)
-                        if (positionMillis == null) {
-                            logger.info { "Did not find saved position" }
-                        } else {
-                            logger.info { "Loaded saved position: $positionMillis, waiting for video properties" }
-                            player.mediaProperties.filter { it != null && it.durationMillis > 0L }.firstOrNull()
-                            logger.info { "Loaded saved position: $positionMillis, video properties ready, seeking" }
-                            withContext(Dispatchers.Main + NonCancellable) { // android must call in main thread
-                                player.seekTo(positionMillis)
+            // 每次加载新 media 后恢复一次播放进度。
+            // mediamp 0.1.6 的 ExoPlayer 会在每次 seek rebuffer 完成后都发出 READY，
+            // 而旧版只在 onMediaItemTransition 时发出一次 READY。
+            // 如果不限制只恢复一次，会导致循环 seek（READY → seekTo → rebuffer → READY → seekTo ...）。
+            // 使用 collectLatest 监听 mediaData 变化，每次新 media 加载后重置恢复状态。
+            player.mediaData.collectLatest { mediaData ->
+                if (mediaData == null) return@collectLatest
+                var positionRestored = false
+                player.playbackState.collect { playbackState ->
+                    when (playbackState) {
+                        // 加载播放进度（仅在新 media 加载后的首次 READY 时执行）
+                        PlaybackState.READY -> {
+                            if (positionRestored) return@collect
+                            positionRestored = true
+
+                            val positionMillis =
+                                playProgressRepository.getPositionMillisByEpisodeId(episodeSession.episodeId)
+                            if (positionMillis == null) {
+                                logger.info { "Did not find saved position" }
+                            } else {
+                                logger.info { "Loaded saved position: $positionMillis, waiting for video properties" }
+                                player.mediaProperties.filter { it != null && it.durationMillis > 0L }.firstOrNull()
+                                logger.info { "Loaded saved position: $positionMillis, video properties ready, seeking" }
+                                withContext(Dispatchers.Main + NonCancellable) { // android must call in main thread
+                                    player.seekTo(positionMillis)
+                                }
                             }
                         }
-                    }
 
-                    PlaybackState.PAUSED -> {
-                        mediaLoaded.await() // 播放器开始播放了一次之后再保存状态
-                        savePlayProgressOrRemove(episodeSession.episodeId)
-                    }
+                        PlaybackState.PAUSED -> {
+                            mediaLoaded.await() // 播放器开始播放了一次之后再保存状态
+                            savePlayProgressOrRemove(episodeSession.episodeId)
+                        }
 
-                    PlaybackState.FINISHED -> {
-                        mediaLoaded.await() // 播放器开始播放了一次之后再保存状态
-                        savePlayProgressOrRemove(episodeSession.episodeId)
-                    }
+                        PlaybackState.FINISHED -> {
+                            mediaLoaded.await() // 播放器开始播放了一次之后再保存状态
+                            savePlayProgressOrRemove(episodeSession.episodeId)
+                        }
 
-                    else -> Unit
+                        else -> Unit
+                    }
                 }
             }
-
         }
     }
 
