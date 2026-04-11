@@ -52,6 +52,7 @@ import androidx.compose.material3.adaptive.layout.ThreePaneScaffoldValue
 import androidx.compose.material3.adaptive.navigation.ThreePaneScaffoldNavigator
 import androidx.compose.material3.adaptive.navigation.rememberListDetailPaneScaffoldNavigator
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -60,6 +61,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -86,8 +89,10 @@ import me.him188.ani.app.ui.adaptive.AniListDetailPaneScaffold
 import me.him188.ani.app.ui.adaptive.AniTopAppBar
 import me.him188.ani.app.ui.adaptive.PaneScope
 import me.him188.ani.app.ui.foundation.LocalPlatform
+import me.him188.ani.app.ui.foundation.LocalTvDetailsFocusRequester
 import me.him188.ani.app.ui.foundation.ProvideCompositionLocalsForPreview
 import me.him188.ani.app.ui.foundation.interaction.onEnterKeyEvent
+import me.him188.ani.app.ui.foundation.isTv
 import me.him188.ani.app.ui.foundation.layout.AniWindowInsets
 import me.him188.ani.app.ui.foundation.layout.currentWindowAdaptiveInfo1
 import me.him188.ani.app.ui.foundation.layout.paneVerticalPadding
@@ -118,11 +123,14 @@ fun SearchPage(
     var isSearchBarExpanded by rememberSaveable { mutableStateOf(false) }
     var layoutKind by rememberSaveable { mutableStateOf(SearchResultLayoutKind.COVER) }
     var editingQuery by rememberSaveable(state.query.keywords) { mutableStateOf(state.query.keywords) }
+    val isTv = LocalPlatform.current.isTv()
+    val tvDetailsFocusRequester = remember { FocusRequester() }
+    val gridFocusRequester = remember { FocusRequester() }
 
     LaunchedEffect(state.hasSelectedItem) {
         if (state.hasSelectedItem) {
             isSearchBarExpanded = false
-            focusManager.clearFocus(force = true)
+            if (!isTv) focusManager.clearFocus(force = true)
         }
     }
 
@@ -134,7 +142,9 @@ fun SearchPage(
 
     SearchPageListDetailScaffold(
         navigator = navigator,
-        hasSelectedItem = state.hasSelectedItem,
+        // On TV, pre-expand to two-pane as soon as a search is active so that D-pad focus
+        // moving between items doesn't trigger a layout change (which would kill focus).
+        hasSelectedItem = state.hasSelectedItem || (isTv && state.hasActiveSearch),
         searchBar = {
             SearchPageSearchBar(
                 state = state,
@@ -143,10 +153,18 @@ fun SearchPage(
                 editingQuery = editingQuery,
                 onEditingQueryChange = { editingQuery = it },
                 expanded = isSearchBarExpanded,
-                onExpandedChange = { isSearchBarExpanded = it },
+                onExpandedChange = { expanded ->
+                    isSearchBarExpanded = expanded
+                    if (!expanded && isTv) {
+                        coroutineScope.launch {
+                            runCatching { gridFocusRequester.requestFocus() }
+                        }
+                    }
+                },
                 modifier = Modifier.padding(bottom = 16.dp),
                 placeholder = { Text("关键词") },
                 windowInsets = contentWindowInsets.only(WindowInsetsSides.Horizontal),
+                isTv = isTv,
             )
         },
         searchResultColumn = {
@@ -171,6 +189,7 @@ fun SearchPage(
                     selectedItemIndex = { state.selectedItemIndex },
                     onSelect = { index ->
                         val item = items[index] ?: return@SearchResultColumn
+                        if (isTv) tvDetailsFocusRequester.requestFocus()
                         if (listDetailLayoutParameters.preferSinglePane) {
                             isSearchBarExpanded = false
                             onIntent(
@@ -205,6 +224,21 @@ fun SearchPage(
                             if (shouldAnimateScroll) {
                                 gridState.animateScrollToItem(index)
                             }
+                        }
+                    },
+                    onFocusItem = { index ->
+                        val item = items[index] ?: return@SearchResultColumn
+                        if (!listDetailLayoutParameters.preferSinglePane) {
+                            // Only update the selection (detail pane content); do NOT call
+                            // navigator.navigateTo here. On TV the two-pane layout is already
+                            // expanded via hasSelectedItem above, so navigating would trigger
+                            // a recomposition that kills D-pad focus on the hovered item.
+                            onIntent(
+                                SearchPageIntent.SelectResult(
+                                    index = index,
+                                    item = item,
+                                ),
+                            )
                         }
                     },
                     onPlay = {
@@ -242,6 +276,7 @@ fun SearchPage(
                             )
                         }
                     },
+                    modifier = if (isTv) Modifier.focusRequester(gridFocusRequester) else Modifier,
                     highlightSelected = !isSinglePane,
                     state = gridState,
                     layoutParams = SearchResultColumnLayoutParams.layoutParameters(
@@ -260,8 +295,12 @@ fun SearchPage(
             }
         },
         detailContent = {
-            items.itemSnapshotList.getOrNull(state.selectedItemIndex)?.let {
-                detailContent(it.subjectId)
+            CompositionLocalProvider(
+                LocalTvDetailsFocusRequester provides if (isTv) tvDetailsFocusRequester else null,
+            ) {
+                items.itemSnapshotList.getOrNull(state.selectedItemIndex)?.let {
+                    detailContent(it.subjectId)
+                }
             }
         },
         navigateToTopButton = {
@@ -309,6 +348,7 @@ private fun SearchPageSearchBar(
     inputFieldModifier: Modifier = Modifier,
     windowInsets: WindowInsets = AniWindowInsets.forSearchBar(),
     placeholder: @Composable (() -> Unit)? = null,
+    isTv: Boolean = false,
 ) {
     var debouncedEditingQuery by remember { mutableStateOf(editingQuery) }
 
@@ -341,9 +381,15 @@ private fun SearchPageSearchBar(
                 onExpandedChange = onExpandedChange,
                 modifier = inputFieldModifier
                     .fillMaxWidth()
-                    .onFocusChanged { focusState ->
-                        if (!focusState.isFocused && expanded) {
-                            onExpandedChange(false)
+                    .run {
+                        // On TV focus moves from the input to the suggestion list via D-pad;
+                        // the input loses isFocused but the search bar should stay expanded.
+                        // On non-TV, losing focus (e.g. clicking elsewhere) should collapse it.
+                        if (isTv) this
+                        else onFocusChanged { focusState ->
+                            if (!focusState.isFocused && expanded) {
+                                onExpandedChange(false)
+                            }
                         }
                     }
                     .onEnterKeyEvent {
