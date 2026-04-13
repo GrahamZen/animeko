@@ -30,8 +30,14 @@ import androidx.compose.material3.LoadingIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
+import me.him188.ani.app.ui.foundation.LocalTvCommentTabFocusRequester
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.itemContentType
 import androidx.paging.compose.itemKey
@@ -59,6 +65,7 @@ fun CommentColumn(
     state: LazyGridState = rememberLazyGridState(),
     commentItem: @Composable LazyGridItemScope.(index: Int, item: UIComment) -> Unit
 ) {
+    val commentTabFocusRequester = LocalTvCommentTabFocusRequester.current
     val emptyContentModifier = Modifier
         .thenNotNull(
             connectedScrollState?.let {
@@ -76,7 +83,18 @@ fun CommentColumn(
     PullToRefreshBox(
         isRefreshing = items.isLoadingFirstPageOrRefreshing,
         onRefresh = { items.refresh() },
-        modifier = modifier,
+        modifier = modifier
+            .onKeyEvent { keyEvent ->
+                if (keyEvent.type == KeyEventType.KeyDown &&
+                    keyEvent.key == Key.Back &&
+                    commentTabFocusRequester != null
+                ) {
+                    commentTabFocusRequester.requestFocus()
+                    true
+                } else {
+                    false
+                }
+            },
         enabled = LocalPlatform.current.isMobile(),
         contentAlignment = Alignment.TopCenter,
     ) {

@@ -123,7 +123,7 @@ import me.him188.ani.app.ui.settings.tabs.theme.ThemeGroup
 import me.him188.ani.app.ui.update.AppUpdateState
 import me.him188.ani.app.ui.update.AppUpdateViewModel
 import me.him188.ani.app.ui.update.NewVersion
-import me.him188.ani.app.ui.update.UpdateNotifier
+import me.him188.ani.app.ui.update.UpdateSettingsNotifier
 import me.him188.ani.utils.platform.annotations.TestOnly
 import me.him188.ani.utils.platform.isDesktop
 import me.him188.ani.utils.platform.isIos
@@ -418,7 +418,7 @@ fun SettingsScope.SoftwareUpdateGroup(
             },
         )
         Box(Modifier.fillMaxWidth()) {
-            UpdateNotifier(autoUpdate)
+            UpdateSettingsNotifier(autoUpdate)
         }
     }
 }

@@ -48,6 +48,9 @@ import me.him188.ani.app.ui.foundation.layout.currentWindowAdaptiveInfo1
 import me.him188.ani.app.ui.foundation.layout.isHeightAtLeastMedium
 import me.him188.ani.app.ui.foundation.layout.isWidthAtLeastMedium
 import me.him188.ani.app.ui.foundation.rememberAsyncHandler
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.focus.FocusRequester
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.settings_account_popup_cancel
 import me.him188.ani.app.ui.lang.settings_account_popup_logout_button
@@ -69,6 +72,11 @@ fun ProfilePopup(
     val state by vm.stateFlow.collectAsStateWithLifecycle()
     var showLogoutDialog by rememberSaveable { mutableStateOf(false) }
 
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
+
     val content = @Composable {
         ProfilePopupLayout(
             state,
@@ -84,6 +92,7 @@ fun ProfilePopup(
                 .ifThen(windowSizeClass.isHeightAtLeastMedium) {
                     padding(vertical = 8.dp)
                 },
+            focusRequester = focusRequester,
         )
     }
 
@@ -94,7 +103,7 @@ fun ProfilePopup(
             offset = with(density) {
                 IntOffset(0, 32.dp.roundToPx())
             },
-            properties = PopupProperties(),
+            properties = PopupProperties(focusable = true),
             onDismissRequest = onDismissRequest,
         ) {
             // 模拟点击外面关闭 popup, 否则事件会被广播到下层

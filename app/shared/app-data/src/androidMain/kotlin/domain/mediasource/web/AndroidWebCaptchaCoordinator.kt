@@ -10,6 +10,8 @@
 package me.him188.ani.app.domain.mediasource.web
 
 import android.annotation.SuppressLint
+import android.os.SystemClock
+import android.view.MotionEvent
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebResourceError
@@ -19,6 +21,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,13 +35,24 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -189,13 +203,41 @@ class AndroidWebCaptchaCoordinator(
             }
         }
 
+        // LocalIsAndroidTV is provided inside AniAppContent's content lambda, but
+        // ComposeContent() is rendered in a sibling overlay Box that does NOT inherit that
+        // CompositionLocal. Read TV mode directly from UiModeManager instead.
+        val localContext = LocalContext.current
+        val isTv = remember(localContext) {
+            val uiModeManager = localContext.getSystemService(
+                android.content.Context.UI_MODE_SERVICE,
+            ) as android.app.UiModeManager
+            uiModeManager.currentModeType ==
+                android.content.res.Configuration.UI_MODE_TYPE_TELEVISION
+        }
         val state = interactiveSolveState ?: return
         val coroutineScope = rememberCoroutineScope()
+
         val dismiss: () -> Unit = {
             if (state.deferred.isActive) {
                 state.deferred.complete(WebCaptchaSolveResult.Cancelled)
             }
             interactiveSolveState = null
+        }
+        // Extracted so both the ✓ button and the TV long-press shortcut share the same logic.
+        val confirmAndClose: () -> Unit = {
+            coroutineScope.launch {
+                val page = state.session.snapshotCurrentPage()
+                val finalUrl = page?.finalUrl ?: state.request.pageUrl
+                if (state.deferred.isActive) {
+                    state.deferred.complete(
+                        WebCaptchaSolveResult.Solved(
+                            finalUrl,
+                            state.session.getCookies(finalUrl),
+                        ),
+                    )
+                }
+                interactiveSolveState = null
+            }
         }
         BackHandler(onBack = dismiss)
         Dialog(
@@ -226,40 +268,29 @@ class AndroidWebCaptchaCoordinator(
                             Text("返回", color = Color.White)
                         }
                         Text(
-                            text = requestTitle(state.request.pageUrl),
+                            // On TV, the title doubles as an operation hint.
+                            text = if (isTv) {
+                                "方向键移动 | 确认键点击 | 长按确认键完成"
+                            } else {
+                                requestTitle(state.request.pageUrl)
+                            },
                             color = Color.White,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.align(Alignment.Center),
                         )
                         TextButton(
-                            onClick = {
-                                coroutineScope.launch {
-                                    val page = state.session.snapshotCurrentPage()
-                                    val finalUrl = page?.finalUrl ?: state.request.pageUrl
-                                    if (state.deferred.isActive) {
-                                        state.deferred.complete(
-                                            WebCaptchaSolveResult.Solved(
-                                                finalUrl,
-                                                state.session.getCookies(finalUrl),
-                                            ),
-                                        )
-                                    }
-                                    interactiveSolveState = null
-                                }
-                            },
+                            onClick = confirmAndClose,
                             modifier = Modifier.align(Alignment.CenterEnd),
                         ) {
                             Text("✓", color = Color.White)
                         }
                     }
-                    AndroidView(
-                        factory = {
-                            state.session.webView.also { webView ->
-                                (webView.parent as? ViewGroup)?.removeView(webView)
-                            }
-                        },
-                        modifier = Modifier.fillMaxSize(),
+                    TvCapturableWebView(
+                        webView = state.session.webView,
+                        isTv = isTv,
+                        onDismiss = dismiss,
+                        onConfirm = confirmAndClose,
                     )
                 }
             }
@@ -632,5 +663,147 @@ class AndroidWebCaptchaCoordinator(
 
             return lastPage?.takeIf { it.isUsableSolvedPage(request) }
         }
+    }
+}
+
+/**
+ * A WebView composable with an optional TV D-pad virtual cursor overlay.
+ *
+ * All TV-specific state (cursor position, key handling, canvas drawing) is encapsulated here so
+ * that the main [AndroidWebCaptchaCoordinator.ComposeContent] body stays free of TV-specific code.
+ * Future upstream changes to the captcha dialog will only need to touch the host composable, not
+ * this helper.
+ *
+ * On non-TV devices the composable is equivalent to a plain [AndroidView] wrapping [webView].
+ */
+@SuppressLint("ClickableViewAccessibility")
+@Composable
+private fun TvCapturableWebView(
+    webView: WebView,
+    isTv: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val webViewHolder = remember { arrayOfNulls<WebView>(1) }
+    var cursorX by remember { mutableFloatStateOf(-1f) }
+    var cursorY by remember { mutableFloatStateOf(-1f) }
+    val density = LocalDensity.current
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .onSizeChanged { size ->
+                // Initialise cursor to centre on first layout (TV only).
+                if (isTv && cursorX < 0f && size.width > 0) {
+                    cursorX = size.width / 2f
+                    cursorY = size.height / 2f
+                }
+            }
+            .then(
+                if (isTv) {
+                    Modifier.onPreviewKeyEvent { keyEvent ->
+                        tvWebViewCursorKeyEvent(
+                            keyEvent = keyEvent,
+                            cursorX = cursorX,
+                            cursorY = cursorY,
+                            onCursorMove = { x, y -> cursorX = x; cursorY = y },
+                            webViewHolder = webViewHolder,
+                            density = density,
+                            onDismiss = onDismiss,
+                            onConfirm = onConfirm,
+                        )
+                    }
+                } else {
+                    Modifier
+                },
+            ),
+    ) {
+        AndroidView(
+            factory = {
+                webView.also { wv ->
+                    (wv.parent as? ViewGroup)?.removeView(wv)
+                    webViewHolder[0] = wv
+                }
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
+        // Draw the virtual cursor on top of the WebView on TV.
+        if (isTv && cursorX >= 0f) {
+            TvWebViewCursorCanvas(cursorX, cursorY)
+        }
+    }
+}
+
+/**
+ * Handles a single Compose [KeyEvent] for the TV D-pad virtual cursor.
+ * Returns true if the event was consumed.
+ */
+private fun tvWebViewCursorKeyEvent(
+    keyEvent: androidx.compose.ui.input.key.KeyEvent,
+    cursorX: Float,
+    cursorY: Float,
+    onCursorMove: (x: Float, y: Float) -> Unit,
+    webViewHolder: Array<WebView?>,
+    density: androidx.compose.ui.unit.Density,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+): Boolean {
+    // onPreviewKeyEvent fires in Compose's tunnel phase, BEFORE the
+    // embedded AndroidView (WebView) ever receives the key event.
+    // Returning true consumes the event so WebView never sees it.
+
+    // On TV the Back key goes through the KeyEvent path and WebView
+    // would consume it for browser-history navigation before
+    // BackHandler ever fires. Intercept it here instead.
+    if (keyEvent.key == Key.Back && keyEvent.type == KeyEventType.KeyUp) {
+        onDismiss()
+        return true
+    }
+    if (keyEvent.type != KeyEventType.KeyDown) return false
+
+    val repeatCount = (keyEvent.nativeKeyEvent as? android.view.KeyEvent)?.repeatCount ?: 0
+    val baseStep = with(density) { 20.dp.toPx() }
+    val step = baseStep * (1f + repeatCount / 12f).coerceAtMost(5f)
+    return when (keyEvent.key) {
+        Key.DirectionUp -> { onCursorMove(cursorX, (cursorY - step).coerceAtLeast(0f)); true }
+        Key.DirectionDown -> { onCursorMove(cursorX, cursorY + step); true }
+        Key.DirectionLeft -> { onCursorMove((cursorX - step).coerceAtLeast(0f), cursorY); true }
+        Key.DirectionRight -> { onCursorMove(cursorX + step, cursorY); true }
+        Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+            when (repeatCount) {
+                // Initial press → simulate a tap on WebView at cursor position.
+                0 -> {
+                    val downTime = SystemClock.uptimeMillis()
+                    val down = MotionEvent.obtain(
+                        downTime, downTime, MotionEvent.ACTION_DOWN, cursorX, cursorY, 0,
+                    )
+                    val up = MotionEvent.obtain(
+                        downTime, downTime + 50L, MotionEvent.ACTION_UP, cursorX, cursorY, 0,
+                    )
+                    webViewHolder[0]?.let { wv ->
+                        wv.dispatchTouchEvent(down)
+                        wv.dispatchTouchEvent(up)
+                    }
+                    down.recycle()
+                    up.recycle()
+                }
+                // Key held ~500 ms → long-press → confirm captcha solved.
+                1 -> onConfirm()
+                // Subsequent repeats: no-op, already confirmed.
+            }
+            true
+        }
+        else -> false
+    }
+}
+
+/** Draws the virtual cursor circle overlay used on Android TV. */
+@Composable
+private fun TvWebViewCursorCanvas(cursorX: Float, cursorY: Float) {
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        val radius = 9.dp.toPx()
+        val center = Offset(cursorX, cursorY)
+        drawCircle(color = Color.White, radius = radius, center = center)
+        drawCircle(color = Color.Black, radius = radius, center = center, style = Stroke(width = 2.5f))
     }
 }
