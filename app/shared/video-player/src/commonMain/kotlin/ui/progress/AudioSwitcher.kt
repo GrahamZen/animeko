@@ -114,6 +114,7 @@ fun PlayerControllerDefaults.AudioSwitcher(
         modifier,
         properties = PlatformPopupProperties(
             clippingEnabled = false,
+            focusable = true, // Critical for TV focus (especially Android TV); applied on all platforms
         ),
     )
 }

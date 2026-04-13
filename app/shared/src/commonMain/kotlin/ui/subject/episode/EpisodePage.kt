@@ -69,8 +69,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.coerceIn
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -100,7 +98,8 @@ import me.him188.ani.app.ui.foundation.ImageViewer
 import me.him188.ani.app.ui.foundation.LocalImageViewerHandler
 import me.him188.ani.app.ui.foundation.LocalIsPreviewing
 import me.him188.ani.app.ui.foundation.LocalPlatform
-import me.him188.ani.app.ui.foundation.ProvideCompositionLocalsForPreview
+import me.him188.ani.app.ui.foundation.LocalTvCommentTabFocusRequester
+import me.him188.ani.app.ui.foundation.isTv
 import me.him188.ani.app.ui.foundation.animation.AniAnimatedVisibility
 import me.him188.ani.app.ui.foundation.effects.DarkStatusBarAppearance
 import me.him188.ani.app.ui.foundation.effects.OnLifecycleEvent
@@ -480,8 +479,12 @@ private fun EpisodeScreenTabletVeryWide(
                         ),
                 )
 
-                // ExternalContent("", Modifier.fillMaxWidth().height(128.dp))
+                val commentTabFocusRequester = remember { FocusRequester() }
 
+                CompositionLocalProvider(
+                    LocalTvCommentTabFocusRequester provides
+                            if (LocalPlatform.current.isTv()) commentTabFocusRequester else null,
+                ) {
                 TabRow(
                     pagerState, scope, { vm.episodeCommentState.count }, Modifier.fillMaxWidth(),
                     containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -561,6 +564,7 @@ private fun EpisodeScreenTabletVeryWide(
                         }
                     }
                 }
+                } // end CompositionLocalProvider
             }
         }
     }
@@ -574,6 +578,7 @@ private fun TabRow(
     modifier: Modifier = Modifier,
     containerColor: Color = MaterialTheme.colorScheme.surface,
 ) {
+    val commentTabFocusRequester = LocalTvCommentTabFocusRequester.current
     ScrollableTabRow(
         selectedTabIndex = pagerState.currentPage,
         modifier,
@@ -608,6 +613,9 @@ private fun TabRow(
             },
             selectedContentColor = MaterialTheme.colorScheme.primary,
             unselectedContentColor = MaterialTheme.colorScheme.onSurface,
+            modifier = if (commentTabFocusRequester != null) {
+                Modifier.focusRequester(commentTabFocusRequester)
+            } else Modifier,
         )
     }
 }
@@ -647,17 +655,6 @@ private fun EpisodeScreenContentPhone(
                 danmakuHostState,
                 danmakuEditorState, vm.playerControllerState, vm.isFullscreen,
                 windowInsets = videoWindowInsets,
-            )
-        },
-        headlineContent = {
-            // ExternalContent("", Modifier.fillMaxWidth().height(64.dp))
-        },
-        tabRowContent = {
-            DummyDanmakuEditor(
-                onClick = {
-                    showDanmakuEditor = true
-                    pauseOnPlaying()
-                },
             )
         },
         episodeDetails = {
@@ -725,13 +722,21 @@ private fun EpisodeScreenContentPhone(
                 gridState = vm.commentLazyGirdState,
             )
         },
-        modifier = modifier.then(
+        modifier.then(
             if (vm.isFullscreen) {
                 Modifier.fillMaxSize()
             } else {
                 Modifier.windowInsetsPadding(columnInsets)
             },
         ),
+        tabRowContent = {
+            DummyDanmakuEditor(
+                onClick = {
+                    showDanmakuEditor = true
+                    pauseOnPlaying()
+                },
+            )
+        },
     )
 
     if (showDanmakuEditor) {
@@ -801,7 +806,6 @@ fun EpisodeScreenContentPhoneScaffold(
     episodeDetails: @Composable () -> Unit,
     commentColumn: @Composable () -> Unit,
     modifier: Modifier = Modifier,
-    headlineContent: @Composable () -> Unit = {},
     tabRowContent: @Composable () -> Unit = {},
 ) {
     Column(modifier) {
@@ -813,37 +817,42 @@ fun EpisodeScreenContentPhoneScaffold(
 
         val pagerState = rememberPagerState(initialPage = 0) { 2 }
         val scope = rememberCoroutineScope()
+        val commentTabFocusRequester = remember { FocusRequester() }
 
-        Column(Modifier.fillMaxSize()) {
-            headlineContent()
-            Surface(color = MaterialTheme.colorScheme.surfaceContainerLow) {
-                Row {
-                    TabRow(
-                        pagerState, scope, commentCount, Modifier.weight(1f),
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                    )
-                    Box(
-                        modifier = Modifier.weight(0.618f) // width
-                            .height(48.dp)
-                            .padding(vertical = 4.dp, horizontal = 16.dp),
-                    ) {
-                        Row(Modifier.align(Alignment.CenterEnd)) {
-                            tabRowContent()
+        CompositionLocalProvider(
+            LocalTvCommentTabFocusRequester provides
+                    if (LocalPlatform.current.isTv()) commentTabFocusRequester else null,
+        ) {
+            Column(Modifier.fillMaxSize()) {
+                Surface(color = MaterialTheme.colorScheme.surfaceContainerLow) {
+                    Row {
+                        TabRow(
+                            pagerState, scope, commentCount, Modifier.weight(1f),
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                        )
+                        Box(
+                            modifier = Modifier.weight(0.618f) // width
+                                .height(48.dp)
+                                .padding(vertical = 4.dp, horizontal = 16.dp),
+                        ) {
+                            Row(Modifier.align(Alignment.CenterEnd)) {
+                                tabRowContent()
+                            }
                         }
                     }
                 }
-            }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.weaken())
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.weaken())
 
-            HorizontalPager(state = pagerState, Modifier.fillMaxSize()) { index ->
-                Box(Modifier.fillMaxSize()) {
-                    when (index) {
-                        0 -> {
-                            episodeDetails()
-                        }
+                HorizontalPager(state = pagerState, Modifier.fillMaxSize()) { index ->
+                    Box(Modifier.fillMaxSize()) {
+                        when (index) {
+                            0 -> {
+                                episodeDetails()
+                            }
 
-                        1 -> {
-                            commentColumn()
+                            1 -> {
+                                commentColumn()
+                            }
                         }
                     }
                 }
@@ -916,6 +925,8 @@ private fun EpisodeVideo(
         expanded = expanded,
         hasNextEpisode = vm.episodeSelectorState.hasNextEpisode,
         onClickNextEpisode = { vm.episodeSelectorState.selectNext() },
+        hasPrevEpisode = vm.episodeSelectorState.hasPrevEpisode,
+        onClickPrevEpisode = { vm.episodeSelectorState.selectPrev() },
         playerControllerState = playerControllerState,
         onClickSkip85 = { vm.onClickSkip85(it) },
         title = {
@@ -1163,46 +1174,5 @@ class MediampAudioLevelController(
         val targetIsMute = !muteFlow.value
         controller.toggleMute()
         onVolumeStateChanged(level, targetIsMute)
-    }
-}
-
-@Composable
-@Preview(widthDp = 1080 / 3, heightDp = 2400 / 3, showBackground = true)
-@Preview(device = "spec:width=1280dp,height=800dp,dpi=240", showBackground = true)
-internal fun PreviewEpisodePage() {
-    ProvideCompositionLocalsForPreview {
-        val context = LocalContext.current
-        EpisodeScreen(
-            remember {
-                EpisodeViewModel(
-                    424663,
-                    1277147,
-                    context = context,
-                )
-            },
-        )
-    }
-}
-
-@Composable
-@PreviewLightDark
-fun PreviewEpisodeSceneContentPhoneScaffoldTabs() {
-    ProvideCompositionLocalsForPreview {
-        EpisodeScreenContentPhoneScaffold(
-            videoOnly = false,
-            commentCount = { 100 },
-            video = {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(200.dp),
-                )
-            },
-            episodeDetails = { },
-            commentColumn = { },
-            tabRowContent = {
-                DummyDanmakuEditor({ })
-            },
-        )
     }
 }

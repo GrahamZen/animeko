@@ -23,10 +23,12 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import me.him188.ani.app.ui.foundation.AbstractViewModel
 import me.him188.ani.app.ui.foundation.dialogs.PlatformPopupProperties
 import org.openani.mediamp.metadata.SubtitleTrack
@@ -34,9 +36,19 @@ import org.openani.mediamp.metadata.TrackGroup
 
 @Stable
 class SubtitleTrackState(
-    current: StateFlow<SubtitleTrack?>,
+    private val current: StateFlow<SubtitleTrack?>,
     candidates: Flow<List<SubtitleTrack>>,
+    private val select: (SubtitleTrack?) -> Unit,
 ) : AbstractViewModel() {
+    // Tracks the user's explicit subtitle selection so it can be re-applied when
+    // the player reverts it (e.g. when an external subtitle file finishes loading
+    // for Jellyfin sources, ExoPlayer may re-run default track selection).
+    //
+    // DESIRE_NOT_SET  — user hasn't made an explicit choice yet
+    // DESIRE_NONE     — user explicitly chose "no subtitle"
+    // any other value — internalId of the track the user wants
+    private val userDesiredInternalId = MutableStateFlow(DESIRE_NOT_SET)
+
     val options = candidates.map { tracks ->
         tracks.map { track ->
             SubtitlePresentation(track, track.subtitleLanguage)
@@ -46,6 +58,34 @@ class SubtitleTrackState(
     val value = combine(options, current) { options, current ->
         options.firstOrNull { it.subtitleTrack.id == current?.id }
     }.flowOn(Dispatchers.Default)
+
+    init {
+        backgroundScope.launch {
+            combine(options, current, userDesiredInternalId) { opts, cur, desired ->
+                Triple(opts, cur, desired)
+            }.collect { (opts, cur, desired) ->
+                if (desired == DESIRE_NOT_SET) return@collect
+                val targetTrack = if (desired == DESIRE_NONE) null
+                else opts.firstOrNull { it.subtitleTrack.internalId == desired }?.subtitleTrack
+                // Only re-apply if the desired track exists in the current candidates
+                // (or the user wants none), and the player has diverged from it.
+                val canApply = desired == DESIRE_NONE || targetTrack != null
+                if (canApply && cur?.internalId != targetTrack?.internalId) {
+                    select(targetTrack)
+                }
+            }
+        }
+    }
+
+    /** Called when the user explicitly chooses a subtitle track (or null for "off"). */
+    fun userSelect(track: SubtitleTrack?) {
+        userDesiredInternalId.value = track?.internalId ?: DESIRE_NONE
+    }
+
+    companion object {
+        private const val DESIRE_NOT_SET = "__not_set__"
+        private const val DESIRE_NONE = "__none__"
+    }
 }
 
 
@@ -56,7 +96,7 @@ fun PlayerControllerDefaults.SubtitleSwitcher(
     onSelect: (SubtitleTrack?) -> Unit = { playerState.select(it) },
 ) {
     val state = remember(playerState) {
-        SubtitleTrackState(playerState.selected, playerState.candidates)
+        SubtitleTrackState(playerState.selected, playerState.candidates) { playerState.select(it) }
     }
     SubtitleSwitcher(state, onSelect, modifier)
 }
@@ -70,7 +110,10 @@ fun PlayerControllerDefaults.SubtitleSwitcher(
     val options by state.options.collectAsStateWithLifecycle(emptyList())
     SubtitleSwitcher(
         value = state.value.collectAsStateWithLifecycle(null).value,
-        onValueChange = { onSelect(it?.subtitleTrack) },
+        onValueChange = {
+            state.userSelect(it?.subtitleTrack)
+            onSelect(it?.subtitleTrack)
+        },
         optionsProvider = { options },
         modifier,
     )
@@ -114,6 +157,7 @@ fun PlayerControllerDefaults.SubtitleSwitcher(
         modifier,
         properties = PlatformPopupProperties(
             clippingEnabled = false,
+            focusable = true, // Critical for TV focus (especially Android TV); applied on all platforms
         ),
     )
 }

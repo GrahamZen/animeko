@@ -9,21 +9,14 @@
 
 package me.him188.ani.app.ui.update
 
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.material3.BasicAlertDialog
-import androidx.compose.material3.ListItem
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -37,295 +30,140 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.window.core.layout.WindowSizeClass
+import kotlinx.coroutines.delay
 import me.him188.ani.app.platform.LocalContext
-import me.him188.ani.app.tools.update.InstallationResult
-import me.him188.ani.app.ui.foundation.ProvideCompositionLocalsForPreview
 import me.him188.ani.app.ui.foundation.animation.AniAnimatedVisibility
-import me.him188.ani.app.ui.foundation.layout.currentWindowAdaptiveInfo1
-import me.him188.ani.app.ui.foundation.layout.isHeightAtLeastMedium
-import me.him188.ani.app.ui.foundation.layout.isWidthAtLeastMedium
-import me.him188.ani.utils.platform.annotations.TestOnly
 
+/**
+ * 检测新版本并在右下角显示一个 5 秒后自动消失的提示.
+ * 没有下载按钮, 仅展示版本号文字.
+ */
 @Composable
 fun BoxScope.UpdateNotifier(
     viewModel: AppUpdateViewModel = viewModel { AppUpdateViewModel() },
-    snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
-    layoutKind: UpdateNotifierLayoutKind = UpdateNotifierDefaults.layoutKind(),
 ) {
     SideEffect {
-        // 用户每次从别的页面回到主页, 都会触发一次检查.
         viewModel.startAutomaticCheckLatestVersion()
     }
 
-    val uriHandler = LocalUriHandler.current
-
     val presentation by viewModel.presentationFlow.collectAsStateWithLifecycle()
-    val context = LocalContext.current
-    var showInstallationError by rememberSaveable { mutableStateOf<InstallationResult.Failed?>(null) }
+    val newVersion = presentation.newVersion
 
-    UpdateNotifier(
-        presentation = presentation,
-        onStartUpdateClick = {
-            presentation.newVersion?.let {
-                viewModel.startDownload(it, uriHandler)
-            }
-        },
-        onInstallClick = {
-            viewModel.install(context)?.let {
-                showInstallationError = it
-            }
-        },
-        onCancelClick = {
-            viewModel.cancelDownload()
-        },
-        onRetryClick = {
-            viewModel.restartDownload(uriHandler)
-        },
-        snackbarHostState = snackbarHostState,
-        layoutKind = layoutKind,
-    )
+    // Reset visibility whenever a new version name appears
+    var visible by rememberSaveable(newVersion?.name) { mutableStateOf(true) }
 
-    showInstallationError?.let {
-        FailedToInstallDialog(
-            it.reason.toString(),
-            onDismissRequest = {
-                showInstallationError = null
-            },
-            state = presentation.state,
-        )
+    // Auto-dismiss after 5 seconds
+    LaunchedEffect(newVersion?.name) {
+        if (newVersion != null) {
+            delay(5_000)
+            visible = false
+        }
+    }
+
+    // Keep the last known name alive so the exit animation can still render text
+    var lastName by remember { mutableStateOf<String?>(null) }
+    if (newVersion != null) lastName = newVersion.name
+
+    AniAnimatedVisibility(
+        visible = newVersion != null && visible,
+        modifier = Modifier
+            .align(Alignment.BottomEnd)
+            .windowInsetsPadding(WindowInsets.navigationBars)
+            .padding(24.dp),
+    ) {
+        Card(
+            shape = MaterialTheme.shapes.extraLarge,
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ),
+            modifier = Modifier.shadow(4.dp, MaterialTheme.shapes.extraLarge),
+        ) {
+            Text(
+                text = "发现新版本 ${lastName ?: ""}，可前往设置更新",
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
+                style = MaterialTheme.typography.bodyLarge,
+            )
+        }
     }
 }
 
 /**
- * A one‑stop host that
- *  1. kicks off automatic update check on the first composition, and
- *  2. shows *either* a bottom‑right popup (desktop) *or* a snackbar (mobile)
- *     when a new version is available.
+ * 设置页中的更新提示卡片，带下载和安装按钮，永久显示直到手动关闭.
  */
 @Composable
-fun BoxScope.UpdateNotifier(
-    presentation: AppUpdatePresentation,
-    onStartUpdateClick: () -> Unit,
-    onInstallClick: () -> Unit,
-    onCancelClick: () -> Unit,
-    onRetryClick: () -> Unit,
-    snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
-    layoutKind: UpdateNotifierLayoutKind = UpdateNotifierDefaults.layoutKind(),
+fun BoxScope.UpdateSettingsNotifier(
+    viewModel: AppUpdateViewModel = viewModel { AppUpdateViewModel() },
 ) {
     val uriHandler = LocalUriHandler.current
+    val context = LocalContext.current
 
-    // Track whether the user dismisses the notification in this session
-    var dismissedManually by rememberSaveable(
-        presentation.newVersion?.name, // 当有新版本时, 重新显示
-    ) {
-        mutableStateOf(false)
+    val presentation by viewModel.presentationFlow.collectAsStateWithLifecycle()
+    val newVersion = presentation.newVersion
+    val state = presentation.state
+
+    // Per-version dismiss state
+    var dismissed by rememberSaveable(newVersion?.name) { mutableStateOf(false) }
+
+    // Install-failure dialog
+    var installErrorMessage by remember { mutableStateOf<String?>(null) }
+
+    installErrorMessage?.let { msg ->
+        FailedToInstallDialog(
+            message = msg,
+            onDismissRequest = { installErrorMessage = null },
+            state = state,
+        )
     }
 
-    val newVersion = presentation.newVersion
-    if (newVersion != null) {
-        if (presentation.isDownloading) {
-            val positionModifiers = when (layoutKind) {
-                UpdateNotifierLayoutKind.POPUP -> Modifier.padding(24.dp).align(Alignment.BottomEnd)
-                UpdateNotifierLayoutKind.SNACKBAR -> Modifier.padding(16.dp).fillMaxWidth()
-                    .align(Alignment.BottomCenter)
-            }
+    val showCard = !dismissed && (state is AppUpdateState.HasUpdate || presentation.isDownloading)
 
-            if (!dismissedManually) {
-                DownloadingUpdatePopupCard(
-                    version = presentation.newVersion,
-                    fileDownloaderStats = presentation.fileDownloaderStats,
-                    error = presentation.downloadError,
-                    onInstallClick = onInstallClick,
-                    onCancelClick = {
-                        onCancelClick()
-                        dismissedManually = true
-                    },
-                    onRetryClick = onRetryClick,
-                    modifier = positionModifiers,
-                )
-            }
-        } else {
-            // 提示有新版本
-
-            val onDetailsClick =
-                { uriHandler.openUri("https://github.com/open-ani/animeko/releases/tag/v${newVersion.name}") }
-
-            when (layoutKind) {
-                UpdateNotifierLayoutKind.POPUP -> {
-                    if (!dismissedManually) {
-                        DesktopPopup(
-                            version = newVersion,
-                            onDismiss = { dismissedManually = true },
-                            onDetailsClick,
-                            onAutoUpdateClick = onStartUpdateClick,
-                            modifier = Modifier.align(Alignment.BottomEnd)
-                                .windowInsetsPadding(WindowInsets.navigationBars)
-                                .padding(24.dp)
-                                .shadow(4.dp, MaterialTheme.shapes.extraLarge),
-                        )
-                    }
-                }
-
-                UpdateNotifierLayoutKind.SNACKBAR -> {
-                    // 点击 snackbar 后显示 popup
-                    var showDetails by rememberSaveable { mutableStateOf(false) }
-
-                    if (!dismissedManually) {
-                        MobileSnackbar(
-                            hostState = snackbarHostState,
-                            version = newVersion,
-                            onShowDetailsClick = { showDetails = true },
-                            onDismissChanged = { dismissedManually = it },
-                        )
-                    }
-
-                    SnackbarHost(hostState = snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
-
-                    // If snackbar action is clicked, we pop up a dialog containing the card.
-                    if (showDetails && !dismissedManually) {
-                        BasicAlertDialog(
-                            { dismissedManually = true },
-                        ) {
-                            NewVersionPopupCard(
-                                version = newVersion.name,
-                                changes = newVersion.majorChanges,
-                                onDetailsClick = onDetailsClick,
-                                onAutoUpdateClick = onStartUpdateClick,
-                                onDismissRequest = null,
+    AniAnimatedVisibility(
+        visible = showCard,
+        modifier = Modifier
+            .align(Alignment.BottomEnd)
+            .windowInsetsPadding(WindowInsets.navigationBars)
+            .padding(24.dp),
+    ) {
+        when {
+            state is AppUpdateState.HasUpdate -> {
+                NewVersionPopupCard(
+                    version = newVersion?.name ?: "",
+                    changes = newVersion?.majorChanges ?: emptyList(),
+                    onDetailsClick = {
+                        newVersion?.let {
+                            uriHandler.openUri(
+                                "https://github.com/$FORK_OWNER/$FORK_REPO/releases/tag/v${it.name}",
                             )
                         }
-                    }
-                }
-            }
-        }
-    }
-}
-
-enum class UpdateNotifierLayoutKind {
-    POPUP,
-    SNACKBAR,
-}
-
-object UpdateNotifierDefaults {
-    @Composable
-    fun layoutKind(windowSizeClass: WindowSizeClass = currentWindowAdaptiveInfo1().windowSizeClass): UpdateNotifierLayoutKind {
-        return if (windowSizeClass.isWidthAtLeastMedium && windowSizeClass.isHeightAtLeastMedium) {
-            UpdateNotifierLayoutKind.POPUP
-        } else {
-            UpdateNotifierLayoutKind.SNACKBAR
-        }
-    }
-}
-
-// ───────────────────────── Desktop implementation ────────────────────────────
-@Composable
-private fun BoxScope.DesktopPopup(
-    version: NewVersion,
-    onDismiss: () -> Unit,
-    onDetailsClick: () -> Unit,
-    onAutoUpdateClick: () -> Unit,
-    modifier: Modifier,
-) {
-    AniAnimatedVisibility(
-        visible = true,
-        modifier = modifier.align(Alignment.BottomEnd),
-    ) {
-        NewVersionPopupCard(
-            version = version.name,
-            changes = version.majorChanges,
-            onDetailsClick = onDetailsClick,
-            onAutoUpdateClick = onAutoUpdateClick,
-            onDismissRequest = onDismiss,
-        )
-    }
-}
-
-// ───────────────────────── Mobile implementation ─────────────────────────────
-@Composable
-private fun MobileSnackbar(
-    hostState: SnackbarHostState,
-    version: NewVersion,
-    onShowDetailsClick: () -> Unit,
-    onDismissChanged: (Boolean) -> Unit,
-) {
-    LaunchedEffect(version.name) {
-        val result = hostState.showSnackbar(
-            message = buildString {
-                append("新版本 ${version.name}")
-
-                version.majorChanges.firstOrNull()?.let {
-                    append("：$it")
-                }
-            },
-            actionLabel = "查看",
-            withDismissAction = true,
-            duration = SnackbarDuration.Indefinite,
-        )
-        when (result) {
-            SnackbarResult.ActionPerformed -> {
-                onShowDetailsClick()
+                    },
+                    onAutoUpdateClick = {
+                        newVersion?.let { viewModel.startDownload(it, uriHandler) }
+                    },
+                    onDismissRequest = { dismissed = true },
+                )
             }
 
-            SnackbarResult.Dismissed -> onDismissChanged(true) // user swiped it away / dismissed
-        }
-    }
-}
-
-///////////////////////////////////////////////////////////////////////////
-// Previews
-///////////////////////////////////////////////////////////////////////////
-
-@OptIn(TestOnly::class)
-@Composable
-@Preview
-private fun PreviewUpdateNotifierHostPopup() = ProvideCompositionLocalsForPreview {
-    PreviewImpl(UpdateNotifierLayoutKind.POPUP)
-}
-
-@OptIn(TestOnly::class)
-@Composable
-@Preview
-private fun PreviewUpdateNotifierHostPopupDownloading() = ProvideCompositionLocalsForPreview {
-    PreviewImpl(
-        UpdateNotifierLayoutKind.POPUP,
-        state = TestAppUpdatePresentations.Downloading,
-    )
-}
-
-@OptIn(TestOnly::class)
-@Composable
-@Preview
-private fun PreviewUpdateNotifierHostSnackbar() = ProvideCompositionLocalsForPreview {
-    PreviewImpl(UpdateNotifierLayoutKind.SNACKBAR)
-}
-
-@TestOnly
-@Composable
-private fun PreviewImpl(
-    kind: UpdateNotifierLayoutKind,
-    state: AppUpdatePresentation = TestAppUpdatePresentations.HasUpdate,
-) {
-    Box {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            repeat(10) {
-                ListItem(headlineContent = { Text("Test $it") })
+            presentation.isDownloading -> {
+                DownloadingUpdatePopupCard(
+                    version = newVersion ?: return@AniAnimatedVisibility,
+                    fileDownloaderStats = presentation.fileDownloaderStats,
+                    error = presentation.downloadError,
+                    onInstallClick = {
+                        val result = viewModel.install(context)
+                        if (result != null) {
+                            installErrorMessage = result.message ?: "未知错误"
+                        }
+                    },
+                    onCancelClick = {
+                        viewModel.cancelDownload()
+                        dismissed = true
+                    },
+                    onRetryClick = { viewModel.restartDownload(uriHandler) },
+                )
             }
         }
-
-        UpdateNotifier(
-            presentation = state,
-            onStartUpdateClick = {},
-            {},
-            {},
-            {},
-            layoutKind = kind,
-        )
     }
 }
