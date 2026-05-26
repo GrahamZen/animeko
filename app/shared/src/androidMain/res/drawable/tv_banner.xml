@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Background: matches launcher background color -->
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#2F3943" />
+        </shape>
+    </item>
+
+    <!-- App icon: circle + logo, centered vertically, offset left-of-center -->
+    <item
+            android:gravity="center"
+            android:width="120dp"
+            android:height="120dp">
+        <layer-list>
+            <!-- Outer blue ring -->
+            <item>
+                <shape android:shape="oval">
+                    <solid android:color="#7EBBED" />
+                </shape>
+            </item>
+            <!-- Inner white circle -->
+            <item>
+                <inset android:inset="12dp">
+                    <shape android:shape="oval">
+                        <solid android:color="#FFFFFF" />
+                    </shape>
+                </inset>
+            </item>
+            <!-- Foreground logo -->
+            <item android:drawable="@drawable/ic_launcher_foreground" />
+        </layer-list>
+    </item>
+
+</layer-list>
