@@ -602,7 +602,9 @@ private fun TabRow(
         Tab(
             selected = pagerState.currentPage == 1,
             onClick = { scope.launch { pagerState.animateScrollToPage(1) } },
-            modifier = Modifier.height(44.dp),
+            modifier = Modifier.height(44.dp).then(
+                if (commentTabFocusRequester != null) Modifier.focusRequester(commentTabFocusRequester) else Modifier,
+            ),
             text = {
                 val text by remember(commentCount) {
                     derivedStateOf {
@@ -614,9 +616,6 @@ private fun TabRow(
             },
             selectedContentColor = MaterialTheme.colorScheme.primary,
             unselectedContentColor = MaterialTheme.colorScheme.onSurface,
-            modifier = if (commentTabFocusRequester != null) {
-                Modifier.focusRequester(commentTabFocusRequester)
-            } else Modifier,
         )
     }
 }
