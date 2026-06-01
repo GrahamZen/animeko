@@ -45,72 +45,49 @@ https://github.com/user-attachments/assets/e63636c9-30b7-411c-aa6b-e5b78b900726
 
 ## 主要功能
 
-### 浏览来自 [Bangumi][Bangumi] 的番剧信息以及社区评价
-
-| <img src=".readme/images/features/subject-details.png" alt="" width="200"/> | <img src=".readme/images/features/subject-rating.png" alt="" width="200"/> | 
-|:---------------------------------------------------------------------------:|:--------------------------------------------------------------------------:|
-
-### 丰富的检索方式：新番时间表、标签搜索
-
-> 由 Bangumi 和 Animeko 服务端共同提供的精确新番时间表
-
-| <img src=".readme/images/features/anime-schedule.png" alt="" width="200"/> | <img src=".readme/images/features/search-by-tag.png" alt="" width="200"/> | 
-|:--------------------------------------------------------------------------:|:-------------------------------------------------------------------------:|
-
-### 云同步追番进度
-
-- 省心的追番进度管理，看完视频自动更新进度
-- 打开 APP 立即继续观看，无需回想上次看到了哪
-
-| <img src=".readme/images/features/subject-collection.png" alt="" width="200"/> | <img src=".readme/images/features/home.png" alt="" width="200"/> | 
-|:------------------------------------------------------------------------------:|:----------------------------------------------------------------:|
-
-### 聚合数据源
-
-- [聚合视频数据源](https://github.com/creamycake-anime/ani-subs)，全自动选择
-  > 还支持 BitTorrent、Jellyfin、Emby、以及自定义源
-- 聚合全网弹幕源（[弹弹play][ddplay]），以及 Animeko 自己的[弹幕服务](https://danmaku-cn.myani.org/swagger/index.html)
-
-| <img src=".readme/images/features/mediaselector-simple.png" alt="" width="200"/> | <img src=".readme/images/features/mediaselector-detailed.png" alt="" width="200"/> |
-|:--------------------------------------------------------------------------------:|:----------------------------------------------------------------------------------:|
-
-| <img src=".readme/images/features/episode.png" alt="" width="200"/> | <img src=".readme/images/features/episode-scrolled.png" alt="" width="200"/> |
-|:-------------------------------------------------------------------:|:----------------------------------------------------------------------------:|
-
-### 离线缓存
-
-- 所有数据源都能缓存
-
-| <img src=".readme/images/features/cache-episode.png" alt="" width="200"/> | <img src=".readme/images/features/cache-list.png" alt="" width="200"/> |
-|:-------------------------------------------------------------------------:|:----------------------------------------------------------------------:|
-
-### 精美界面
-
-| <img src=".readme/images/features/player-fullscreen.png" alt="" width="600"/> |
-|:-----------------------------------------------------------------------------:|
-
-- 适配平板和大屏设备
-
-| <img src=".readme/images/features/pc-home.png" alt="" width="600"/> |
-|:-------------------------------------------------------------------:|
-
-| <img src=".readme/images/features/pc-search.png" alt="" width="600"/> |
-|:---------------------------------------------------------------------:|
-
-| <img src=".readme/images/features/pc-search-detail.png" alt="" width="600"/> |
-|:----------------------------------------------------------------------------:|
-
-### 更多个性设置
-
-| <img src=".readme/images/features/danmaku-settings.png" alt="" width="600"/> |
-|:----------------------------------------------------------------------------:|
-
-| <img src=".readme/images/features/theme-settings.png" alt="" width="200"/> | <img src=".readme/images/features/media-preferences.png" alt="" width="200"/> |
-|:--------------------------------------------------------------------------:|:-----------------------------------------------------------------------------:|
+功能与上游一致：浏览 [Bangumi][Bangumi] 番剧信息与社区评价、新番时间表与标签搜索、云同步追番进度、聚合视频与弹幕数据源、离线缓存、多平台精美界面等。完整的功能介绍与应用截图请见[上游仓库 open-ani/animeko](https://github.com/open-ani/animeko#主要功能)。
 
 ## 📺 Android TV 版说明
 
-本 Fork 在上游基础上完成了大部分 Android TV 遥控器适配，并让应用图标显示在电视主屏幕（LEANBACK 启动器）上。安装后在更新 release 之后会在主页提醒，在设置里可以直接更新。
+本 Fork 在上游基础上完成了 Android TV 遥控器适配，并让应用图标显示在电视主屏幕（LEANBACK 启动器）上。安装后在更新 release 之后会在主页提醒，在设置里可以直接更新。
+
+除遥控器焦点适配外，大部分页面针对电视大屏**专门重新设计**，(测试版本，未正式发布，欢迎提issue或邮件反馈)，并且支持切换为旧版（低端机可选）：
+
+| <img src=".readme/images/features/tv-home.png" alt="TV 主页 - 热门动画介绍轮播" width="600"/> |
+|:---------------------------------------------------------------------------------------------------:|
+
+| <img src=".readme/images/features/tv-home2.png" alt="TV 主页 - 推荐" width="600"/> |
+|:---------------------------------------------------------------------------------------------------:|
+
+| <img src=".readme/images/features/tv-home3.png" alt="TV 主页 - 继续观看" width="600"/> |
+|:---------------------------------------------------------------------------------------------------:|
+
+| <img src=".readme/images/features/tv-collection.png" alt="TV 主页 - 追番" width="600"/> |
+|:---------------------------------------------------------------------------------------------------:|
+
+| <img src=".readme/images/features/tv-search.png" alt="TV 主页 - 搜索" width="600"/> |
+|:---------------------------------------------------------------------------------------------------:|
+
+| <img src=".readme/images/features/subject-details1.png" alt="TV 动画详情页" width="600"/> |
+|:--------------------------------------------------------------------------------------:|
+
+| <img src=".readme/images/features/subject-details2.png" alt="TV 动画详情页 - 选集轮播" width="600"/> |
+|:---------------------------------------------------------------------------------------------------:|
+
+| <img src=".readme/images/features/subject-details3.png" alt="TV 动画详情页 - 作品信息" width="600"/> |
+|:---------------------------------------------------------------------------------------------------:|
+
+还提供两项电视系统级功能：
+
+- **主屏预览频道**：电视主屏幕显示"热门动画"频道和"继续观看"行，点击卡片直达详情页（首次启动时按系统提示允许添加频道）。
+
+| <img src=".readme/images/features/tv_preview_channels.png" alt="TV 主屏预览频道" width="600"/> |
+|:----------------------------------------------------------------------------------------------:|
+
+- **屏保**：轮播在看与热门动画的横版剧照，按确定键直达该动画详情页，左右键切换（需在系统设置 → 屏保中选择 Animeko）。
+
+| <img src=".readme/images/features/tv_screen_saver.png" alt="TV 屏保" width="600"/> |
+|:------------------------------------------------------------------------------------:|
 
 ### 下载
 
@@ -119,6 +96,8 @@ https://github.com/user-attachments/assets/e63636c9-30b7-411c-aa6b-e5b78b900726
 | Android / 电视 | [前往 Releases 下载最新版 APK](https://github.com/GrahamZen/animeko/releases/latest)（推荐 `universal` 版本） |
 
 > 不确定架构时请直接下载 `universal` 版本。该 APK 同时适用于手机、平板和电视盒子。
+
+> 也可前往专门的下载分发仓库 [**GrahamZen/animeko-tv-releases**](https://github.com/GrahamZen/animeko-tv-releases/releases/latest)（每日自动镜像本仓库 Release）。
 
 ### ⚠️ 系统版本要求
 
@@ -138,6 +117,8 @@ https://github.com/user-attachments/assets/e63636c9-30b7-411c-aa6b-e5b78b900726
 - 确认键唤出播放器组件，再按确认键将焦点移到弹幕设置按钮
 
 以上功能在焦点位于"播放器任意按钮的上一级"时生效；焦点在播放器中任意按钮时，按返回键回到上一级。
+
+设置 → 数据源管理支持纯遥控器排序：在数据源条目上**长按确认键**聚焦右侧菜单按钮，**再次长按**进入排序模式，此时确认键选中 / 放下条目，上下键移动选中的条目，返回键退出。
 
 > 最开始的登录部分如果焦点丢失，请接入鼠标完成登录，之后即可继续使用遥控器。
 
