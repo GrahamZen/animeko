@@ -50,6 +50,7 @@ import me.him188.ani.app.navigation.getText
 import me.him188.ani.app.platform.currentAniBuildConfig
 import me.him188.ani.app.ui.foundation.LocalPlatform
 import me.him188.ani.app.ui.foundation.SteppedSlider
+import me.him188.ani.app.ui.foundation.isTv
 import me.him188.ani.app.ui.foundation.animation.AniAnimatedVisibility
 import me.him188.ani.app.ui.foundation.quantizeSliderValue
 import me.him188.ani.app.ui.lang.Lang
@@ -145,7 +146,7 @@ import me.him188.ani.app.ui.settings.tabs.theme.ThemeGroup
 import me.him188.ani.app.ui.update.AppUpdateState
 import me.him188.ani.app.ui.update.AppUpdateViewModel
 import me.him188.ani.app.ui.update.NewVersion
-import me.him188.ani.app.ui.update.UpdateNotifier
+import me.him188.ani.app.ui.update.UpdateSettingsNotifier
 import me.him188.ani.utils.platform.annotations.TestOnly
 import me.him188.ani.utils.platform.isAndroid
 import me.him188.ani.utils.platform.isDesktop
@@ -443,7 +444,7 @@ fun SettingsScope.SoftwareUpdateGroup(
             },
         )
         Box(Modifier.fillMaxWidth()) {
-            UpdateNotifier(autoUpdate)
+            UpdateSettingsNotifier(autoUpdate)
         }
     }
 }
@@ -457,25 +458,28 @@ fun SettingsScope.PlayerGroup(
 ) {
     Group(title = { Text(stringResource(Lang.settings_player)) }) {
         val config by videoScaffoldConfig
-        DropdownItem(
-            selected = { config.fullscreenSwitchMode },
-            values = { FullscreenSwitchMode.entries },
-            itemText = {
-                Text(
-                    when (it) {
-                        FullscreenSwitchMode.ALWAYS_SHOW_FLOATING -> stringResource(Lang.settings_player_fullscreen_always_show)
-                        FullscreenSwitchMode.AUTO_HIDE_FLOATING -> stringResource(Lang.settings_player_fullscreen_auto_hide)
-                        FullscreenSwitchMode.ONLY_IN_CONTROLLER -> stringResource(Lang.settings_player_fullscreen_only_in_controller)
-                    },
-                )
-            },
-            onSelect = {
-                videoScaffoldConfig.update(config.copy(fullscreenSwitchMode = it))
-            },
-            title = { Text(stringResource(Lang.settings_player_fullscreen_button)) },
-            description = { Text(stringResource(Lang.settings_player_fullscreen_button_description)) },
-        )
-        HorizontalDividerItem()
+        // TV 播放恒为全屏, 没有窗口/全屏切换, 该"全屏按钮"设置无意义, 隐藏
+        if (!LocalPlatform.current.isTv()) {
+            DropdownItem(
+                selected = { config.fullscreenSwitchMode },
+                values = { FullscreenSwitchMode.entries },
+                itemText = {
+                    Text(
+                        when (it) {
+                            FullscreenSwitchMode.ALWAYS_SHOW_FLOATING -> stringResource(Lang.settings_player_fullscreen_always_show)
+                            FullscreenSwitchMode.AUTO_HIDE_FLOATING -> stringResource(Lang.settings_player_fullscreen_auto_hide)
+                            FullscreenSwitchMode.ONLY_IN_CONTROLLER -> stringResource(Lang.settings_player_fullscreen_only_in_controller)
+                        },
+                    )
+                },
+                onSelect = {
+                    videoScaffoldConfig.update(config.copy(fullscreenSwitchMode = it))
+                },
+                title = { Text(stringResource(Lang.settings_player_fullscreen_button)) },
+                description = { Text(stringResource(Lang.settings_player_fullscreen_button_description)) },
+            )
+            HorizontalDividerItem()
+        }
         SwitchItem(
             danmakuFilterConfig.value.enableRegexFilter,
             onCheckedChange = {

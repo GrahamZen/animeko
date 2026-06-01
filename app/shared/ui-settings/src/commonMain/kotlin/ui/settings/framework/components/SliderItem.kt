@@ -23,12 +23,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import me.him188.ani.app.ui.foundation.LocalPlatform
 import me.him188.ani.app.ui.foundation.SliderValueIndicator
+import me.him188.ani.app.ui.foundation.isTv
 import me.him188.ani.app.ui.foundation.rememberHoverExitFilteredInteractionSource
 
 
@@ -41,6 +50,19 @@ fun SettingsScope.SliderItem(
     valueLabel: @Composable (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
+    val isTv = LocalPlatform.current.isTv()
+    val focusManager = LocalFocusManager.current
+    val effectiveModifier = if (isTv) {
+        modifier.onPreviewKeyEvent { keyEvent ->
+            if (keyEvent.type == KeyEventType.KeyDown) {
+                when (keyEvent.key) {
+                    Key.DirectionUp -> { focusManager.moveFocus(FocusDirection.Up); true }
+                    Key.DirectionDown -> { focusManager.moveFocus(FocusDirection.Down); true }
+                    else -> false
+                }
+            } else false
+        }
+    } else modifier
     Item(
         headlineContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -57,7 +79,7 @@ fun SettingsScope.SliderItem(
                 }
             }
         },
-        modifier = modifier,
+        modifier = effectiveModifier,
         supportingContent = {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 description?.invoke()

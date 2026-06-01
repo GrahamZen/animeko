@@ -78,10 +78,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -107,6 +115,7 @@ import me.him188.ani.app.navigation.LocalNavigator
 import me.him188.ani.app.ui.adaptive.AniTopAppBar
 import me.him188.ani.app.ui.adaptive.AniTopAppBarDefaults
 import me.him188.ani.app.ui.foundation.LocalPlatform
+import me.him188.ani.app.ui.foundation.isTv
 import me.him188.ani.app.ui.foundation.ifThen
 import me.him188.ani.app.ui.foundation.layout.AniWindowInsets
 import me.him188.ani.app.ui.foundation.layout.currentWindowAdaptiveInfo1
@@ -115,6 +124,7 @@ import me.him188.ani.app.ui.foundation.layout.isWidthAtLeastMedium
 import me.him188.ani.app.ui.foundation.layout.paneHorizontalPadding
 import me.him188.ani.app.ui.foundation.session.SelfAvatar
 import me.him188.ani.app.ui.foundation.theme.AniThemeDefaults
+import me.him188.ani.app.ui.foundation.theme.LocalThemeSettings
 import me.him188.ani.app.ui.foundation.theme.appChromeFrostedGlass
 import me.him188.ani.app.ui.foundation.theme.appChromeHazeSource
 import me.him188.ani.app.ui.foundation.theme.isAppChromeFrostedGlassActive
@@ -253,9 +263,17 @@ fun CollectionPage(
     enableAnimation: Boolean = true,
 
     ) {
+    // TV 沉浸式追番页 (与沉浸式探索页共用同一开关, 关闭则回退下方原布局)
+    if (LocalPlatform.current.isTv() && LocalThemeSettings.current.tvImmersiveExploration) {
+        TvCollectionPage(state, modifier)
+        return
+    }
     val scope = rememberCoroutineScope()
     var hideBangumiSync by rememberSaveable { mutableStateOf(false) }
     val isBangumiSyncing = fullSyncState != null && !fullSyncState.finished
+    // TV: tab 行按下键时把焦点直接请求到列表首张卡片
+    val isTv = LocalPlatform.current.isTv()
+    val firstItemFocusRequester = remember { FocusRequester() }
 
     // 如果有缓存, 列表区域要展示缓存, 错误就用图标放在角落
     CollectionPageLayout(
@@ -342,6 +360,9 @@ fun CollectionPage(
                     }
                 },
                 scrollState = state.tabRowScrollState,
+                onNavigateDown = {
+                    if (isTv) runCatching { firstItemFocusRequester.requestFocus() }.isSuccess else false
+                },
             )
         },
         isRefreshing = { state.selectedPageRefreshing || isBangumiSyncing },
@@ -391,6 +412,12 @@ fun CollectionPage(
                     enableAnimation = enableAnimation,
                     gridState = remember(pageIndex) { state.getGridState(pageIndex) },
                     contentPadding = contentPadding,
+                    // 仅当前选中页的首项挂焦点请求器 (tab 下键的落点)
+                    firstItemFocusRequester = if (isTv && pageIndex == state.selectedTypeIndex) {
+                        firstItemFocusRequester
+                    } else {
+                        null
+                    },
                 )
             }
         }
@@ -428,6 +455,8 @@ private fun CollectionPageLayout(
     }
     val frostedGlassActive = isAppChromeFrostedGlassActive()
     val appBarColors = AniThemeDefaults.topAppBarColors()
+    // TV: 头像/设置等按钮由主页左侧边栏统一承载, 顶栏里不再重复 (只保留标题 + 功能按钮 + 筛选 Tab)
+    val isTv = LocalPlatform.current.isTv()
     Scaffold(
         modifier,
         topBar = {
@@ -438,7 +467,8 @@ private fun CollectionPageLayout(
                         enabled = frostedGlassActive,
                         containerColor = appBarColors.containerColor,
                     )
-                    .ifThen(!frostedGlassActive) { background(appBarColors.containerColor) },
+                    // TV: 顶栏透明, 透出主壳统一的全屏背景 (见 MainScreen), 不画白底矩形
+                    .ifThen(!frostedGlassActive && !isTv) { background(appBarColors.containerColor) },
             ) {
                 AniTopAppBar(
                     title = { AniTopAppBarDefaults.Title(stringResource(Lang.subject_collection_page_title)) },
@@ -458,10 +488,10 @@ private fun CollectionPageLayout(
                             }
                         }
 
-                        settingsIcon()
+                        if (!isTv) settingsIcon()
                     },
-                    avatar = avatar,
-                    colors = if (frostedGlassActive) {
+                    avatar = if (isTv) ({ }) else avatar,
+                    colors = if (frostedGlassActive || isTv) {
                         appBarColors.copy(
                             containerColor = Color.Transparent,
                             scrolledContainerColor = Color.Transparent,
@@ -478,7 +508,8 @@ private fun CollectionPageLayout(
             }
         },
         contentWindowInsets = windowInsets.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
-        containerColor = AniThemeDefaults.pageContentBackgroundColor,
+        // TV: 透明, 透出主壳统一的全屏背景 (见 MainScreen); 其它平台维持原页面背景色
+        containerColor = if (isTv) Color.Transparent else AniThemeDefaults.pageContentBackgroundColor,
     ) { topBarPaddings ->
         Box(
             // 毛玻璃 app chrome 的模糊来源. 内容通过 contentPadding 延伸到 chrome 下方.
@@ -574,8 +605,14 @@ object CollectionPageFilters {
             Text(type.displayText(), softWrap = false)
         },
         scrollState: ScrollState = rememberScrollState(),
+        /** TV: 焦点在 tab 上按下键时调用, 返回 true 表示已把焦点送入下方内容 (见 CollectionPage). */
+        onNavigateDown: () -> Boolean = { false },
     ) {
         val widths = remember { mutableStateListOf(*COLLECTION_TABS_SORTED.map { 24.dp }.toTypedArray()) }
+        // TV: 焦点在 tab 上按下键时, 水平滚动的 TabRow 会把焦点困在自己内部逃不出去;
+        // 先直接请求列表首项 (方向搜索跨 Scaffold slot 不可靠), 失败再退回方向移动.
+        val isTv = LocalPlatform.current.isTv()
+        val focusManager = LocalFocusManager.current
         SecondaryScrollableTabRow(
             selectedTabIndex = selectedIndex,
             indicator = @Composable {
@@ -587,7 +624,15 @@ object CollectionPageFilters {
             containerColor = Color.Unspecified,
             contentColor = MaterialTheme.colorScheme.onSurface,
             divider = {},
-            modifier = modifier.fillMaxWidth(),
+            modifier = modifier.fillMaxWidth().ifThen(isTv) {
+                onPreviewKeyEvent { event ->
+                    if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown) {
+                        onNavigateDown() || focusManager.moveFocus(FocusDirection.Down)
+                    } else {
+                        false
+                    }
+                }
+            },
             scrollState = scrollState,
         ) {
             COLLECTION_TABS_SORTED.forEachIndexed { index, collectionType ->

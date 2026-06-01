@@ -62,8 +62,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.materialkolor.ktx.blend
 import kotlinx.coroutines.launch
 import me.him188.ani.app.navigation.LocalNavigator
+import me.him188.ani.app.ui.foundation.LocalPlatform
 import me.him188.ani.app.ui.foundation.ProvideCompositionLocalsForPreview
 import me.him188.ani.app.ui.foundation.ifThen
+import me.him188.ani.app.ui.foundation.isTv
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.cache_details_source_online
 import me.him188.ani.app.ui.lang.media_source_results_captcha_required
@@ -143,15 +145,14 @@ fun MediaSourceResultsView(
     Column(modifier) {
         var isShowDetails by rememberSaveable { mutableStateOf(false) }
         Row(
-            Modifier.clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-            ) { isShowDetails = !isShowDetails },
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 dataSourcesCountText,
-                Modifier.weight(1f),
+                Modifier.weight(1f).clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { isShowDetails = !isShowDetails },
                 style = MaterialTheme.typography.titleMedium,
             )
 
@@ -260,7 +261,25 @@ private fun MediaSourceResultsRow(
             }
         }
 
-        if (expanded) {
+        if (LocalPlatform.current.isTv()) {
+            // TV: 胶囊按钮 (图标+名称+状态, 聚焦描边), InputChip 的聚焦指示在遥控器上看不清;
+            // 不展开成卡片网格 (展开态为触屏浏览设计)
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = modifier,
+            ) {
+                items(list, key = { "MediaSourceResultsRow-${it.instanceId}" }) { item ->
+                    TvMediaSourceResultChip(
+                        sourceSelected(item.mediaSourceId),
+                        { onClick(item) },
+                        item,
+                        Modifier.ifThen(item.isDisabled) {
+                            alpha(1 - 0.618f)
+                        },
+                    )
+                }
+            }
+        } else if (expanded) {
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),

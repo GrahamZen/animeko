@@ -46,6 +46,8 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import me.him188.ani.app.ui.foundation.LocalPlatform
+import me.him188.ani.app.ui.foundation.isTv
 import me.him188.ani.app.ui.foundation.layout.currentWindowAdaptiveInfo1
 import me.him188.ani.app.ui.foundation.layout.isWidthCompact
 import me.him188.ani.app.ui.foundation.theme.EasingDurations
@@ -304,9 +306,13 @@ fun ProvideAniMotionCompositionLocals(
             windowSizeClass.isWidthCompact // reduce recompositions
         }
     }
-    val navigationMotionScheme by remember {
+    // TV: 页面切换用柔和 crossfade (退场线性淡出), 默认方案的 emphasizedAccelerate
+    // 淡出在全屏切换时观感像"突然变白"
+    val isTv = LocalPlatform.current.isTv()
+    val navigationMotionScheme by remember(isTv) {
         derivedStateOf {
-            NavigationMotionScheme.calculate(useSlide = isWidthCompact)
+            if (isTv) NavigationMotionScheme.calculateTv()
+            else NavigationMotionScheme.calculate(useSlide = isWidthCompact)
         }
     }
     val aniMotionScheme by remember {

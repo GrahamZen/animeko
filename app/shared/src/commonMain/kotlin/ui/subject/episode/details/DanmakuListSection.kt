@@ -250,7 +250,7 @@ fun DanmakuListContent(
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun DanmakuSourceChips(
+internal fun DanmakuSourceChips( // internal: TV 播放器弹幕列表面板复用
     sourceItems: List<DanmakuSourceItem>,
     onToggleSource: (DanmakuServiceId, Boolean) -> Unit,
     onManualMatch: (DanmakuServiceId) -> Unit,
