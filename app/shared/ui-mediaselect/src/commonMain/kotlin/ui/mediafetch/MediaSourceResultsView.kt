@@ -142,15 +142,14 @@ fun MediaSourceResultsView(
     Column(modifier) {
         var isShowDetails by rememberSaveable { mutableStateOf(false) }
         Row(
-            Modifier.clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-            ) { isShowDetails = !isShowDetails },
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 dataSourcesCountText,
-                Modifier.weight(1f),
+                Modifier.weight(1f).clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { isShowDetails = !isShowDetails },
                 style = MaterialTheme.typography.titleMedium,
             )
 

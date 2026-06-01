@@ -9,7 +9,9 @@
 
 package me.him188.ani.android.activity
 
+import android.app.UiModeManager
 import android.content.Intent
+import android.content.res.Configuration
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.SystemBarStyle
@@ -26,6 +28,7 @@ import me.him188.ani.app.navigation.AniNavigator
 import me.him188.ani.app.platform.rememberPlatformWindow
 import me.him188.ani.app.ui.exprovider.ExternalContentProviderFactory
 import me.him188.ani.app.ui.exprovider.LocalExternalContentProvider
+import me.him188.ani.app.ui.foundation.LocalIsAndroidTV
 import me.him188.ani.app.ui.foundation.layout.LocalPlatformWindow
 import me.him188.ani.app.ui.foundation.theme.SystemBarColorEffect
 import me.him188.ani.app.ui.foundation.widgets.LocalToaster
@@ -105,10 +108,16 @@ class MainActivity : AniComponentActivity() {
                     LocalToaster provides toaster,
                     LocalPlatformWindow provides rememberPlatformWindow(this),
                     LocalExternalContentProvider provides externalComponentProviderUpdated,
+                    LocalIsAndroidTV provides isUIModeTV(),
                 ) {
                     AniAppContent(aniNavigator)
                 }
             }
         }
+    }
+
+    private fun isUIModeTV(): Boolean {
+        val uiModeManager = getSystemService(UiModeManager::class.java)
+        return uiModeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
     }
 }
