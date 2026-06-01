@@ -32,6 +32,15 @@ data class EpisodeComment(
     val reactions: List<EpisodeCommentReaction> = emptyList(),
     val replies: List<EpisodeComment> = listOf(),
     val canReply: Boolean = false,
+
+    /**
+     * 被回复的那一条同层回复的 [sourceCommentId]. 直接回复主楼, 或数据源不提供时为 `null`.
+     *
+     * 电视上的完整评论弹窗用它显示"回复 @某人". 目前没有数据源填它: Bangumi 的 `relatedID` 原先
+     * 由客户端直连 next.bgm.tv 时拿得到, 服务端合并后的 `listEpisodeComments` 不带这个关系
+     * (见 `AniEpisodeComment`), 于是那一行不显示. 服务端补上之后在映射处填这里即可.
+     */
+    val replyToCommentId: String? = null,
 )
 
 data class EpisodeCommentReaction(
