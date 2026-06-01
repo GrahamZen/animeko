@@ -509,6 +509,13 @@
     <string name="exploration_schedule_next_weekday">下周%1$s</string>
     <string name="exploration_continue_watching">继续观看</string>
     <string name="exploration_recommendations">推荐</string>
+    <string name="exploration_tv_watch_now">立即观看</string>
+    <string name="exploration_tv_more_details">更多详细内容</string>
+    <string name="exploration_tv_air_date">%1$d年%2$d月</string>
+    <string name="exploration_tv_next_episode">下一集: %1$s</string>
+    <string name="exploration_tv_minutes_left">剩余 %1$d 分钟</string>
+    <string name="exploration_tv_all_caught_up">已看完</string>
+    <string name="exploration_tv_watched_latest">已看完最新一集</string>
     <string name="exploration_horizontal_scroll_tip">按住 Shift + 鼠标滚轮 同样可以水平滚动</string>
 
     <!-- MainScreenPage -->
@@ -530,6 +537,10 @@
     <string name="settings_theme_animated_gradient_subject_description">根据封面生成动态渐变背景。开启后可能导致设备发热和耗电增加</string>
     <string name="settings_theme_frosted_glass">顶栏和导航栏毛玻璃效果</string>
     <string name="settings_theme_frosted_glass_description">为顶栏和导航栏使用模糊的半透明背景</string>
+    <string name="settings_theme_tv_immersive_exploration">沉浸式探索页</string>
+    <string name="settings_theme_tv_immersive_exploration_description">使用沉浸布局。关闭则回退到原布局，降低低端设备的渲染负担</string>
+    <string name="settings_theme_tv_immersive_details">沉浸式详情页</string>
+    <string name="settings_theme_tv_immersive_details_description">条目详情使用沉浸式 Hero 布局。关闭则回退到通用多栏布局</string>
     <string name="settings_theme_palette">调色板</string>
     <string name="settings_theme_mode_light">浅色</string>
     <string name="settings_theme_mode_dark">深色</string>
@@ -797,6 +808,7 @@
     <string name="subject_rendering_season_year_month">%1$s 年 %2$s 月</string>
 
     <!-- Subject Episode -->
+    <string name="subject_episode_duration_minutes">%1$d 分钟</string>
     <string name="subject_episode_unwatch">取消看过</string>
     <string name="subject_episode_watched">已看过</string>
     <string name="subject_episode_dropped">已抛弃</string>
@@ -953,6 +965,8 @@
     <string name="subject_details_show_more">显示更多</string>
     <string name="subject_details_view_all">查看全部</string>
     <string name="subject_details_episodes">选集</string>
+    <string name="subject_details_nav_home">主页</string>
+    <string name="subject_details_no_summary">暂无信息</string>
     <string name="subject_details_rating">评分</string>
     <string name="subject_details_hot_reviews">热门评价</string>
     <string name="subject_details_info">作品信息</string>

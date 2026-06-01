@@ -34,14 +34,18 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -50,6 +54,8 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.paging.compose.collectAsLazyPagingItems
 import me.him188.ani.app.navigation.LocalNavigator
+import me.him188.ani.app.ui.foundation.LocalPlatform
+import me.him188.ani.app.ui.foundation.isTv
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.person_details_open_full_page
 import org.jetbrains.compose.resources.stringResource
@@ -211,6 +217,15 @@ private fun PreviewSheetHeader(
     onOpenFullPage: () -> Unit,
     onDismissRequest: () -> Unit,
 ) {
+    // TV: Dialog 打开时焦点不会自动进入, 遥控器会卡在弹窗外; 初始聚焦到关闭按钮
+    val closeFocus = remember { FocusRequester() }
+    val isTv = LocalPlatform.current.isTv()
+    if (isTv) {
+        LaunchedEffect(Unit) {
+            withFrameNanos { }
+            runCatching { closeFocus.requestFocus() }
+        }
+    }
     Row(
         Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp, top = 12.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -228,7 +243,7 @@ private fun PreviewSheetHeader(
                 contentDescription = stringResource(Lang.person_details_open_full_page),
             )
         }
-        IconButton(onDismissRequest) {
+        IconButton(onDismissRequest, Modifier.focusRequester(closeFocus)) {
             Icon(Icons.Rounded.Close, contentDescription = null)
         }
     }

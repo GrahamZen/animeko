@@ -39,9 +39,11 @@ import me.him188.ani.app.domain.media.cache.MediaCache
 import me.him188.ani.app.domain.media.cache.MediaCacheManager
 import me.him188.ani.app.domain.media.fetch.MediaSourceManager
 import me.him188.ani.app.ui.foundation.AbstractViewModel
+import me.him188.ani.app.ui.foundation.LocalPlatform
 import me.him188.ani.app.ui.foundation.animation.AniAnimatedVisibility
 import me.him188.ani.app.ui.foundation.animation.LocalAniMotionScheme
 import me.him188.ani.app.ui.foundation.interaction.WindowDragArea
+import me.him188.ani.app.ui.foundation.isTv
 import me.him188.ani.app.ui.foundation.theme.AniThemeDefaults
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.cache_details_title
@@ -124,13 +126,16 @@ fun MediaCacheDetailsScreen(
     Scaffold(
         modifier = modifier,
         topBar = {
-            WindowDragArea {
-                TopAppBar(
-                    title = { Text(stringResource(Lang.cache_details_title)) },
-                    navigationIcon = navigationIcon,
-                    colors = AniThemeDefaults.topAppBarColors(),
-                    windowInsets = windowInsets.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Top),
-                )
+            // TV: 返回按钮已移除, 顶栏只剩标题占位, 整条不渲染
+            if (!LocalPlatform.current.isTv()) {
+                WindowDragArea {
+                    TopAppBar(
+                        title = { Text(stringResource(Lang.cache_details_title)) },
+                        navigationIcon = navigationIcon,
+                        colors = AniThemeDefaults.topAppBarColors(),
+                        windowInsets = windowInsets.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Top),
+                    )
+                }
             }
         },
         contentWindowInsets = windowInsets.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),

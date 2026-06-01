@@ -33,6 +33,10 @@ data class ThemeSettings(
     val seedColorValue: ULong = DefaultSeedColor.value,
     val enableAnimatedGradientSubjectPage: Boolean = false,
     val enableFrostedGlassEffect: Boolean = false,
+    /** TV: 探索页使用沉浸式布局 (Hero 轮播); 关闭则回退上游原布局 (低端机可关以降低开销). */
+    val tvImmersiveExploration: Boolean = true,
+    /** TV: 条目详情页使用沉浸式布局 (Hero 首屏); 关闭则回退上游通用多栏布局. */
+    val tvImmersiveDetails: Boolean = true,
     @Suppress("PropertyName") @Transient val _placeholder: Int = 0,
 ) {
     @Transient

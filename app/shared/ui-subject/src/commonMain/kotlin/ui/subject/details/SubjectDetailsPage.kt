@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2024-2026 OpenAni and contributors.
+ * Copyright (C) 2024-2025 OpenAni and contributors.
  *
  * 此源代码的使用受 GNU AFFERO GENERAL PUBLIC LICENSE version 3 许可证的约束, 可以在以下链接找到该许可证.
  * Use of this source code is governed by the GNU AGPLv3 license, which can be found at the following link.
@@ -24,12 +24,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -44,6 +44,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.rounded.AddComment
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
@@ -81,7 +82,6 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImagePainter
@@ -95,14 +95,13 @@ import me.him188.ani.app.data.models.subject.SubjectCollectionStats
 import me.him188.ani.app.data.models.subject.SubjectInfo
 import me.him188.ani.app.data.models.subject.SubjectProgressInfo
 import me.him188.ani.app.data.models.subject.Tag
-import me.him188.ani.app.data.models.subject.TestSubjectInfo
 import me.him188.ani.app.domain.episode.SetEpisodeCollectionTypeRequest
 import me.him188.ani.app.domain.foundation.LoadError
 import me.him188.ani.app.navigation.LocalNavigator
 import me.him188.ani.app.ui.external.placeholder.placeholder
 import me.him188.ani.app.ui.foundation.ImageViewer
 import me.him188.ani.app.ui.foundation.LocalPlatform
-import me.him188.ani.app.ui.foundation.ProvideCompositionLocalsForPreview
+import me.him188.ani.app.ui.foundation.isTv
 import me.him188.ani.app.ui.foundation.Tag
 import me.him188.ani.app.ui.foundation.animation.AniAnimatedVisibility
 import me.him188.ani.app.ui.foundation.ifThen
@@ -160,18 +159,24 @@ import me.him188.ani.app.ui.subject.details.components.SubjectDetailsHeader
 import me.him188.ani.app.ui.subject.details.layout.CompactDetailsTabContent
 import me.him188.ani.app.ui.subject.details.layout.SubjectDetailsLayoutParams
 import me.him188.ani.app.ui.subject.details.layout.SubjectDetailsMultiColumnPage
+import me.him188.ani.app.ui.subject.details.layout.SubjectDetailsTvPage
 import me.him188.ani.app.ui.subject.person.PeoplePreviewHost
 import me.him188.ani.app.ui.subject.details.layout.SubjectDetailsMultiColumnPlaceholder
 import me.him188.ani.app.ui.subject.details.sections.SubjectCommentsSheet
 import me.him188.ani.app.ui.subject.details.state.SubjectDetailsState
-import me.him188.ani.app.ui.subject.details.state.createTestSubjectDetailsState
 import me.him188.ani.app.ui.subject.episode.list.EpisodeListDialog
 import me.him188.ani.app.ui.user.SelfInfoUiState
-import me.him188.ani.app.ui.user.TestSelfInfoUiState
 import me.him188.ani.datasources.api.PackedDate
 import me.him188.ani.datasources.api.topic.toggleCollected
-import me.him188.ani.utils.platform.annotations.TestOnly
 import me.him188.ani.utils.platform.isMobile
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.tooling.preview.Preview
+import me.him188.ani.app.data.models.subject.TestSubjectInfo
+import me.him188.ani.app.ui.foundation.LocalTvDetailsFocusRequester
+import me.him188.ani.app.ui.foundation.ProvideCompositionLocalsForPreview
+import me.him188.ani.app.ui.subject.details.state.createTestSubjectDetailsState
+import me.him188.ani.app.ui.user.TestSelfInfoUiState
+import me.him188.ani.utils.platform.annotations.TestOnly
 import org.jetbrains.compose.resources.stringResource
 
 // region screen
@@ -194,7 +199,10 @@ fun SubjectDetailsScreen(
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
-        vm.reload()
+        // 不能用 reload(): 从播放页返回等重新进入组合的场景会重复执行本 effect,
+        // reload() 的 clear() 会取消当前 state 的 scope, 而 load() 的"已加载"守卫又会跳过
+        // 重新加载, UI 便停留在僵尸状态上 (收藏/评分等操作静默失效).
+        vm.load()
     }
 
     SubjectDetailsScreen(
@@ -241,7 +249,7 @@ fun SubjectDetailsScreen(
     // 断点必须按本页面实际可用宽度决定, 不能按窗口宽度:
     // 本页面会内嵌于播放页 ModalBottomSheet (最大 640dp) 与搜索页 list-detail 详情栏.
     BoxWithConstraints(modifier) {
-        val layoutParams = SubjectDetailsLayoutParams.calculate(maxWidth)
+        val layoutParams = SubjectDetailsLayoutParams.calculate(maxWidth, isTv = LocalPlatform.current.isTv())
         when (state) {
             null, is SubjectDetailsUIState.Placeholder -> PlaceholderSubjectDetailsPage(
                 state?.subjectInfo,
@@ -364,7 +372,13 @@ private fun SubjectDetailsPage(
             )
         }
 
-        if (layoutParams.isMultiColumn && state.info != null) {
+        // TV 不看 info 是否加载完, 始终走 TV 布局 (页内自带加载占位) ——
+        // 否则加载的一瞬会先闪一下单栏旧布局再切换.
+        // 沉浸式 TV 详情页始终走 TV 布局 (不等 info, 避免闪一下旧布局); 关闭沉浸式时按桌面规则等 info 加载.
+        // 开关运行时由设置项控制 (界面设置 → TV 沉浸式详情页), 默认开.
+        val isTv = LocalPlatform.current.isTv()
+        val useTvImmersive = isTv && themeSettings.tvImmersiveDetails
+        if (layoutParams.isMultiColumn && (state.info != null || useTvImmersive)) {
             // 双栏 / 三栏: 全新自适应布局 (复用现有 SubjectDetailsState 数据).
             // 桌面无"评价" tab, 完整评论流与"写评价"从评价预览/热门评价卡进入.
             var showComments by rememberSaveable { mutableStateOf(false) }
@@ -380,22 +394,43 @@ private fun SubjectDetailsPage(
             }
             // 中大屏点击人物/角色先打开右侧预览 (方案C), 手机上则直接导航到全页
             PeoplePreviewHost {
-                SubjectDetailsMultiColumnPage(
-                    state = state,
-                    selfInfo = selfInfo,
-                    layoutParams = layoutParams,
-                    onPlay = onPlay,
-                    onClickTag = onClickTag,
-                    onClickLogin = onClickLogin,
-                    onShowComments = { showComments = true },
-                    modifier = modifier,
-                    showTopBar = showTopBar,
-                    windowInsets = windowInsets,
-                    backgroundPalette = if (themeSettings.enableAnimatedGradientSubjectPage) paletteState.palette else null,
-                    navigationIcon = navigationIcon,
-                    onClickOpenExternal = onClickOpenExternal,
-                    onCoverImageSuccess = onCoverImageSuccess,
-                )
+                if (useTvImmersive) {
+                    // TV: 单列信息流 (Hero 首屏 + 横向区块), 见 SubjectDetailsTvPage
+                    SubjectDetailsTvPage(
+                        state = state,
+                        selfInfo = selfInfo,
+                        layoutParams = layoutParams,
+                        onPlay = onPlay,
+                        onClickTag = onClickTag,
+                        onClickLogin = onClickLogin,
+                        onShowComments = { showComments = true },
+                        modifier = modifier,
+                        showTopBar = showTopBar,
+                        windowInsets = windowInsets,
+                        backgroundPalette = if (themeSettings.enableAnimatedGradientSubjectPage) paletteState.palette else null,
+                        onClickOpenExternal = onClickOpenExternal,
+                        onCoverImageSuccess = onCoverImageSuccess,
+                        onEpisodeCollectionUpdate = onEpisodeCollectionUpdate,
+                        onClickCache = { navigator.navigateSubjectCaches(presentation.subjectId) },
+                    )
+                } else {
+                    SubjectDetailsMultiColumnPage(
+                        state = state,
+                        selfInfo = selfInfo,
+                        layoutParams = layoutParams,
+                        onPlay = onPlay,
+                        onClickTag = onClickTag,
+                        onClickLogin = onClickLogin,
+                        onShowComments = { showComments = true },
+                        modifier = modifier,
+                        showTopBar = showTopBar,
+                        windowInsets = windowInsets,
+                        backgroundPalette = if (themeSettings.enableAnimatedGradientSubjectPage) paletteState.palette else null,
+                        navigationIcon = navigationIcon,
+                        onClickOpenExternal = onClickOpenExternal,
+                        onCoverImageSuccess = onCoverImageSuccess,
+                    )
+                }
             }
             return@MaterialThemeFromPaletteAndImage
         }
@@ -429,10 +464,14 @@ private fun SubjectDetailsPage(
                 EditableRating(state.editableRatingState)
             },
             selectEpisodeButton = {
+                val tvDetailsFocusRequester = LocalTvDetailsFocusRequester.current
                 SubjectDetailsDefaults.SelectEpisodeButtons(
                     state.subjectProgressState,
                     onShowEpisodeList = { showSelectEpisode = true },
                     onPlay = onPlay,
+                    modifier = Modifier.ifThen(tvDetailsFocusRequester != null) {
+                        focusRequester(tvDetailsFocusRequester!!)
+                    },
                 )
             },
             modifier = modifier,
@@ -529,6 +568,15 @@ private fun PlaceholderSubjectDetailsPage(
     navigationIcon: @Composable () -> Unit = {},
     onClickOpenExternal: () -> Unit = {},
 ) {
+    if (LocalPlatform.current.isTv() && LocalThemeSettings.current.tvImmersiveDetails) {
+        // 沉浸式 TV: 与 SubjectDetailsTvPage 的 info 加载占位一致 (居中转圈), 避免先闪
+        // 多栏骨架再整页切换到 TV 布局. 关闭沉浸式时走下方通用多栏骨架.
+        Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+        return
+    }
+
     if (layoutParams.isMultiColumn) {
         // 与加载完成后的多栏布局几何对齐, 避免跳变.
         SubjectDetailsMultiColumnPlaceholder(
