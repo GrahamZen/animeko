@@ -19,6 +19,7 @@ import androidx.compose.runtime.getValue
 import androidx.paging.PagingData
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flowOf
 import me.him188.ani.app.data.models.subject.RelatedCharacterInfo
 import me.him188.ani.app.data.models.subject.RelatedPersonInfo
 import me.him188.ani.app.data.models.subject.RelatedSubjectInfo
@@ -54,6 +55,14 @@ class SubjectDetailsState(
     val subjectProgressState: SubjectProgressState,
     val subjectCommentState: CommentState,
     val presentation: StateFlow<SubjectDetailsPresentation>, // default to placeholder
+    /** TMDB 横版背景图 URL (TV 详情页 Hero 用); null = 加载中或不可用. 惰性: 无收集者时不发请求. */
+    val tmdbBackdropUrlFlow: Flow<String?> = flowOf(null),
+    /** TMDB 分集缩略图 (episodeId -> URL, TV 选集卡片用); 空 = 加载中或不可用. 惰性: 无收集者时不发请求. */
+    val tmdbEpisodeStillsFlow: Flow<Map<Int, String>> = flowOf(emptyMap()),
+    /** TMDB 分集时长 (episodeId -> 分钟, TV 选集信息行用); Bangumi 侧无此数据. 惰性同上. */
+    val tmdbEpisodeRuntimesFlow: Flow<Map<Int, Int>> = flowOf(emptyMap()),
+    /** 各集播放进度 (episodeId -> 0..1 观看比例, TV 选集卡片进度条用); 无记录的集不含在内. */
+    val playProgressFlow: Flow<Map<Int, Float>> = flowOf(emptyMap()),
 ) {
     private val selfCollectionTypeOrNull by selfCollectionTypeState
     val selfCollectionType by derivedStateOf { selfCollectionTypeOrNull }

@@ -71,6 +71,7 @@ import me.him188.ani.app.ui.foundation.theme.LocalAppChromeHazeState
 import me.him188.ani.app.ui.foundation.theme.appChromeFrostedGlass
 import me.him188.ani.app.ui.foundation.theme.appChromeHazeSource
 import me.him188.ani.app.ui.foundation.theme.isAppChromeFrostedGlassActive
+import me.him188.ani.app.ui.foundation.widgets.LocalTvBackButtonInitialFocus
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.person_details_basic_info
 import me.him188.ani.app.ui.lang.person_details_casts
@@ -220,24 +221,28 @@ private fun PeopleDetailsScaffold(
                         colors = AniThemeDefaults.topAppBarColors().copy(containerColor = Color.Transparent),
                         windowInsets = topAppBarWindowInsets,
                     )
-                    // 有背景和标题的, 仅在页内标题滚出后显示
+                    // 有背景和标题的, 仅在页内标题滚出后显示.
+                    // TV: 此栏随滚动反复出现, 每次都会重新组合返回按钮; 必须禁用其初始抢焦点,
+                    // 否则向下导航时焦点被抢到左上角, 画面来回跳 (同条目详情页的修复).
                     AniAnimatedVisibility(stickyTopBarVisible && topBarTitle.isNotBlank()) {
-                        TopAppBar(
-                            title = {
-                                Text(topBarTitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            },
-                            modifier = Modifier.appChromeFrostedGlass(
-                                enabled = frostedGlassActive,
-                                containerColor = stickyTopBarColor,
-                            ),
-                            navigationIcon = navigationIcon,
-                            colors = if (frostedGlassActive) {
-                                AniThemeDefaults.topAppBarColors().copy(containerColor = Color.Transparent)
-                            } else {
-                                AniThemeDefaults.topAppBarColors(containerColor = stickyTopBarColor)
-                            },
-                            windowInsets = topAppBarWindowInsets,
-                        )
+                        CompositionLocalProvider(LocalTvBackButtonInitialFocus provides false) {
+                            TopAppBar(
+                                title = {
+                                    Text(topBarTitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                },
+                                modifier = Modifier.appChromeFrostedGlass(
+                                    enabled = frostedGlassActive,
+                                    containerColor = stickyTopBarColor,
+                                ),
+                                navigationIcon = navigationIcon,
+                                colors = if (frostedGlassActive) {
+                                    AniThemeDefaults.topAppBarColors().copy(containerColor = Color.Transparent)
+                                } else {
+                                    AniThemeDefaults.topAppBarColors(containerColor = stickyTopBarColor)
+                                },
+                                windowInsets = topAppBarWindowInsets,
+                            )
+                        }
                     }
                 }
             },

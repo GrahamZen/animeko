@@ -98,6 +98,7 @@ import me.him188.ani.app.navigation.SubjectDetailPlaceholder
 import me.him188.ani.app.platform.LocalContext
 import me.him188.ani.app.platform.navigation.LocalBrowserNavigator
 import me.him188.ani.app.ui.foundation.ProvideCompositionLocalsForPreview
+import me.him188.ani.app.ui.foundation.widgets.AniBottomSheetDefaults
 import me.him188.ani.app.ui.foundation.animation.AniAnimatedVisibility
 import me.him188.ani.app.ui.foundation.animation.LocalAniMotionScheme
 import me.him188.ani.app.ui.foundation.layout.AniWindowInsets
@@ -235,6 +236,7 @@ fun EpisodeDetails(
             ModalBottomSheet(
                 { showSubjectDetails = false },
                 sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = currentWindowAdaptiveInfo1().isWidthAtLeastMedium),
+                sheetMaxWidth = AniBottomSheetDefaults.sheetMaxWidth(),
                 modifier = Modifier.desktopTitleBarPadding().statusBarsPadding(),
                 contentWindowInsets = {
                     BottomSheetDefaults.windowInsets
@@ -422,6 +424,7 @@ fun EpisodeDetails(
                     ModalBottomSheet(
                         { showMediaSelector = false },
                         sheetState = sheetState,
+                        sheetMaxWidth = AniBottomSheetDefaults.sheetMaxWidth(),
                         modifier = Modifier.desktopTitleBarPadding().statusBarsPadding(),
                         contentWindowInsets = {
                             BottomSheetDefaults.windowInsets
@@ -614,6 +617,7 @@ fun EpisodeDetails(
         ModalBottomSheet(
             { showDanmakuInfoSheet = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false),
+            sheetMaxWidth = AniBottomSheetDefaults.sheetMaxWidth(),
             modifier = Modifier.desktopTitleBarPadding().statusBarsPadding(),
             contentWindowInsets = {
                 BottomSheetDefaults.windowInsets

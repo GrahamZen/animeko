@@ -238,7 +238,7 @@ sealed class EpisodePageLoadError {
  */
 @Stable
 class EpisodeViewModel(
-    val subjectId: Int,
+    val subjectId: Int, 
     initialEpisodeId: Int,
     initialIsFullscreen: Boolean = false,
     context: Context,

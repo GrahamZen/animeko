@@ -46,6 +46,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -71,9 +72,12 @@ import me.him188.ani.app.data.models.subject.Tag
 import me.him188.ani.app.tools.ColorUtils
 import me.him188.ani.app.ui.external.placeholder.placeholder
 import me.him188.ani.app.ui.foundation.AsyncImage
+import me.him188.ani.app.ui.foundation.LocalPlatform
 import me.him188.ani.app.ui.foundation.animation.AniAnimatedVisibility
 import me.him188.ani.app.ui.foundation.text.ProvideContentColor
+import me.him188.ani.app.ui.foundation.isTv
 import me.him188.ani.app.ui.foundation.theme.AniThemeDefaults
+import me.him188.ani.app.ui.foundation.widgets.LocalTvBackButtonInitialFocus
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.rating_self_score
 import me.him188.ani.app.ui.lang.subject_details_episodes
@@ -102,6 +106,7 @@ import me.him188.ani.app.ui.subject.details.sections.SubjectInfoTable
 import me.him188.ani.app.ui.subject.details.sections.SubjectRatingSummary
 import me.him188.ani.app.ui.subject.details.sections.SubjectSummarySection
 import me.him188.ani.app.ui.subject.details.sections.SubjectTagsSection
+import me.him188.ani.app.ui.subject.details.sections.TvEpisodeCarousel
 import me.him188.ani.app.ui.subject.details.state.SubjectDetailsState
 import me.him188.ani.app.ui.subject.renderSubjectSeason
 import me.him188.ani.app.ui.user.SelfInfoUiState
@@ -198,23 +203,38 @@ internal fun SubjectDetailsMultiColumnPage(
             if (info.summary.isNotBlank()) {
                 SubjectSummarySection(info.summary)
             }
-            PagedEpisodesGrid(
-                episodes = episodes,
-                currentEpisodeId = currentEpisodeId,
-                onEpisodeClick = { onPlay(it.episodeId) },
-                header = { pager ->
-                    SectionHeader(stringResource(Lang.subject_details_episodes)) {
-                        // 分页时分页控件替代集数文案; 不足一页时恢复 (定稿 1610:1003)
-                        pager?.invoke() ?: ProvideContentColor(MaterialTheme.colorScheme.onSurfaceVariant) {
-                            AiringLabel(
-                                state.airingLabelState,
-                                style = MaterialTheme.typography.bodyMedium,
-                                progressColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+            val airingLabel: @Composable () -> Unit = {
+                ProvideContentColor(MaterialTheme.colorScheme.onSurfaceVariant) {
+                    AiringLabel(
+                        state.airingLabelState,
+                        style = MaterialTheme.typography.bodyMedium,
+                        progressColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (LocalPlatform.current.isTv()) {
+                // TV: 单行横向滚动 + 聚焦集简介, 遥控器左右导航自动滚动, 无需分页
+                TvEpisodeCarousel(
+                    episodes = episodes,
+                    currentEpisodeId = currentEpisodeId,
+                    onEpisodeClick = { onPlay(it.episodeId) },
+                    header = {
+                        SectionHeader(stringResource(Lang.subject_details_episodes)) { airingLabel() }
+                    },
+                )
+            } else {
+                PagedEpisodesGrid(
+                    episodes = episodes,
+                    currentEpisodeId = currentEpisodeId,
+                    onEpisodeClick = { onPlay(it.episodeId) },
+                    header = { pager ->
+                        SectionHeader(stringResource(Lang.subject_details_episodes)) {
+                            // 分页时分页控件替代集数文案; 不足一页时恢复 (定稿 1610:1003)
+                            pager?.invoke() ?: airingLabel()
                         }
-                    }
-                },
-            )
+                    },
+                )
+            }
             CharactersSection(exposedCharacters, allCharacters, totalCharactersCount)
             if (!layoutParams.showRail) {
                 StaffSection(
@@ -272,7 +292,7 @@ internal fun SubjectDetailsMultiColumnPage(
  * 页内标题滚过顶栏后, 顶栏按 M3 规范渐显 [topBarTitle] 并加底色 (与手机版 SubjectDetailsLayout 行为一致).
  */
 @Composable
-private fun MultiColumnScaffold(
+internal fun MultiColumnScaffold(
     layoutParams: SubjectDetailsLayoutParams,
     modifier: Modifier = Modifier,
     showTopBar: Boolean = true,
@@ -281,6 +301,10 @@ private fun MultiColumnScaffold(
     onClickOpenExternal: () -> Unit = {},
     topBarTitle: String? = null,
     scrollState: ScrollState = rememberScrollState(),
+    /** 滚过页内标题后是否渐显带底色的粘性顶栏. TV 上应关闭 (10-foot UI 无固定标题栏惯例, 且会遮挡 Hero 背景图). */
+    stickyTopBarEnabled: Boolean = true,
+    /** 覆盖顶栏右侧按钮区; null 时使用默认 (打开外部链接按钮). TV 用它给按钮加暗色底以浮于背景图上. */
+    actionsOverride: (@Composable RowScope.() -> Unit)? = null,
     backgroundOverlay: @Composable (PaddingValues) -> Unit = {},
     content: @Composable RowScope.() -> Unit,
 ) {
@@ -293,7 +317,7 @@ private fun MultiColumnScaffold(
         }
     }
     val topAppBarWindowInsets = windowInsets.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Top)
-    val topAppBarActions: @Composable RowScope.() -> Unit = {
+    val topAppBarActions: @Composable RowScope.() -> Unit = actionsOverride ?: {
         IconButton(onClickOpenExternal) {
             Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null)
         }
@@ -313,12 +337,18 @@ private fun MultiColumnScaffold(
                         windowInsets = topAppBarWindowInsets,
                     )
                     // 有背景和标题的, 仅在页内标题滚出后显示
-                    AniAnimatedVisibility(stickyTopBarVisible && topBarTitle != null) {
+                    AniAnimatedVisibility(stickyTopBarEnabled && stickyTopBarVisible && topBarTitle != null) {
                         TopAppBar(
                             title = {
                                 Text(topBarTitle ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis)
                             },
-                            navigationIcon = navigationIcon,
+                            navigationIcon = {
+                                // 粘性顶栏随滚动反复进出组合, 禁止其中的返回键在每次出现时抢焦点
+                                // (TV 上返回键默认在进入组合时请求初始焦点, 见 LocalTvBackButtonInitialFocus)
+                                CompositionLocalProvider(LocalTvBackButtonInitialFocus provides false) {
+                                    navigationIcon()
+                                }
+                            },
                             actions = topAppBarActions,
                             colors = AniThemeDefaults.topAppBarColors(
                                 containerColor = AniThemeDefaults.navigationContainerColor,
@@ -586,7 +616,7 @@ private fun EditRatingButton(editableRatingState: EditableRatingState) {
 }
 
 @Composable
-private fun SubjectRelatedBlock(related: LazyPagingItems<RelatedSubjectInfo>) {
+internal fun SubjectRelatedBlock(related: LazyPagingItems<RelatedSubjectInfo>) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         SectionHeader(stringResource(Lang.subject_details_related_subjects))
         RelatedSubjectsGrid(related, onClick = rememberNavigateToRelatedSubject())

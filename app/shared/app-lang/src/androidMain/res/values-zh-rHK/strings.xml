@@ -743,6 +743,7 @@
     <string name="subject_rendering_season_year_month">%1$s 年 %2$s 月</string>
 
     <!-- Subject Episode -->
+    <string name="subject_episode_duration_minutes">%1$d 分鐘</string>
     <string name="subject_episode_unwatch">取消看過</string>
     <string name="subject_episode_watched">已看過</string>
     <string name="subject_episode_dropped">已拋棄</string>

@@ -9,7 +9,9 @@
 
 package me.him188.ani.android.activity
 
+import android.app.UiModeManager
 import android.content.Intent
+import android.content.res.Configuration
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.SystemBarStyle
@@ -32,6 +34,7 @@ import me.him188.ani.app.navigation.AniNavigator
 import me.him188.ani.app.platform.rememberPlatformWindow
 import me.him188.ani.app.ui.exprovider.ExternalContentProviderFactory
 import me.him188.ani.app.ui.exprovider.LocalExternalContentProvider
+import me.him188.ani.app.ui.foundation.LocalIsAndroidTV
 import me.him188.ani.app.ui.foundation.layout.LocalPlatformWindow
 import me.him188.ani.app.ui.foundation.theme.SystemBarColorEffect
 import me.him188.ani.app.ui.foundation.widgets.LocalToaster
@@ -102,29 +105,37 @@ class MainActivity : AniComponentActivity() {
         val externalContentProvider = externalContentProviderFactory.create(this, lifecycleScope)
 
         setContent {
-            AniApp {
-                val externalComponentProviderUpdated by rememberUpdatedState(externalContentProvider)
+            // 提供在 AniApp 外层, 让 AniApp 根部的 TV 返回键拦截 (isTv) 能读到正确的值
+            CompositionLocalProvider(LocalIsAndroidTV provides isUIModeTV()) {
+                AniApp {
+                    val externalComponentProviderUpdated by rememberUpdatedState(externalContentProvider)
 
-                SystemBarColorEffect()
+                    SystemBarColorEffect()
 
-                CompositionLocalProvider(
-                    LocalToaster provides toaster,
-                    LocalPlatformWindow provides rememberPlatformWindow(this),
-                    LocalExternalContentProvider provides externalComponentProviderUpdated,
-                ) {
-                    // Expose Modifier.testTag as resource-id in accessibility/uiautomator dumps,
-                    // so UI-automation agents can locate elements by stable ids (debug only).
-                    @OptIn(ExperimentalComposeUiApi::class)
-                    val rootModifier = if (BuildConfig.DEBUG) {
-                        Modifier.semantics { testTagsAsResourceId = true }
-                    } else {
-                        Modifier
-                    }
-                    Box(rootModifier) {
-                        AniAppContent(aniNavigator)
+                    CompositionLocalProvider(
+                        LocalToaster provides toaster,
+                        LocalPlatformWindow provides rememberPlatformWindow(this),
+                        LocalExternalContentProvider provides externalComponentProviderUpdated,
+                    ) {
+                        // Expose Modifier.testTag as resource-id in accessibility/uiautomator dumps,
+                        // so UI-automation agents can locate elements by stable ids (debug only).
+                        @OptIn(ExperimentalComposeUiApi::class)
+                        val rootModifier = if (BuildConfig.DEBUG) {
+                            Modifier.semantics { testTagsAsResourceId = true }
+                        } else {
+                            Modifier
+                        }
+                        Box(rootModifier) {
+                            AniAppContent(aniNavigator)
+                        }
                     }
                 }
             }
         }
+    }
+
+    private fun isUIModeTV(): Boolean {
+        val uiModeManager = getSystemService(UiModeManager::class.java)
+        return uiModeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
     }
 }

@@ -728,6 +728,7 @@
     <string name="subject_rendering_season_year_month">%1$s/%2$s</string>
 
     <!-- Subject Episode -->
+    <string name="subject_episode_duration_minutes">%1$d min</string>
     <string name="subject_episode_unwatch">Unmark Watched</string>
     <string name="subject_episode_watched">Watched</string>
     <string name="subject_episode_dropped">Dropped</string>

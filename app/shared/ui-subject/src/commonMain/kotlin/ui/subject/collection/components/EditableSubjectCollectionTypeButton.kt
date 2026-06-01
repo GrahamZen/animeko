@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.TaskAlt
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -26,6 +27,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.CoroutineScope
@@ -148,6 +150,7 @@ class EditableSubjectCollectionTypeState(
 fun EditableSubjectCollectionTypeButton(
     state: EditableSubjectCollectionTypeState,
     modifier: Modifier = Modifier,
+    shape: Shape = ButtonDefaults.shape,
 ) {
     // 同时设置所有剧集为看过
     EditableSubjectCollectionTypeDialogsHost(state)
@@ -168,6 +171,7 @@ fun EditableSubjectCollectionTypeButton(
         },
         modifier = modifier.placeholder(presentation.isPlaceholder),
         enabled = !presentation.isSetSelfCollectionTypeWorking,
+        shape = shape,
     )
 }
 
