@@ -96,6 +96,7 @@ import me.him188.ani.app.ui.adaptive.ListDetailLayoutParameters
 import me.him188.ani.app.ui.adaptive.PaneScope
 import me.him188.ani.app.ui.adaptive.TopAppBarSize
 import me.him188.ani.app.ui.foundation.LocalPlatform
+import me.him188.ani.app.ui.foundation.isTv
 import me.him188.ani.app.ui.foundation.animation.LocalAniMotionScheme
 import me.him188.ani.app.ui.foundation.animation.NavigationMotionScheme
 import me.him188.ani.app.ui.foundation.ifThen
@@ -410,13 +411,18 @@ internal fun SettingsPageLayout(
     // 毛玻璃模式下顶栏覆盖在内容上方并保持常驻, 以便展示模糊效果.
     val frostedGlassActive = isAppChromeFrostedGlassActive()
 
-    val listPaneTopAppBarScrollBehavior = if (LocalPlatform.current.hasScrollingBug()) {
+    // TV: 顶栏不渲染, enterAlways 行为的 heightOffsetLimit 得不到顶栏测量更新
+    // (保持初始 -MAX_VALUE), 其 onPreScroll 会无限消耗向上滚动增量, 吃掉焦点
+    // bringIntoView 触发的滚动, 页面无法随焦点移动. 改用 pinned (不消耗滚动).
+    val isTv = LocalPlatform.current.isTv()
+    val usePinnedTopAppBar = LocalPlatform.current.hasScrollingBug() || isTv
+    val listPaneTopAppBarScrollBehavior = if (usePinnedTopAppBar) {
         TopAppBarDefaults.pinnedScrollBehavior()
     } else {
         TopAppBarDefaults.enterAlwaysScrollBehavior()
     }
 
-    val detailPaneTopAppBarScrollBehavior = if (LocalPlatform.current.hasScrollingBug()) {
+    val detailPaneTopAppBarScrollBehavior = if (usePinnedTopAppBar) {
         TopAppBarDefaults.pinnedScrollBehavior()
     } else {
         TopAppBarDefaults.enterAlwaysScrollBehavior()
@@ -463,10 +469,12 @@ internal fun SettingsPageLayout(
             size = topAppBarSize,
         )
     }
+    // TV: 返回按钮已移除, 列表侧顶栏只剩"设置"标题占位, 整条不渲染
+    val hideTopAppBarsOnTv = isTv
     AniListDetailPaneScaffold(
         navigator,
         // 毛玻璃模式下顶栏由 listPaneContent 内部覆盖绘制.
-        listPaneTopAppBar = if (frostedGlassActive) null else listPaneTopAppBar,
+        listPaneTopAppBar = if (frostedGlassActive || hideTopAppBarsOnTv) null else listPaneTopAppBar,
         listPaneContent = paneScope@{
             var listTopAppBarHeight by remember { mutableStateOf(0) }
             val drawerSheet: @Composable PaneScope.() -> Unit = {
@@ -520,8 +528,10 @@ internal fun SettingsPageLayout(
                     ) {
                         drawerSheet()
                     }
-                    Box(Modifier.onSizeChanged { listTopAppBarHeight = it.height }) {
-                        listPaneTopAppBar()
+                    if (!hideTopAppBarsOnTv) {
+                        Box(Modifier.onSizeChanged { listTopAppBarHeight = it.height }) {
+                            listPaneTopAppBar()
+                        }
                     }
                 }
             } else {
@@ -725,6 +735,9 @@ private fun PaneScope.DetailPaneRoute(
     modifier: Modifier = Modifier,
     tabContent: @Composable (PaneScope.() -> Unit),
 ) {
+    // TV: 返回按钮已移除, 详情侧顶栏只剩标题占位, 整条不渲染 (当前分类由左侧导航项高亮承担)
+    @Suppress("NAME_SHADOWING")
+    val topAppBar: @Composable () -> Unit = if (LocalPlatform.current.isTv()) ({}) else topAppBar
     if (isAppChromeFrostedGlassActive()) {
         // 毛玻璃: 顶栏覆盖在内容上方, 内容从顶栏下方滚过并被模糊.
         // 内容通过 LocalSettingsTopAppBarUnderlapHeight 在滚动内容顶部留出顶栏的空间.

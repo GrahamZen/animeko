@@ -754,6 +754,7 @@
     <string name="subject_rendering_season_year_month">%1$s/%2$s</string>
 
     <!-- Subject Episode -->
+    <string name="subject_episode_duration_minutes">%1$d min</string>
     <string name="subject_episode_unwatch">Unmark Watched</string>
     <string name="subject_episode_watched">Watched</string>
     <string name="subject_episode_dropped">Dropped</string>
@@ -907,6 +908,8 @@
     <string name="subject_details_show_more">Show more</string>
     <string name="subject_details_view_all">View all</string>
     <string name="subject_details_episodes">Episodes</string>
+    <string name="subject_details_nav_home">Home</string>
+    <string name="subject_details_no_summary">No information</string>
     <string name="subject_details_rating">Rating</string>
     <string name="subject_details_hot_reviews">Popular reviews</string>
     <string name="subject_details_info">Information</string>

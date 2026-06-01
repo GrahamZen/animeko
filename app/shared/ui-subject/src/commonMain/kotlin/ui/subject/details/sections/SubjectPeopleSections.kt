@@ -28,6 +28,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -177,12 +180,16 @@ fun CharactersSection(
 ) {
     if (exposedCharacters.itemCount == 0) return
     var showAll by rememberSaveable { mutableStateOf(false) }
+    // TV: "查看全部" 在标题行右上角, 与头像条不同行, 空间焦点搜索向右够不到;
+    // 把最右一个头像的右键显式指到该按钮 (同选集轮播的网格入口处理)
+    val viewAllFocus = remember { FocusRequester() }
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SectionHeader(
             stringResource(Lang.subject_details_characters),
             actionLabel = stringResource(Lang.subject_details_view_all),
             onAction = { showAll = true },
             modifier = Modifier.padding(contentPadding),
+            actionModifier = Modifier.focusRequester(viewAllFocus),
         )
         val onClickCharacter = rememberPeopleClickHandler()
         LazyRow(
@@ -194,6 +201,9 @@ fun CharactersSection(
                 CharacterAvatarCell(
                     item, itemWidth, avatarSize,
                     onClick = { onClickCharacter(PeoplePreviewTarget.Character(item.character.id)) },
+                    modifier = if (i == exposedCharacters.itemCount - 1) {
+                        Modifier.focusProperties { right = viewAllFocus }
+                    } else Modifier,
                 )
             }
         }
@@ -225,10 +235,11 @@ private fun CharacterAvatarCell(
     itemWidth: Dp,
     avatarSize: Dp,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val cv = remember(info) { info.character.actors.firstOrNull()?.displayName }
     Column(
-        Modifier
+        modifier
             .width(itemWidth)
             .clip(MaterialTheme.shapes.small)
             .clickable(onClick = onClick),

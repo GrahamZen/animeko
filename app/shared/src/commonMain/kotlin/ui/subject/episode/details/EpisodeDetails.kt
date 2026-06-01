@@ -74,6 +74,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -97,7 +104,11 @@ import me.him188.ani.app.navigation.LocalNavigator
 import me.him188.ani.app.navigation.SubjectDetailPlaceholder
 import me.him188.ani.app.platform.LocalContext
 import me.him188.ani.app.platform.navigation.LocalBrowserNavigator
+import me.him188.ani.app.ui.foundation.LocalPlatform
+import me.him188.ani.app.ui.foundation.ifThen
+import me.him188.ani.app.ui.foundation.isTv
 import me.him188.ani.app.ui.foundation.ProvideCompositionLocalsForPreview
+import me.him188.ani.app.ui.foundation.widgets.AniBottomSheetDefaults
 import me.him188.ani.app.ui.foundation.animation.AniAnimatedVisibility
 import me.him188.ani.app.ui.foundation.animation.LocalAniMotionScheme
 import me.him188.ani.app.ui.foundation.layout.AniWindowInsets
@@ -235,6 +246,7 @@ fun EpisodeDetails(
             ModalBottomSheet(
                 { showSubjectDetails = false },
                 sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = currentWindowAdaptiveInfo1().isWidthAtLeastMedium),
+                sheetMaxWidth = AniBottomSheetDefaults.sheetMaxWidth(),
                 modifier = Modifier.desktopTitleBarPadding().statusBarsPadding(),
                 contentWindowInsets = {
                     BottomSheetDefaults.windowInsets
@@ -422,6 +434,7 @@ fun EpisodeDetails(
                     ModalBottomSheet(
                         { showMediaSelector = false },
                         sheetState = sheetState,
+                        sheetMaxWidth = AniBottomSheetDefaults.sheetMaxWidth(),
                         modifier = Modifier.desktopTitleBarPadding().statusBarsPadding(),
                         contentWindowInsets = {
                             BottomSheetDefaults.windowInsets
@@ -614,6 +627,7 @@ fun EpisodeDetails(
         ModalBottomSheet(
             { showDanmakuInfoSheet = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false),
+            sheetMaxWidth = AniBottomSheetDefaults.sheetMaxWidth(),
             modifier = Modifier.desktopTitleBarPadding().statusBarsPadding(),
             contentWindowInsets = {
                 BottomSheetDefaults.windowInsets
@@ -722,10 +736,31 @@ private fun DanmakuTimeShiftDialog(
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text(descriptionText)
                 Text(currentOffsetText)
+                // TV: M3 Slider 自己会把方向键 (含上下) 当作调值消费, 焦点会被困在
+                // slider 上. 在 preview 阶段把上下键改成焦点移动, 左右仍归 slider 调值
+                val isTv = LocalPlatform.current.isTv()
+                val focusManager = LocalFocusManager.current
                 Slider(
                     value = shift,
                     onValueChange = { shift = it.coerceIn(sliderRange.start, sliderRange.endInclusive) },
                     valueRange = sliderRange,
+                    modifier = Modifier.ifThen(isTv) {
+                        onPreviewKeyEvent { event ->
+                            when (event.key) {
+                                Key.DirectionUp, Key.DirectionDown -> {
+                                    if (event.type == KeyEventType.KeyDown) {
+                                        focusManager.moveFocus(
+                                            if (event.key == Key.DirectionUp) FocusDirection.Up else FocusDirection.Down,
+                                        )
+                                    }
+                                    // KeyUp 也吞掉, 避免 slider 收到不成对的按键事件
+                                    true
+                                }
+
+                                else -> false
+                            }
+                        }
+                    },
                 )
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),

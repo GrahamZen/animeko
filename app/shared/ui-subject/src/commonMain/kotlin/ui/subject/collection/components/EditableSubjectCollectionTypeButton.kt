@@ -14,19 +14,27 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.TaskAlt
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.dp
+import me.him188.ani.app.ui.foundation.LocalPlatform
+import me.him188.ani.app.ui.foundation.isTv
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
@@ -148,6 +156,7 @@ class EditableSubjectCollectionTypeState(
 fun EditableSubjectCollectionTypeButton(
     state: EditableSubjectCollectionTypeState,
     modifier: Modifier = Modifier,
+    shape: Shape = ButtonDefaults.shape,
 ) {
     // 同时设置所有剧集为看过
     EditableSubjectCollectionTypeDialogsHost(state)
@@ -168,6 +177,7 @@ fun EditableSubjectCollectionTypeButton(
         },
         modifier = modifier.placeholder(presentation.isPlaceholder),
         enabled = !presentation.isSetSelfCollectionTypeWorking,
+        shape = shape,
     )
 }
 
@@ -203,12 +213,22 @@ private fun SetAllEpisodeDoneDialog(
     onConfirm: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // TV: 对话框窗口不会自动把遥控器焦点分配给按钮, 必须显式请求, 否则整个对话框无法操作
+    val confirmFocus = remember { FocusRequester() }
+    if (LocalPlatform.current.isTv()) {
+        LaunchedEffect(Unit) {
+            withFrameNanos { }
+            runCatching { confirmFocus.requestFocus() }
+        }
+    }
     AlertDialog(
         onDismissRequest = onDismissRequest,
         icon = { Icon(Icons.Rounded.TaskAlt, null) },
         text = { Text(stringResource(Lang.subject_collection_set_all_episodes_watched)) },
         confirmButton = {
-            TextButton(onConfirm) { Text(stringResource(Lang.subject_collection_set)) }
+            TextButton(onConfirm, Modifier.focusRequester(confirmFocus)) {
+                Text(stringResource(Lang.subject_collection_set))
+            }
 
             if (isWorking) {
                 CircularProgressIndicator(Modifier.padding(start = 8.dp).size(24.dp))

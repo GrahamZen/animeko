@@ -64,7 +64,9 @@ import me.him188.ani.app.data.models.subject.nameCn
 import me.him188.ani.app.ui.comment.CommentState
 import me.him188.ani.app.ui.external.placeholder.placeholder
 import me.him188.ani.app.ui.foundation.AsyncImage
+import me.him188.ani.app.ui.foundation.LocalPlatform
 import me.him188.ani.app.ui.foundation.animation.AniAnimatedVisibility
+import me.him188.ani.app.ui.foundation.isTv
 import me.him188.ani.app.ui.foundation.avatar.AvatarImage
 import me.him188.ani.app.ui.foundation.theme.AniThemeDefaults
 import me.him188.ani.app.ui.foundation.theme.LocalAppChromeHazeState
@@ -212,6 +214,8 @@ private fun PeopleDetailsScaffold(
         val frostedGlassActive = isAppChromeFrostedGlassActive()
         Scaffold(
             topBar = {
+                // TV: 返回按钮已移除, 顶栏只剩占位 (正文自带大标题块), 整块不渲染
+                if (!LocalPlatform.current.isTv()) {
                 Box {
                     // 透明背景的, 总是显示
                     TopAppBar(
@@ -220,7 +224,7 @@ private fun PeopleDetailsScaffold(
                         colors = AniThemeDefaults.topAppBarColors().copy(containerColor = Color.Transparent),
                         windowInsets = topAppBarWindowInsets,
                     )
-                    // 有背景和标题的, 仅在页内标题滚出后显示
+                    // 有背景和标题的, 仅在页内标题滚出后显示.
                     AniAnimatedVisibility(stickyTopBarVisible && topBarTitle.isNotBlank()) {
                         TopAppBar(
                             title = {
@@ -239,6 +243,7 @@ private fun PeopleDetailsScaffold(
                             windowInsets = topAppBarWindowInsets,
                         )
                     }
+                }
                 }
             },
             containerColor = backgroundColor,

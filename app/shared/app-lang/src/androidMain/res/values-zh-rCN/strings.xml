@@ -794,6 +794,7 @@
     <string name="subject_rendering_season_year_month">%1$s 年 %2$s 月</string>
 
     <!-- Subject Episode -->
+    <string name="subject_episode_duration_minutes">%1$d 分钟</string>
     <string name="subject_episode_unwatch">取消看过</string>
     <string name="subject_episode_watched">已看过</string>
     <string name="subject_episode_dropped">已抛弃</string>
@@ -947,6 +948,8 @@
     <string name="subject_details_show_more">显示更多</string>
     <string name="subject_details_view_all">查看全部</string>
     <string name="subject_details_episodes">选集</string>
+    <string name="subject_details_nav_home">主页</string>
+    <string name="subject_details_no_summary">暂无信息</string>
     <string name="subject_details_rating">评分</string>
     <string name="subject_details_hot_reviews">热门评价</string>
     <string name="subject_details_info">作品信息</string>
