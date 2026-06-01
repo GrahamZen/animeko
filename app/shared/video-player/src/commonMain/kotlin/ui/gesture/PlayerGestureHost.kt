@@ -81,6 +81,7 @@ import me.him188.ani.app.ui.foundation.LocalPlatform
 import me.him188.ani.app.ui.foundation.animation.AniAnimatedVisibility
 import me.him188.ani.app.ui.foundation.effects.onPointerEventMultiplatform
 import me.him188.ani.app.ui.foundation.ifThen
+import me.him188.ani.app.ui.foundation.isTv
 import me.him188.ani.app.ui.foundation.layout.isSystemInFullscreen
 import me.him188.ani.app.ui.lang.*
 import me.him188.ani.app.utils.fixToString
@@ -624,33 +625,42 @@ fun PlayerGestureHost(
         }
 
         @Composable
-        fun Modifier.combineClickableWithFamilyGesture() = this then
-                combinedClickable(
-                    remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = remember(family, playerFocusState) {
-                        {
-                            if (family.clickToPauseResume) {
-                                onTogglePauseResumeState()
-                            }
-                            if (family.clickToToggleController) {
-                                controllerState.toggleFullVisible()
-                            }
-                            playerFocusState.requestPlayerFocus()
-                        }
-                    },
-                    onDoubleClick = remember(family, onToggleFullscreen, playerFocusState) {
+        fun Modifier.combineClickableWithFamilyGesture(): Modifier {
+            // TV: 遥控器确认键由 clickable 处理, 连按两下确认不应触发双击暂停
+            // (手机双击屏幕暂停保留). 无双击动作时传 null, 单击不必等待双击判定超时
+            val isTv = LocalPlatform.current.isTv()
+            val doubleClickToPauseResume = family.doubleClickToPauseResume && !isTv
+            val onDoubleClick: (() -> Unit)? =
+                if (family.doubleClickToFullscreen || doubleClickToPauseResume) {
+                    remember(family, doubleClickToPauseResume, onToggleFullscreen, playerFocusState) {
                         {
                             if (family.doubleClickToFullscreen) {
                                 onToggleFullscreen()
                             }
-                            if (family.doubleClickToPauseResume) {
+                            if (doubleClickToPauseResume) {
                                 onTogglePauseResumeState()
                             }
                             playerFocusState.requestPlayerFocus()
                         }
-                    },
-                )
+                    }
+                } else null
+            return this then combinedClickable(
+                remember { MutableInteractionSource() },
+                indication = null,
+                onClick = remember(family, playerFocusState) {
+                    {
+                        if (family.clickToPauseResume) {
+                            onTogglePauseResumeState()
+                        }
+                        if (family.clickToToggleController) {
+                            controllerState.toggleFullVisible()
+                        }
+                        playerFocusState.requestPlayerFocus()
+                    }
+                },
+                onDoubleClick = onDoubleClick,
+            )
+        }
 
         val mouseMoveTasker = rememberUiMonoTasker()
         Box(

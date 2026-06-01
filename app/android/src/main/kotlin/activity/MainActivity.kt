@@ -9,7 +9,9 @@
 
 package me.him188.ani.android.activity
 
+import android.app.UiModeManager
 import android.content.Intent
+import android.content.res.Configuration
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.SystemBarStyle
@@ -25,6 +27,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.core.view.WindowCompat
 import me.him188.ani.android.BuildConfig
+import me.him188.ani.android.tv.TvHomeChannels
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -32,6 +35,7 @@ import me.him188.ani.app.navigation.AniNavigator
 import me.him188.ani.app.platform.rememberPlatformWindow
 import me.him188.ani.app.ui.exprovider.ExternalContentProviderFactory
 import me.him188.ani.app.ui.exprovider.LocalExternalContentProvider
+import me.him188.ani.app.ui.foundation.LocalIsAndroidTV
 import me.him188.ani.app.ui.foundation.layout.LocalPlatformWindow
 import me.him188.ani.app.ui.foundation.theme.SystemBarColorEffect
 import me.him188.ani.app.ui.foundation.widgets.LocalToaster
@@ -40,6 +44,7 @@ import me.him188.ani.app.ui.main.AniApp
 import me.him188.ani.app.ui.main.AniAppContent
 import me.him188.ani.utils.logging.error
 import me.him188.ani.utils.logging.logger
+import org.koin.android.ext.android.getKoin
 import org.koin.android.ext.android.inject
 
 class MainActivity : AniComponentActivity() {
@@ -77,6 +82,13 @@ class MainActivity : AniComponentActivity() {
         super.onCreate(savedInstanceState)
         handleStartIntent(intent)
 
+        // TV 主屏预览频道 (热门动画 / 继续观看), 仅 TV 生效且每进程只跑一次;
+        // 延迟到启动高峰之后, 需要 activity context 才能弹出添加频道的系统确认框
+        lifecycleScope.launch {
+            delay(10_000)
+            TvHomeChannels.updateOnce(this@MainActivity, getKoin())
+        }
+
         enableEdgeToEdge(
             // 透明状态栏
             statusBarStyle = SystemBarStyle.auto(
@@ -102,29 +114,37 @@ class MainActivity : AniComponentActivity() {
         val externalContentProvider = externalContentProviderFactory.create(this, lifecycleScope)
 
         setContent {
-            AniApp {
-                val externalComponentProviderUpdated by rememberUpdatedState(externalContentProvider)
+            // 提供在 AniApp 外层, 让 AniApp 根部的 TV 返回键拦截 (isTv) 能读到正确的值
+            CompositionLocalProvider(LocalIsAndroidTV provides isUIModeTV()) {
+                AniApp {
+                    val externalComponentProviderUpdated by rememberUpdatedState(externalContentProvider)
 
-                SystemBarColorEffect()
+                    SystemBarColorEffect()
 
-                CompositionLocalProvider(
-                    LocalToaster provides toaster,
-                    LocalPlatformWindow provides rememberPlatformWindow(this),
-                    LocalExternalContentProvider provides externalComponentProviderUpdated,
-                ) {
-                    // Expose Modifier.testTag as resource-id in accessibility/uiautomator dumps,
-                    // so UI-automation agents can locate elements by stable ids (debug only).
-                    @OptIn(ExperimentalComposeUiApi::class)
-                    val rootModifier = if (BuildConfig.DEBUG) {
-                        Modifier.semantics { testTagsAsResourceId = true }
-                    } else {
-                        Modifier
-                    }
-                    Box(rootModifier) {
-                        AniAppContent(aniNavigator)
+                    CompositionLocalProvider(
+                        LocalToaster provides toaster,
+                        LocalPlatformWindow provides rememberPlatformWindow(this),
+                        LocalExternalContentProvider provides externalComponentProviderUpdated,
+                    ) {
+                        // Expose Modifier.testTag as resource-id in accessibility/uiautomator dumps,
+                        // so UI-automation agents can locate elements by stable ids (debug only).
+                        @OptIn(ExperimentalComposeUiApi::class)
+                        val rootModifier = if (BuildConfig.DEBUG) {
+                            Modifier.semantics { testTagsAsResourceId = true }
+                        } else {
+                            Modifier
+                        }
+                        Box(rootModifier) {
+                            AniAppContent(aniNavigator)
+                        }
                     }
                 }
             }
         }
+    }
+
+    private fun isUIModeTV(): Boolean {
+        val uiModeManager = getSystemService(UiModeManager::class.java)
+        return uiModeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
     }
 }

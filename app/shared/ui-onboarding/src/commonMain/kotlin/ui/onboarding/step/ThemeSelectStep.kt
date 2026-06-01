@@ -26,7 +26,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import me.him188.ani.app.data.models.preference.DarkMode
+import me.him188.ani.app.ui.foundation.LocalPlatform
 import me.him188.ani.app.ui.foundation.ProvideCompositionLocalsForPreview
+import me.him188.ani.app.ui.foundation.isTv
 import me.him188.ani.app.ui.foundation.layout.currentWindowAdaptiveInfo1
 import me.him188.ani.app.ui.foundation.theme.AniThemeDefaults
 import me.him188.ani.app.ui.foundation.theme.isPlatformSupportDynamicTheme
@@ -46,6 +48,9 @@ internal fun ThemeSelectStep(
     onUpdateUseDarkMode: (DarkMode) -> Unit,
     onUpdateUseDynamicTheme: (Boolean) -> Unit,
     onUpdateSeedColor: (Color) -> Unit,
+    onUpdateTvImmersiveExploration: (Boolean) -> Unit,
+    onUpdateTvImmersiveDetails: (Boolean) -> Unit,
+    onUpdateTvFullTransitions: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
     layoutParams: WizardLayoutParams = WizardLayoutParams.calculate(currentWindowAdaptiveInfo1().windowSizeClass)
 ) {
@@ -97,6 +102,53 @@ internal fun ThemeSelectStep(
                 }
             }
         }
+        // TV 专属: 沉浸式布局开关 (与设置-主题里的一致, 低端设备可在初始设置就关掉)
+        if (LocalPlatform.current.isTv()) {
+            Group(
+                title = { Text(stringResource(Lang.onboarding_theme_tv_layout)) },
+                useThinHeader = true,
+            ) {
+                TextItem(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onUpdateTvImmersiveExploration(!config.tvImmersiveExploration) },
+                    title = { Text(stringResource(Lang.settings_theme_tv_immersive_exploration)) },
+                    description = { Text(stringResource(Lang.settings_theme_tv_immersive_exploration_description)) },
+                    action = {
+                        Switch(
+                            checked = config.tvImmersiveExploration,
+                            onCheckedChange = { onUpdateTvImmersiveExploration(it) },
+                        )
+                    },
+                )
+                TextItem(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onUpdateTvImmersiveDetails(!config.tvImmersiveDetails) },
+                    title = { Text(stringResource(Lang.settings_theme_tv_immersive_details)) },
+                    description = { Text(stringResource(Lang.settings_theme_tv_immersive_details_description)) },
+                    action = {
+                        Switch(
+                            checked = config.tvImmersiveDetails,
+                            onCheckedChange = { onUpdateTvImmersiveDetails(it) },
+                        )
+                    },
+                )
+                TextItem(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onUpdateTvFullTransitions(!config.tvFullTransitions) },
+                    title = { Text(stringResource(Lang.settings_theme_tv_full_transitions)) },
+                    description = { Text(stringResource(Lang.settings_theme_tv_full_transitions_description)) },
+                    action = {
+                        Switch(
+                            checked = config.tvFullTransitions,
+                            onCheckedChange = { onUpdateTvFullTransitions(it) },
+                        )
+                    },
+                )
+            }
+        }
     }
 }
 
@@ -105,6 +157,9 @@ class ThemeSelectUIState(
     val darkMode: DarkMode = DarkMode.AUTO,
     val useDynamicTheme: Boolean = false,
     val seedColor: Color = DefaultSeedColor,
+    val tvImmersiveExploration: Boolean = true,
+    val tvImmersiveDetails: Boolean = true,
+    val tvFullTransitions: Boolean = true,
 ) {
     companion object {
         @Stable
@@ -121,6 +176,9 @@ fun PreviewSelectThemeStep() {
             onUpdateUseDarkMode = { },
             onUpdateUseDynamicTheme = { },
             onUpdateSeedColor = { },
+            onUpdateTvImmersiveExploration = { },
+            onUpdateTvImmersiveDetails = { },
+            onUpdateTvFullTransitions = { },
         )
     }
 }

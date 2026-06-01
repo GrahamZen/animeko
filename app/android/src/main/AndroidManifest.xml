@@ -25,10 +25,21 @@
             android:name="android.permission.WRITE_EXTERNAL_STORAGE"
             android:maxSdkVersion="28"
             tools:ignore="ScopedStorage" />
+    <!-- TV 主屏预览频道 (热门动画 / 继续观看) 写入系统 TvProvider -->
+    <uses-permission android:name="com.android.providers.tv.permission.READ_EPG_DATA" />
+    <uses-permission android:name="com.android.providers.tv.permission.WRITE_EPG_DATA" />
+
+    <uses-feature
+            android:name="android.software.leanback"
+            android:required="false" />
+    <uses-feature
+            android:name="android.hardware.touchscreen"
+            android:required="false" />
 
     <application
             android:name="AniApplication"
             android:allowBackup="true"
+            android:banner="@drawable/tv_banner"
             android:icon="@mipmap/ic_launcher"
             android:label="@string/app_name"
             android:largeHeap="true"
@@ -44,6 +55,11 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
 
             <intent-filter android:autoVerify="false">
@@ -68,6 +84,18 @@
                         android:scheme="ani" />
             </intent-filter>
         </activity>
+
+        <!-- TV 系统屏保: 轮播在看/热门动画的 TMDB 剧照, 确定键跳详情页.
+             需用户在系统设置 → 屏保 里手动选择 Animeko -->
+        <service
+                android:name=".tv.AniDreamService"
+                android:exported="true"
+                android:permission="android.permission.BIND_DREAM_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.dreams.DreamService" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </service>
 
         <service
                 android:name="androidx.appcompat.app.AppLocalesMetadataHolderService"

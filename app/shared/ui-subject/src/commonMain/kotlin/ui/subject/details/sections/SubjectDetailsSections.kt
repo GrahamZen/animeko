@@ -81,10 +81,12 @@ fun SectionHeader(
     actionLabel: String?,
     onAction: () -> Unit,
     modifier: Modifier = Modifier,
+    /** 作用于右侧按钮本体, 如 TV 上给按钮挂 FocusRequester 供方向键显式导航. */
+    actionModifier: Modifier = Modifier,
 ) {
     SectionHeader(title, modifier) {
         if (actionLabel != null) {
-            SectionHeaderActionButton(onAction) { Text(actionLabel) }
+            SectionHeaderActionButton(onAction, modifier = actionModifier) { Text(actionLabel) }
         }
     }
 }
@@ -93,9 +95,10 @@ fun SectionHeader(
 @Composable
 fun SectionHeaderActionButton(
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
-    TextButton(onClick) {
+    TextButton(onClick, modifier) {
         content()
         Icon(
             Icons.AutoMirrored.Rounded.KeyboardArrowRight,

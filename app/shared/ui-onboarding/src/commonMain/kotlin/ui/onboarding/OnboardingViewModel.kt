@@ -68,6 +68,9 @@ class OnboardingViewModel : AbstractSettingsViewModel(), KoinComponent {
             darkMode = it.darkMode,
             useDynamicTheme = it.useDynamicTheme,
             seedColor = it.seedColor,
+            tvImmersiveExploration = it.tvImmersiveExploration,
+            tvImmersiveDetails = it.tvImmersiveDetails,
+            tvFullTransitions = it.tvFullTransitions,
         )
     }
         .stateInBackground(
@@ -90,6 +93,21 @@ class OnboardingViewModel : AbstractSettingsViewModel(), KoinComponent {
         onUpdateSeedColor = { seedColor ->
             launchInBackground {
                 themeSettings.update { copy(useDynamicTheme = false, seedColorValue = seedColor.value) }
+            }
+        },
+        onUpdateTvImmersiveExploration = { enabled ->
+            launchInBackground {
+                themeSettings.update { copy(tvImmersiveExploration = enabled) }
+            }
+        },
+        onUpdateTvImmersiveDetails = { enabled ->
+            launchInBackground {
+                themeSettings.update { copy(tvImmersiveDetails = enabled) }
+            }
+        },
+        onUpdateTvFullTransitions = { enabled ->
+            launchInBackground {
+                themeSettings.update { copy(tvFullTransitions = enabled) }
             }
         },
     )
@@ -238,6 +256,9 @@ class ThemeSelectStepState(
     val onUpdateUseDarkMode: (DarkMode) -> Unit,
     val onUpdateUseDynamicTheme: (Boolean) -> Unit,
     val onUpdateSeedColor: (Color) -> Unit,
+    val onUpdateTvImmersiveExploration: (Boolean) -> Unit,
+    val onUpdateTvImmersiveDetails: (Boolean) -> Unit,
+    val onUpdateTvFullTransitions: (Boolean) -> Unit,
 )
 
 @Stable

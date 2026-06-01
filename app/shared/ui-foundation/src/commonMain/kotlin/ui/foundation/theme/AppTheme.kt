@@ -29,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.IntOffset
 import me.him188.ani.app.data.models.preference.DarkMode
 import me.him188.ani.app.data.models.preference.ThemeSettings
@@ -96,6 +97,16 @@ object AniThemeDefaults {
 
     val pageContentBackgroundColor
         @Composable get() = MaterialTheme.colorScheme.surfaceContainerLowest
+
+    /**
+     * TV 全屏页面背景色 (主壳统一背景与侧边栏展开面板底色共用, 两处必须一致):
+     * 深色主题用页面背景色 [pageContentBackgroundColor]; 浅色主题用 surface, 带主题色而非死白.
+     */
+    val tvPageBackgroundColor: Color
+        @Composable get() {
+            val surface = MaterialTheme.colorScheme.surface
+            return if (surface.luminance() < 0.5f) pageContentBackgroundColor else surface
+        }
 
     /**
      * 默认的 [TopAppBarColors], 期望用于 [pageContentBackgroundColor] 的容器之内

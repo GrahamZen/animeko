@@ -54,9 +54,13 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.Dp
@@ -71,9 +75,12 @@ import me.him188.ani.app.ui.foundation.IconButton
 import me.him188.ani.app.ui.foundation.animation.AniMotionScheme
 import me.him188.ani.app.ui.foundation.animation.LocalAniMotionScheme
 import me.him188.ani.app.ui.foundation.icons.BackgroundDotLarge
+import me.him188.ani.app.ui.foundation.LocalPlatform
 import me.him188.ani.app.ui.foundation.icons.GalleryThumbnail
+import me.him188.ani.app.ui.foundation.ifThen
 import me.him188.ani.app.ui.foundation.interaction.keyboardDirectionToSelectItem
 import me.him188.ani.app.ui.foundation.interaction.keyboardPageToScroll
+import me.him188.ani.app.ui.foundation.isTv
 import me.him188.ani.app.ui.foundation.layout.currentWindowAdaptiveInfo1
 import me.him188.ani.app.ui.foundation.layout.paneHorizontalPadding
 import me.him188.ani.app.ui.foundation.layout.paneVerticalPadding
@@ -104,9 +111,14 @@ internal fun SearchResultColumn(
     summary: @Composable SearchResultColumnScope.() -> Unit, // 可在还没发起任何搜索时不展示
     selectedItemIndex: () -> Int,
     onSelect: (index: Int) -> Unit,
+    onFocusItem: (index: Int) -> Unit = {},
     onPlay: (info: SubjectPreviewItemInfo) -> Unit,
     highlightSelected: Boolean = true,
     modifier: Modifier = Modifier,
+    // TV: 从详情页返回时把焦点恢复到之前点击的格子. tick > 0 时才执行 (由页面 ON_RESUME 驱动).
+    focusRestoreIndex: Int = -1,
+    focusRestoreTick: Int = 0,
+    onFocusRestored: () -> Unit = {},
     headers: LazyGridScope.() -> Unit = {},
     state: LazyGridState = rememberLazyGridState(),
     layoutParams: SearchResultColumnLayoutParams = SearchResultColumnLayoutParams.layoutParameters(kind = layoutKind),
@@ -115,6 +127,7 @@ internal fun SearchResultColumn(
     var height by rememberSaveable { mutableIntStateOf(0) }
     val bringIntoViewRequesters = remember { mutableStateMapOf<Int, BringIntoViewRequester>() }
     val aniMotionScheme = LocalAniMotionScheme.current
+    val isTv = LocalPlatform.current.isTv()
 
     val itemsState = rememberUpdatedState(items)
 
@@ -130,15 +143,16 @@ internal fun SearchResultColumn(
         modifier
             .focusGroup()
             .onSizeChanged { height = it.height }
-            .keyboardDirectionToSelectItem(
-                selectedItemIndex = selectedItemIndex,
-                itemCount = { items.itemCount },
-            ) {
-                state.animateScrollToItem(it)
-                onSelect(it)
-            }
-            .keyboardPageToScroll({ height.toFloat() }) {
-                state.animateScrollBy(it)
+            .ifThen(!isTv) {
+                keyboardDirectionToSelectItem(
+                    selectedItemIndex = selectedItemIndex,
+                    itemCount = { items.itemCount },
+                ) {
+                    state.animateScrollToItem(it)
+                    onSelect(it)
+                }.keyboardPageToScroll({ height.toFloat() }) {
+                    state.animateScrollBy(it)
+                }
             },
         cells = layoutParams.grid.gridCells,
         state = state,
@@ -170,6 +184,23 @@ internal fun SearchResultColumn(
         ) { index ->
             val info = items[index]
 
+            val restoreFocusHere = isTv && index == focusRestoreIndex
+            val restoreFocusRequester = remember { FocusRequester() }
+            if (restoreFocusHere) {
+                LaunchedEffect(focusRestoreTick) {
+                    if (focusRestoreTick <= 0) return@LaunchedEffect
+                    // 返回瞬间格子可能还没完成布局, 失败则等几帧重试
+                    repeat(5) {
+                        withFrameNanos {}
+                        if (runCatching { restoreFocusRequester.requestFocus() }.isSuccess) {
+                            onFocusRestored()
+                            return@LaunchedEffect
+                        }
+                    }
+                    onFocusRestored()
+                }
+            }
+
             AnimatedContent(
                 layoutParams.kind,
                 transitionSpec = aniMotionScheme.animatedContent.topLevel,
@@ -189,11 +220,14 @@ internal fun SearchResultColumn(
                                 info?.imageUrl,
                                 isPlaceholder = info == null,
                                 onClick = { onSelect(index) },
-                                Modifier.animateItem(
-                                    aniMotionScheme.feedItemFadeInSpec,
-                                    aniMotionScheme.feedItemPlacementSpec,
-                                    aniMotionScheme.feedItemFadeOutSpec,
-                                ),
+                                Modifier
+                                    .ifThen(restoreFocusHere) { focusRequester(restoreFocusRequester) }
+                                    .onFocusChanged { if (it.isFocused) onFocusItem(index) }
+                                    .animateItem(
+                                        aniMotionScheme.feedItemFadeInSpec,
+                                        aniMotionScheme.feedItemPlacementSpec,
+                                        aniMotionScheme.feedItemFadeOutSpec,
+                                    ),
                                 shape = layoutParams.grid.cardShape,
                             )
                         }
@@ -216,6 +250,8 @@ internal fun SearchResultColumn(
                                     onClick = { onSelect(index) },
                                     onPlay = onPlay,
                                     Modifier
+                                        .ifThen(restoreFocusHere) { focusRequester(restoreFocusRequester) }
+                                        .onFocusChanged { if (it.isFocused) onFocusItem(index) }
                                         .animateItem(
                                             aniMotionScheme.feedItemFadeInSpec,
                                             aniMotionScheme.feedItemPlacementSpec,
