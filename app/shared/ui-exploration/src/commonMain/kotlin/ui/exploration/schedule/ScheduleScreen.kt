@@ -67,6 +67,7 @@ import kotlinx.datetime.number
 import me.him188.ani.app.ui.adaptive.AniTopAppBar
 import me.him188.ani.app.ui.adaptive.HorizontalScrollControlScaffoldOnDesktop
 import me.him188.ani.app.ui.foundation.HorizontalScrollControlState
+import me.him188.ani.app.ui.foundation.LocalAniUiBehavior
 import me.him188.ani.app.ui.foundation.LocalPlatform
 import me.him188.ani.app.ui.foundation.ProvideCompositionLocalsForPreview
 import me.him188.ani.app.ui.foundation.layout.AniWindowInsets
@@ -152,12 +153,15 @@ fun ScheduleScreen(
     Scaffold(
         modifier,
         topBar = {
-            AniTopAppBar(
-                title = { Text(stringResource(Lang.exploration_schedule)) },
-                Modifier.fillMaxWidth(),
-                navigationIcon = navigationIcon,
-                windowInsets = windowInsets.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
-            )
+            // 返回按钮隐藏时, 顶栏只剩标题占位, 整条不渲染
+            if (LocalAniUiBehavior.current.showNavigationTopAppBar) {
+                AniTopAppBar(
+                    title = { Text(stringResource(Lang.exploration_schedule)) },
+                    Modifier.fillMaxWidth(),
+                    navigationIcon = navigationIcon,
+                    windowInsets = windowInsets.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
+                )
+            }
         },
         containerColor = AniThemeDefaults.pageContentBackgroundColor,
         contentWindowInsets = windowInsets.only(WindowInsetsSides.Horizontal),

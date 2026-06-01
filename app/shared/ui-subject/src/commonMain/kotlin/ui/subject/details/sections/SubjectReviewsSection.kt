@@ -44,10 +44,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.paging.compose.LazyPagingItems
+import androidx.paging.compose.collectAsLazyPagingItemsWithLifecycle
 import me.him188.ani.app.tools.formatDateTime
 import me.him188.ani.app.ui.comment.CommentState
 import me.him188.ani.app.ui.comment.UIComment
 import me.him188.ani.app.ui.comment.UIRichText
+import me.him188.ani.app.ui.foundation.LocalAniUiBehavior
 import me.him188.ani.app.ui.foundation.avatar.AvatarImage
 import me.him188.ani.app.ui.foundation.layout.desktopTitleBar
 import me.him188.ani.app.ui.foundation.layout.desktopTitleBarPadding
@@ -77,6 +79,11 @@ fun ReviewsPreviewSection(
     totalCount: Int?,
     onShowAll: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * 只作用在评论卡行 (标题行之下) 的 modifier: TV 内嵌介绍页把"卡片行按下键跳下一区块"
+     * 的拦截挂在这里 —— 挂整个区块会把标题行"查看全部"按钮的下键也吃掉 (导航不到卡片).
+     */
+    cardsModifier: Modifier = Modifier,
 ) {
     if (comments.itemCount == 0) return
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -85,7 +92,7 @@ fun ReviewsPreviewSection(
             actionLabel = reviewsCountLabel(totalCount),
             onAction = onShowAll,
         )
-        BoxWithConstraints {
+        BoxWithConstraints(cardsModifier) {
             val count = minOf(comments.itemCount, PREVIEW_COMMENT_COUNT)
             if (maxWidth < STACK_REVIEW_CARDS_BELOW_WIDTH) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -225,6 +232,9 @@ internal fun UIRichText.toPlainText(): String =
 /**
  * 完整评论流 sheet: 桌面 (双栏/三栏) 没有"评价" tab, 从评价预览/热门评价卡进入.
  * 复用手机"评价" tab 的 [SubjectCommentColumn], 头部提供"写评价"入口.
+ *
+ * TV 上改为大号居中弹窗 (可导航的纯文本评论卡片网格, 确认键展开全文, 返回键关闭);
+ * 保留"写评价"入口.
  */
 @Composable
 fun SubjectCommentsSheet(
@@ -235,6 +245,27 @@ fun SubjectCommentsSheet(
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    if (LocalAniUiBehavior.current.panelsAsCenteredDialogs) {
+        val gridComments = state.list.collectAsLazyPagingItemsWithLifecycle()
+        CommentsGridDialog(
+            title = stringResource(Lang.subject_details_tab_comments) +
+                    (state.count?.takeIf { it > 0 }
+                        ?.let { " · " + remember(it) { groupThousands(it) } } ?: ""),
+            comments = gridComments,
+            onDismissRequest = onDismissRequest,
+            showRating = true,
+            headerAction = {
+                TextButton(onClickWriteReview) {
+                    Icon(Icons.Rounded.AddComment, contentDescription = null, Modifier.size(18.dp))
+                    Text(
+                        stringResource(Lang.subject_details_write_review),
+                        Modifier.padding(start = 8.dp),
+                    )
+                }
+            },
+        )
+        return
+    }
     ModalBottomSheet(
         onDismissRequest,
         modifier = modifier.desktopTitleBarPadding().statusBarsPadding(),
