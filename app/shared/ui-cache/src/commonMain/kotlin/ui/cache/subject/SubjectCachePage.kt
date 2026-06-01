@@ -63,6 +63,7 @@ import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import me.him188.ani.app.data.models.preference.MediaSelectorSettings
@@ -71,6 +72,7 @@ import me.him188.ani.app.platform.PermissionManager
 import me.him188.ani.app.ui.adaptive.AniTopAppBar
 import me.him188.ani.app.ui.adaptive.AniTopAppBarDefaults
 import me.him188.ani.app.ui.cache.DeleteActionDialog
+import me.him188.ani.app.ui.cache.rememberCacheDeleteSummary
 import me.him188.ani.app.ui.cache.components.CacheEpisodeRow
 import me.him188.ani.app.ui.cache.components.CacheEpisodeState
 import me.him188.ani.app.ui.cache.components.CacheSelectionFloatingToolbar
@@ -104,6 +106,13 @@ import me.him188.ani.datasources.api.topic.UnifiedCollectionType
 import me.him188.ani.datasources.api.topic.isDoneOrDropped
 import org.jetbrains.compose.resources.stringResource
 import org.koin.mp.KoinPlatform
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import me.him188.ani.app.ui.cache.ForcedDarkTheme
+import me.him188.ani.app.ui.foundation.PlayerFrameHolder
 
 object SubjectCachePageTestTags {
     const val SUMMARY_ROW = "subject_cache_summary_row"
@@ -154,6 +163,21 @@ fun SubjectCacheScreen(
     navigationIcon: @Composable () -> Unit = {},
 ) {
     val cachedEpisodes by vm.cacheEpisodesFlow.collectAsStateWithLifecycle()
+    // TV (fork): 从播放器跳过来时拿那一刻的暂停帧当页面背景, 前后观感连续 (浅色主题下这几页
+    // 突然一页亮白很刺眼, 见 ForcedDarkTheme). peek 而非 take —— 从更深的"管理全部缓存"返回时
+    // 本页会重新组合, 取走即清就拿不到第二次了; 按 subjectId 对号防止别处进来时看到陈旧的帧.
+    val pausedFrame = remember(vm.subjectId) { PlayerFrameHolder.peek(vm.subjectId) }
+    ForcedDarkTheme {
+    Box(Modifier.fillMaxSize()) {
+        if (pausedFrame != null) {
+            Image(
+                pausedFrame,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.75f)))
+        }
     SubjectCachePage(
         title = vm.subjectTitle,
         cacheListState = vm.cacheListState,
@@ -170,7 +194,10 @@ fun SubjectCacheScreen(
         modifier = modifier,
         windowInsets = windowInsets,
         navigationIcon = navigationIcon,
+        containerColor = if (pausedFrame != null) Color.Transparent else null,
     )
+    }
+    }
 }
 
 /**
@@ -193,6 +220,8 @@ fun SubjectCachePage(
     modifier: Modifier = Modifier,
     windowInsets: WindowInsets = AniWindowInsets.forPageContent(),
     navigationIcon: @Composable () -> Unit = {},
+    /** 非空时覆盖 Scaffold 底色 —— TV 用播放器暂停帧当背景时要透明 (见 [SubjectCacheScreen]). */
+    containerColor: Color? = null,
 ) {
     val selectionState = rememberCacheSelectionState()
 
@@ -218,6 +247,8 @@ fun SubjectCachePage(
     if (showDeleteSelectedDialog) {
         DeleteActionDialog(
             onDismiss = { showDeleteSelectedDialog = false },
+            // 批量删除不可撤销, 把"到底要删什么"摊开写 (fork; 见 rememberCacheDeleteSummary)
+            summary = rememberCacheDeleteSummary(selectedEntries),
             onConfirm = {
                 selectedEntries.forEach(onDelete)
                 selectionState.clear()
@@ -245,6 +276,28 @@ fun SubjectCachePage(
     val uiScope = rememberCoroutineScope()
     val context = LocalContext.current
 
+    // TV 焦点协调 (fork): 记录当前持有焦点的缓存按钮, 区分"焦点被弹窗/视觉切换清空"(要夺回) 与
+    // "用户方向键导航到了别的按钮"(不能抢); 弹窗开着时一律不夺回. 见 EpisodeCacheActionIcon.
+    val cacheFocusOwner = remember { mutableStateOf<Any?>(null) }
+    val popupOpen = (cacheListState.currentSelectMediaTask != null && !hideMediaSelector) ||
+            cacheListState.currentSelectStorageTask != null
+    // 换行接力棒: 按下载 / 删除会让那一集从"未缓存行"变成"已缓存行"或反过来, 原节点被销毁,
+    // 由新行按 episodeId 认领焦点. 见 [LocalCacheRowRefocus].
+    val cacheRowRefocus = remember { mutableStateOf<CacheRowRefocus?>(null) }
+    // 兜底过期: 换行没发生 (用户在数据源弹窗里取消了) 时把接力棒收掉, 免得很久以后那一集碰巧
+    // 换行时突然从别处夺走焦点. 与 EpisodeCacheActionIcon 里的 wantFocus 同一套时限, 同样只在
+    // 无弹窗时才计时 —— 用户可能在数据源列表里翻很久.
+    LaunchedEffect(cacheRowRefocus.value, popupOpen) {
+        if (cacheRowRefocus.value != null && !popupOpen) {
+            delay(8000)
+            cacheRowRefocus.value = null
+        }
+    }
+    CompositionLocalProvider(
+        LocalCacheFocusOwner provides cacheFocusOwner,
+        LocalCachePopupOpen provides popupOpen,
+        LocalCacheRowRefocus provides cacheRowRefocus,
+    ) {
     Scaffold(
         modifier,
         topBar = {
@@ -318,7 +371,7 @@ fun SubjectCachePage(
                 )
             }
         },
-        containerColor = AniThemeDefaults.pageContentBackgroundColor,
+        containerColor = containerColor ?: AniThemeDefaults.pageContentBackgroundColor,
         contentWindowInsets = windowInsets.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
     ) { paddingValues ->
         val layoutDirection = LocalLayoutDirection.current
@@ -380,6 +433,7 @@ fun SubjectCachePage(
                 )
             }
         }
+    }
     }
 }
 
@@ -616,14 +670,23 @@ fun EpisodeNotCachedRow(
                 LocalContentColor provides
                         if (dimmed) LocalContentColor.current else MaterialTheme.colorScheme.primary,
             ) {
+                val rowRefocus = LocalCacheRowRefocus.current
                 EpisodeCacheActionIcon(
                     isLoadingIndefinitely = !isRequestHidden &&
                             episode.showProgressIndicator.collectAsStateWithLifecycle().value,
                     hasActionRunning = episode.actionTasker.isRunning.collectAsStateWithLifecycle().value,
                     cacheStatus = episode.cacheStatus,
                     canCache = episode.canCache,
-                    onClick = { if (!inSelectionMode) onClick() },
+                    onClick = {
+                        if (!inSelectionMode) {
+                            // 缓存一旦建出来, 本行会被换成 CacheEpisodeRow, 本按钮连同它自己的夺回
+                            // 逻辑一起销毁 —— 先把焦点交接出去. 见 [LocalCacheRowRefocus].
+                            rowRefocus?.value = CacheRowRefocus(episode.episodeId, toCached = true)
+                            onClick()
+                        }
+                    },
                     onCancel = onCancel,
+                    refocusEpisodeId = episode.episodeId,
                 )
             }
         }
@@ -664,6 +727,22 @@ fun SubjectCacheDetailPaneContent(
     val context = LocalContext.current
     val rowShape = if (singlePane) RectangleShape else MaterialTheme.shapes.medium
 
+    // TV 焦点协调 (fork): 与 [SubjectCachePage] 同一套, 全局缓存管理页的详情栏里也是这些行.
+    val cacheFocusOwner = remember { mutableStateOf<Any?>(null) }
+    val popupOpen = (vm.cacheListState.currentSelectMediaTask != null && !hideMediaSelector) ||
+            vm.cacheListState.currentSelectStorageTask != null
+    val cacheRowRefocus = remember { mutableStateOf<CacheRowRefocus?>(null) }
+    LaunchedEffect(cacheRowRefocus.value, popupOpen) {
+        if (cacheRowRefocus.value != null && !popupOpen) {
+            delay(8000)
+            cacheRowRefocus.value = null
+        }
+    }
+    CompositionLocalProvider(
+        LocalCacheFocusOwner provides cacheFocusOwner,
+        LocalCachePopupOpen provides popupOpen,
+        LocalCacheRowRefocus provides cacheRowRefocus,
+    ) {
     LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = 480.dp),
         modifier = modifier,
@@ -717,6 +796,7 @@ fun SubjectCacheDetailPaneContent(
             onViewDetail = onViewDetail,
             rowShape = rowShape,
         )
+    }
     }
 }
 
