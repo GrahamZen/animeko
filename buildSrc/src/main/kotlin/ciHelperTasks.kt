@@ -373,6 +373,9 @@ abstract class UploadAndroidApksTask : ReleaseUploadTask() {
         apkFiles.forEach { file ->
             val arch = file.name
                 .removePrefix("android-default-")
+                // fork: formFactor flavor 让 APK 文件名多出 "tv-" 段, 剥掉它以保持 release 资产名
+                // (ani-<版本>-universal.apk 等) 与历史版本一致 —— release-template.md 里的下载链接依赖它
+                .removePrefix("tv-")
                 .removeSuffix("-release.apk")
                 .takeIf { it != file.name }
                 ?: throw GradleException("Cannot infer Android architecture from file name '${file.name}'")
