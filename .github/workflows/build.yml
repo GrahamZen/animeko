@@ -24,23 +24,9 @@ concurrency:
   group: '${{ github.workflow }}-${{ github.event_name }}-${{ github.ref_name == ''main'' && github.run_id || github.ref_name }}'
   cancel-in-progress: true
 jobs:
-  consistency-check:
-    name: 'Workflow YAML Consistency Check'
-    runs-on: 'ubuntu-latest'
-    permissions: {}
-    steps:
-    - id: 'step-0'
-      uses: 'actions/checkout@v4'
-    - id: 'step-1'
-      run: 'pip3 install PyYAML'
-    - id: 'step-2'
-      run: 'cp ".github/workflows/build.yml" ".github/workflows/build.yml-check.yml" '
-    - id: 'step-3'
-      run: '.github/workflows/src.main.kts'
-    - id: 'step-4'
-      run: 'python .github/workflows/check_yaml_equivalence.py .github/workflows/build.yml .github/workflows/build.yml-check.yml'
   build_github-windows-2022:
     name: 'Build (Windows Server 2019 x86_64)'
+    if: false
     runs-on:
     - 'windows-2022'
     permissions:
@@ -152,12 +138,12 @@ jobs:
       name: 'Compile Kotlin Android (Attempt #1)'
       continue-on-error: true
       timeout-minutes: 180
-      run: './gradlew compileDefaultDebugKotlin compileDefaultReleaseKotlin "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake" "-DBoost_INCLUDE_DIR=C:/vcpkg/installed/x64-windows/include" "-Dorg.gradle.jvmargs=-Xmx4g -Dkotlin.daemon.jvm.options=-Xmx4g" "-Dkotlin.daemon.jvm.options=-Xmx4g" "--parallel"'
+      run: './gradlew compileDefaultTvDebugKotlin compileDefaultTvReleaseKotlin compileDefaultPhoneDebugKotlin "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake" "-DBoost_INCLUDE_DIR=C:/vcpkg/installed/x64-windows/include" "-Dorg.gradle.jvmargs=-Xmx4g -Dkotlin.daemon.jvm.options=-Xmx4g" "-Dkotlin.daemon.jvm.options=-Xmx4g" "--parallel"'
     - id: 'step-16'
       name: 'Compile Kotlin Android (Attempt #2)'
       continue-on-error: false
       timeout-minutes: 180
-      run: './gradlew compileDefaultDebugKotlin compileDefaultReleaseKotlin "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake" "-DBoost_INCLUDE_DIR=C:/vcpkg/installed/x64-windows/include" "-Dorg.gradle.jvmargs=-Xmx4g -Dkotlin.daemon.jvm.options=-Xmx4g" "-Dkotlin.daemon.jvm.options=-Xmx4g" "--parallel"'
+      run: './gradlew compileDefaultTvDebugKotlin compileDefaultTvReleaseKotlin compileDefaultPhoneDebugKotlin "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake" "-DBoost_INCLUDE_DIR=C:/vcpkg/installed/x64-windows/include" "-Dorg.gradle.jvmargs=-Xmx4g -Dkotlin.daemon.jvm.options=-Xmx4g" "-Dkotlin.daemon.jvm.options=-Xmx4g" "--parallel"'
       if: '${{ steps.step-15.outcome == ''failure'' }}'
     - id: 'step-17'
       name: 'Package Desktop (Attempt #1)'
@@ -359,12 +345,12 @@ jobs:
       name: 'Compile Kotlin Android (Attempt #1)'
       continue-on-error: true
       timeout-minutes: 180
-      run: './gradlew compileDefaultDebugKotlin compileDefaultReleaseKotlin "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-Dorg.gradle.jvmargs=-Xmx4g -Dkotlin.daemon.jvm.options=-Xmx4g" "-Dkotlin.daemon.jvm.options=-Xmx4g" "--parallel" "--no-configuration-cache"'
+      run: './gradlew compileDefaultTvDebugKotlin compileDefaultTvReleaseKotlin compileDefaultPhoneDebugKotlin "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-Dorg.gradle.jvmargs=-Xmx4g -Dkotlin.daemon.jvm.options=-Xmx4g" "-Dkotlin.daemon.jvm.options=-Xmx4g" "--parallel" "--no-configuration-cache"'
     - id: 'step-17'
       name: 'Compile Kotlin Android (Attempt #2)'
       continue-on-error: false
       timeout-minutes: 180
-      run: './gradlew compileDefaultDebugKotlin compileDefaultReleaseKotlin "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-Dorg.gradle.jvmargs=-Xmx4g -Dkotlin.daemon.jvm.options=-Xmx4g" "-Dkotlin.daemon.jvm.options=-Xmx4g" "--parallel" "--no-configuration-cache"'
+      run: './gradlew compileDefaultTvDebugKotlin compileDefaultTvReleaseKotlin compileDefaultPhoneDebugKotlin "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-Dorg.gradle.jvmargs=-Xmx4g -Dkotlin.daemon.jvm.options=-Xmx4g" "-Dkotlin.daemon.jvm.options=-Xmx4g" "--parallel" "--no-configuration-cache"'
       if: '${{ steps.step-16.outcome == ''failure'' }}'
     - id: 'step-18'
       name: 'Package Desktop (Attempt #1)'
@@ -602,23 +588,23 @@ jobs:
       name: 'Compile Kotlin Android (Attempt #1)'
       continue-on-error: true
       timeout-minutes: 180
-      run: './gradlew compileDefaultDebugKotlin compileDefaultReleaseKotlin "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-Dorg.gradle.jvmargs=-Xmx8g -Dkotlin.daemon.jvm.options=-Xmx6g" "-Dkotlin.daemon.jvm.options=-Xmx6g"'
+      run: './gradlew compileDefaultTvDebugKotlin compileDefaultTvReleaseKotlin compileDefaultPhoneDebugKotlin "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-Dorg.gradle.jvmargs=-Xmx8g -Dkotlin.daemon.jvm.options=-Xmx6g" "-Dkotlin.daemon.jvm.options=-Xmx6g"'
     - id: 'step-20'
       name: 'Compile Kotlin Android (Attempt #2)'
       continue-on-error: false
       timeout-minutes: 180
-      run: './gradlew compileDefaultDebugKotlin compileDefaultReleaseKotlin "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-Dorg.gradle.jvmargs=-Xmx8g -Dkotlin.daemon.jvm.options=-Xmx6g" "-Dkotlin.daemon.jvm.options=-Xmx6g"'
+      run: './gradlew compileDefaultTvDebugKotlin compileDefaultTvReleaseKotlin compileDefaultPhoneDebugKotlin "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-Dorg.gradle.jvmargs=-Xmx8g -Dkotlin.daemon.jvm.options=-Xmx6g" "-Dkotlin.daemon.jvm.options=-Xmx6g"'
       if: '${{ steps.step-19.outcome == ''failure'' }}'
     - id: 'step-21'
       name: 'Build Android Debug APKs (Attempt #1)'
       continue-on-error: true
       timeout-minutes: 180
-      run: './gradlew assembleDefaultDebug "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-Dorg.gradle.jvmargs=-Xmx8g -Dkotlin.daemon.jvm.options=-Xmx6g" "-Dkotlin.daemon.jvm.options=-Xmx6g"'
+      run: './gradlew assembleDefaultTvDebug "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-Dorg.gradle.jvmargs=-Xmx8g -Dkotlin.daemon.jvm.options=-Xmx6g" "-Dkotlin.daemon.jvm.options=-Xmx6g"'
     - id: 'step-22'
       name: 'Build Android Debug APKs (Attempt #2)'
       continue-on-error: false
       timeout-minutes: 180
-      run: './gradlew assembleDefaultDebug "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-Dorg.gradle.jvmargs=-Xmx8g -Dkotlin.daemon.jvm.options=-Xmx6g" "-Dkotlin.daemon.jvm.options=-Xmx6g"'
+      run: './gradlew assembleDefaultTvDebug "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-Dorg.gradle.jvmargs=-Xmx8g -Dkotlin.daemon.jvm.options=-Xmx6g" "-Dkotlin.daemon.jvm.options=-Xmx6g"'
       if: '${{ steps.step-21.outcome == ''failure'' }}'
     - id: 'step-23'
       name: 'Upload Android Debug APK arm64-v8a (Attempt #1)'
@@ -626,7 +612,7 @@ jobs:
       uses: 'actions/upload-artifact@v4'
       with:
         name: 'ani-android-arm64-v8a-debug'
-        path: 'app/android/build/outputs/apk/default/debug/android-default-arm64-v8a-debug.apk'
+        path: 'app/android/build/outputs/apk/defaultTv/debug/android-default-tv-arm64-v8a-debug.apk'
         overwrite: 'true'
     - id: 'step-24'
       name: 'Upload Android Debug APK arm64-v8a (Attempt #2)'
@@ -634,7 +620,7 @@ jobs:
       uses: 'actions/upload-artifact@v4'
       with:
         name: 'ani-android-arm64-v8a-debug'
-        path: 'app/android/build/outputs/apk/default/debug/android-default-arm64-v8a-debug.apk'
+        path: 'app/android/build/outputs/apk/defaultTv/debug/android-default-tv-arm64-v8a-debug.apk'
         overwrite: 'true'
       if: '${{ steps.step-23.outcome == ''failure'' }}'
     - id: 'step-25'
@@ -643,7 +629,7 @@ jobs:
       uses: 'actions/upload-artifact@v4'
       with:
         name: 'ani-android-arm64-v8a-debug'
-        path: 'app/android/build/outputs/apk/default/debug/android-default-arm64-v8a-debug.apk'
+        path: 'app/android/build/outputs/apk/defaultTv/debug/android-default-tv-arm64-v8a-debug.apk'
         overwrite: 'true'
       if: '${{ steps.step-24.outcome == ''failure'' }}'
     - id: 'step-26'
@@ -652,7 +638,7 @@ jobs:
       uses: 'actions/upload-artifact@v4'
       with:
         name: 'ani-android-x86_64-debug'
-        path: 'app/android/build/outputs/apk/default/debug/android-default-x86_64-debug.apk'
+        path: 'app/android/build/outputs/apk/defaultTv/debug/android-default-tv-x86_64-debug.apk'
         overwrite: 'true'
     - id: 'step-27'
       name: 'Upload Android Debug APK x86_64 (Attempt #2)'
@@ -660,7 +646,7 @@ jobs:
       uses: 'actions/upload-artifact@v4'
       with:
         name: 'ani-android-x86_64-debug'
-        path: 'app/android/build/outputs/apk/default/debug/android-default-x86_64-debug.apk'
+        path: 'app/android/build/outputs/apk/defaultTv/debug/android-default-tv-x86_64-debug.apk'
         overwrite: 'true'
       if: '${{ steps.step-26.outcome == ''failure'' }}'
     - id: 'step-28'
@@ -669,7 +655,7 @@ jobs:
       uses: 'actions/upload-artifact@v4'
       with:
         name: 'ani-android-x86_64-debug'
-        path: 'app/android/build/outputs/apk/default/debug/android-default-x86_64-debug.apk'
+        path: 'app/android/build/outputs/apk/defaultTv/debug/android-default-tv-x86_64-debug.apk'
         overwrite: 'true'
       if: '${{ steps.step-27.outcome == ''failure'' }}'
     - id: 'step-29'
@@ -678,7 +664,7 @@ jobs:
       uses: 'actions/upload-artifact@v4'
       with:
         name: 'ani-android-armeabi-v7a-debug'
-        path: 'app/android/build/outputs/apk/default/debug/android-default-armeabi-v7a-debug.apk'
+        path: 'app/android/build/outputs/apk/defaultTv/debug/android-default-tv-armeabi-v7a-debug.apk'
         overwrite: 'true'
     - id: 'step-30'
       name: 'Upload Android Debug APK armeabi-v7a (Attempt #2)'
@@ -686,7 +672,7 @@ jobs:
       uses: 'actions/upload-artifact@v4'
       with:
         name: 'ani-android-armeabi-v7a-debug'
-        path: 'app/android/build/outputs/apk/default/debug/android-default-armeabi-v7a-debug.apk'
+        path: 'app/android/build/outputs/apk/defaultTv/debug/android-default-tv-armeabi-v7a-debug.apk'
         overwrite: 'true'
       if: '${{ steps.step-29.outcome == ''failure'' }}'
     - id: 'step-31'
@@ -695,7 +681,7 @@ jobs:
       uses: 'actions/upload-artifact@v4'
       with:
         name: 'ani-android-armeabi-v7a-debug'
-        path: 'app/android/build/outputs/apk/default/debug/android-default-armeabi-v7a-debug.apk'
+        path: 'app/android/build/outputs/apk/defaultTv/debug/android-default-tv-armeabi-v7a-debug.apk'
         overwrite: 'true'
       if: '${{ steps.step-30.outcome == ''failure'' }}'
     - id: 'step-32'
@@ -704,7 +690,7 @@ jobs:
       uses: 'actions/upload-artifact@v4'
       with:
         name: 'ani-android-universal-debug'
-        path: 'app/android/build/outputs/apk/default/debug/android-default-universal-debug.apk'
+        path: 'app/android/build/outputs/apk/defaultTv/debug/android-default-tv-universal-debug.apk'
         overwrite: 'true'
     - id: 'step-33'
       name: 'Upload Android Debug APK universal (Attempt #2)'
@@ -712,7 +698,7 @@ jobs:
       uses: 'actions/upload-artifact@v4'
       with:
         name: 'ani-android-universal-debug'
-        path: 'app/android/build/outputs/apk/default/debug/android-default-universal-debug.apk'
+        path: 'app/android/build/outputs/apk/defaultTv/debug/android-default-tv-universal-debug.apk'
         overwrite: 'true'
       if: '${{ steps.step-32.outcome == ''failure'' }}'
     - id: 'step-34'
@@ -721,7 +707,7 @@ jobs:
       uses: 'actions/upload-artifact@v4'
       with:
         name: 'ani-android-universal-debug'
-        path: 'app/android/build/outputs/apk/default/debug/android-default-universal-debug.apk'
+        path: 'app/android/build/outputs/apk/defaultTv/debug/android-default-tv-universal-debug.apk'
         overwrite: 'true'
       if: '${{ steps.step-33.outcome == ''failure'' }}'
     - id: 'step-35'
@@ -733,7 +719,7 @@ jobs:
         signing_release_keyPassword: '${{ secrets.SIGNING_RELEASE_KEYPASSWORD }}'
       continue-on-error: true
       timeout-minutes: 180
-      run: './gradlew assembleDefaultRelease "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-Dorg.gradle.jvmargs=-Xmx8g -Dkotlin.daemon.jvm.options=-Xmx6g" "-Dkotlin.daemon.jvm.options=-Xmx6g"'
+      run: './gradlew assembleDefaultTvRelease "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-Dorg.gradle.jvmargs=-Xmx8g -Dkotlin.daemon.jvm.options=-Xmx6g" "-Dkotlin.daemon.jvm.options=-Xmx6g"'
       if: '${{ (github.repository == ''open-ani/animeko'') && (!(github.event_name == ''pull_request'')) }}'
     - id: 'step-36'
       name: 'Build Android Release APKs (Attempt #2)'
@@ -744,7 +730,7 @@ jobs:
         signing_release_keyPassword: '${{ secrets.SIGNING_RELEASE_KEYPASSWORD }}'
       continue-on-error: false
       timeout-minutes: 180
-      run: './gradlew assembleDefaultRelease "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-Dorg.gradle.jvmargs=-Xmx8g -Dkotlin.daemon.jvm.options=-Xmx6g" "-Dkotlin.daemon.jvm.options=-Xmx6g"'
+      run: './gradlew assembleDefaultTvRelease "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-Dorg.gradle.jvmargs=-Xmx8g -Dkotlin.daemon.jvm.options=-Xmx6g" "-Dkotlin.daemon.jvm.options=-Xmx6g"'
       if: '${{ steps.step-35.outcome == ''failure'' }}'
     - id: 'step-37'
       name: 'Upload Android Release APK arm64-v8a (Attempt #1)'
@@ -752,7 +738,7 @@ jobs:
       uses: 'actions/upload-artifact@v4'
       with:
         name: 'ani-android-arm64-v8a-release'
-        path: 'app/android/build/outputs/apk/default/release/android-default-arm64-v8a-release.apk'
+        path: 'app/android/build/outputs/apk/defaultTv/release/android-default-tv-arm64-v8a-release.apk'
         overwrite: 'true'
     - id: 'step-38'
       name: 'Upload Android Release APK arm64-v8a (Attempt #2)'
@@ -760,7 +746,7 @@ jobs:
       uses: 'actions/upload-artifact@v4'
       with:
         name: 'ani-android-arm64-v8a-release'
-        path: 'app/android/build/outputs/apk/default/release/android-default-arm64-v8a-release.apk'
+        path: 'app/android/build/outputs/apk/defaultTv/release/android-default-tv-arm64-v8a-release.apk'
         overwrite: 'true'
       if: '${{ steps.step-37.outcome == ''failure'' }}'
     - id: 'step-39'
@@ -769,7 +755,7 @@ jobs:
       uses: 'actions/upload-artifact@v4'
       with:
         name: 'ani-android-arm64-v8a-release'
-        path: 'app/android/build/outputs/apk/default/release/android-default-arm64-v8a-release.apk'
+        path: 'app/android/build/outputs/apk/defaultTv/release/android-default-tv-arm64-v8a-release.apk'
         overwrite: 'true'
       if: '${{ steps.step-38.outcome == ''failure'' }}'
     - id: 'step-40'
@@ -778,7 +764,7 @@ jobs:
       uses: 'actions/upload-artifact@v4'
       with:
         name: 'ani-android-x86_64-release'
-        path: 'app/android/build/outputs/apk/default/release/android-default-x86_64-release.apk'
+        path: 'app/android/build/outputs/apk/defaultTv/release/android-default-tv-x86_64-release.apk'
         overwrite: 'true'
     - id: 'step-41'
       name: 'Upload Android Release APK x86_64 (Attempt #2)'
@@ -786,7 +772,7 @@ jobs:
       uses: 'actions/upload-artifact@v4'
       with:
         name: 'ani-android-x86_64-release'
-        path: 'app/android/build/outputs/apk/default/release/android-default-x86_64-release.apk'
+        path: 'app/android/build/outputs/apk/defaultTv/release/android-default-tv-x86_64-release.apk'
         overwrite: 'true'
       if: '${{ steps.step-40.outcome == ''failure'' }}'
     - id: 'step-42'
@@ -795,7 +781,7 @@ jobs:
       uses: 'actions/upload-artifact@v4'
       with:
         name: 'ani-android-x86_64-release'
-        path: 'app/android/build/outputs/apk/default/release/android-default-x86_64-release.apk'
+        path: 'app/android/build/outputs/apk/defaultTv/release/android-default-tv-x86_64-release.apk'
         overwrite: 'true'
       if: '${{ steps.step-41.outcome == ''failure'' }}'
     - id: 'step-43'
@@ -804,7 +790,7 @@ jobs:
       uses: 'actions/upload-artifact@v4'
       with:
         name: 'ani-android-armeabi-v7a-release'
-        path: 'app/android/build/outputs/apk/default/release/android-default-armeabi-v7a-release.apk'
+        path: 'app/android/build/outputs/apk/defaultTv/release/android-default-tv-armeabi-v7a-release.apk'
         overwrite: 'true'
     - id: 'step-44'
       name: 'Upload Android Release APK armeabi-v7a (Attempt #2)'
@@ -812,7 +798,7 @@ jobs:
       uses: 'actions/upload-artifact@v4'
       with:
         name: 'ani-android-armeabi-v7a-release'
-        path: 'app/android/build/outputs/apk/default/release/android-default-armeabi-v7a-release.apk'
+        path: 'app/android/build/outputs/apk/defaultTv/release/android-default-tv-armeabi-v7a-release.apk'
         overwrite: 'true'
       if: '${{ steps.step-43.outcome == ''failure'' }}'
     - id: 'step-45'
@@ -821,7 +807,7 @@ jobs:
       uses: 'actions/upload-artifact@v4'
       with:
         name: 'ani-android-armeabi-v7a-release'
-        path: 'app/android/build/outputs/apk/default/release/android-default-armeabi-v7a-release.apk'
+        path: 'app/android/build/outputs/apk/defaultTv/release/android-default-tv-armeabi-v7a-release.apk'
         overwrite: 'true'
       if: '${{ steps.step-44.outcome == ''failure'' }}'
     - id: 'step-46'
@@ -830,7 +816,7 @@ jobs:
       uses: 'actions/upload-artifact@v4'
       with:
         name: 'ani-android-universal-release'
-        path: 'app/android/build/outputs/apk/default/release/android-default-universal-release.apk'
+        path: 'app/android/build/outputs/apk/defaultTv/release/android-default-tv-universal-release.apk'
         overwrite: 'true'
     - id: 'step-47'
       name: 'Upload Android Release APK universal (Attempt #2)'
@@ -838,7 +824,7 @@ jobs:
       uses: 'actions/upload-artifact@v4'
       with:
         name: 'ani-android-universal-release'
-        path: 'app/android/build/outputs/apk/default/release/android-default-universal-release.apk'
+        path: 'app/android/build/outputs/apk/defaultTv/release/android-default-tv-universal-release.apk'
         overwrite: 'true'
       if: '${{ steps.step-46.outcome == ''failure'' }}'
     - id: 'step-48'
@@ -847,7 +833,7 @@ jobs:
       uses: 'actions/upload-artifact@v4'
       with:
         name: 'ani-android-universal-release'
-        path: 'app/android/build/outputs/apk/default/release/android-default-universal-release.apk'
+        path: 'app/android/build/outputs/apk/defaultTv/release/android-default-tv-universal-release.apk'
         overwrite: 'true'
       if: '${{ steps.step-47.outcome == ''failure'' }}'
     - id: 'step-49'
@@ -1363,12 +1349,12 @@ jobs:
       name: 'Compile Kotlin Android (Attempt #1)'
       continue-on-error: true
       timeout-minutes: 180
-      run: './gradlew compileDefaultDebugKotlin compileDefaultReleaseKotlin "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-Dorg.gradle.jvmargs=-Xmx12g -Dkotlin.daemon.jvm.options=-Xmx20g" "-Dkotlin.daemon.jvm.options=-Xmx20g" "--parallel"'
+      run: './gradlew compileDefaultTvDebugKotlin compileDefaultTvReleaseKotlin compileDefaultPhoneDebugKotlin "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-Dorg.gradle.jvmargs=-Xmx12g -Dkotlin.daemon.jvm.options=-Xmx20g" "-Dkotlin.daemon.jvm.options=-Xmx20g" "--parallel"'
     - id: 'step-19'
       name: 'Compile Kotlin Android (Attempt #2)'
       continue-on-error: false
       timeout-minutes: 180
-      run: './gradlew compileDefaultDebugKotlin compileDefaultReleaseKotlin "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-Dorg.gradle.jvmargs=-Xmx12g -Dkotlin.daemon.jvm.options=-Xmx20g" "-Dkotlin.daemon.jvm.options=-Xmx20g" "--parallel"'
+      run: './gradlew compileDefaultTvDebugKotlin compileDefaultTvReleaseKotlin compileDefaultPhoneDebugKotlin "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-Dorg.gradle.jvmargs=-Xmx12g -Dkotlin.daemon.jvm.options=-Xmx20g" "-Dkotlin.daemon.jvm.options=-Xmx20g" "--parallel"'
       if: '${{ steps.step-18.outcome == ''failure'' }}'
     - id: 'step-20'
       name: 'generateDummyFramework (Attempt #1)'

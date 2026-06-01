@@ -1,24 +1,22 @@
-$RELEASE_NOTES
-
 [//]: # (ANI-SERVER-MAGIC-SEPARATOR)
 
 [//]: # (注意: api server 依赖这个特殊分隔符)
 
 [//]: # (对于所有可用的变量列表, 参考 CI release.yml 的 step release-notes)
 
-[github-win-x64]: https://github.com/open-ani/ani/releases/download/$GIT_TAG/ani-$TAG_VERSION-windows-x86_64.zip
+[github-win-x64]: https://github.com/GrahamZen/animeko/releases/download/$GIT_TAG/ani-$TAG_VERSION-windows-x86_64.zip
 
-[github-mac-x64]: https://github.com/open-ani/ani/releases/download/$GIT_TAG/ani-$TAG_VERSION-macos-x86_64.dmg
+[github-mac-x64]: https://github.com/GrahamZen/animeko/releases/download/$GIT_TAG/ani-$TAG_VERSION-macos-x86_64.dmg
 
-[github-mac-aarch64]: https://github.com/open-ani/ani/releases/download/$GIT_TAG/ani-$TAG_VERSION-macos-aarch64.dmg
+[github-mac-aarch64]: https://github.com/GrahamZen/animeko/releases/download/$GIT_TAG/ani-$TAG_VERSION-macos-aarch64.dmg
 
-[github-android]: https://github.com/open-ani/ani/releases/download/$GIT_TAG/ani-$TAG_VERSION-universal.apk
+[github-android]: https://github.com/GrahamZen/animeko/releases/download/$GIT_TAG/ani-$TAG_VERSION-universal.apk
 
-[github-android-arm64-v8a]: https://github.com/open-ani/ani/releases/download/$GIT_TAG/ani-$TAG_VERSION-arm64-v8a.apk
+[github-android-arm64-v8a]: https://github.com/GrahamZen/animeko/releases/download/$GIT_TAG/ani-$TAG_VERSION-arm64-v8a.apk
 
-[github-android-armeabi-v7a]: https://github.com/open-ani/ani/releases/download/$GIT_TAG/ani-$TAG_VERSION-armeabi-v7a.apk
+[github-android-armeabi-v7a]: https://github.com/GrahamZen/animeko/releases/download/$GIT_TAG/ani-$TAG_VERSION-armeabi-v7a.apk
 
-[github-android-x86_64]: https://github.com/open-ani/ani/releases/download/$GIT_TAG/ani-$TAG_VERSION-x86_64.apk
+[github-android-x86_64]: https://github.com/GrahamZen/animeko/releases/download/$GIT_TAG/ani-$TAG_VERSION-x86_64.apk
 
 [cf-win-x64]: https://d.myani.org/$GIT_TAG/ani-$TAG_VERSION-windows-x86_64.zip
 
@@ -38,23 +36,23 @@ $RELEASE_NOTES
 
 [cf-android-x86_64]: https://d.myani.org/$GIT_TAG/ani-$TAG_VERSION-x86_64.apk
 
-[ghproxy-win-x64]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-windows-x86_64.zip
+[ghproxy-win-x64]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2FGrahamZen%2Fanimeko%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-windows-x86_64.zip
 
-[ghproxy-mac-x64]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-macos-x86_64.zip
+[ghproxy-mac-x64]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2FGrahamZen%2Fanimeko%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-macos-x86_64.zip
 
-[ghproxy-linux-x64]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-linux-x86_64.appimage
+[ghproxy-linux-x64]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2FGrahamZen%2Fanimeko%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-linux-x86_64.appimage
 
-[ghproxy-mac-aarch64]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-macos-aarch64.dmg
+[ghproxy-mac-aarch64]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2FGrahamZen%2Fanimeko%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-macos-aarch64.dmg
 
-[ghproxy-ios]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION.ios
+[ghproxy-ios]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2FGrahamZen%2Fanimeko%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION.ipa
 
-[ghproxy-android]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-universal.apk
+[ghproxy-android]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2FGrahamZen%2Fanimeko%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-universal.apk
 
-[ghproxy-android-arm64-v8a]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-arm64-v8a.apk
+[ghproxy-android-arm64-v8a]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2FGrahamZen%2Fanimeko%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-arm64-v8a.apk
 
-[ghproxy-android-armeabi-v7a]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-armeabi-v7a.apk
+[ghproxy-android-armeabi-v7a]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2FGrahamZen%2Fanimeko%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-armeabi-v7a.apk
 
-[ghproxy-android-x86_64]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2Fopen-ani%2Fani%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-x86_64.apk
+[ghproxy-android-x86_64]: https://ghfast.top/?q=https%3A%2F%2Fgithub.com%2FGrahamZen%2Fanimeko%2Freleases%2Fdownload%2F$GIT_TAG%2Fani-$TAG_VERSION-x86_64.apk
 
 [macOS 无法打开解决方案]: https://myani.org/wiki/macos-unable-to-open
 
@@ -64,32 +62,14 @@ $RELEASE_NOTES
 
 [macOS Intel芯片版本安装教程]: https://myani.org/wiki/macos-intel-install
 
-[macos-intel-issue]: https://github.com/open-ani/animeko/issues/1345
-
-[linux-issue]: https://github.com/open-ani/animeko/issues/944
 
 [iOS 自签]: https://myani.org/wiki/ios-install
 
 |                  | 下载                                               | 常见问题                                        |
 |------------------|--------------------------------------------------|---------------------------------------------|
-| 安卓 手机/平板         | [主线][cf-android] / [备线][ghproxy-android]         |                                             |
-| 安卓 电视            | 仍在开发中                                            | 现在可以使用平板版接鼠标使用                              |
-| iOS              | [主线][cf-ios] / [备线][ghproxy-ios]                 | 需要[自签][iOS 自签]                                  |
-| Windows          | [主线][cf-win-x64] / [备线][ghproxy-win-x64]         | 1. 目录不要有中文或者空格 <br/> 2. [显示异常][Windows下字体与背景颜色异常解决方案] |
-| macOS (M 系列芯片)   | [主线][cf-mac-aarch64] / [备线][ghproxy-mac-aarch64] | ⚠️ [安装后打不开][macOS 无法打开解决方案]                      |
-| macOS (Intel 芯片) | [主线][cf-mac-x64] / [备线][ghproxy-mac-x64]         | ⚠️ [安装教程][macOS Intel芯片版本安装教程]                    |
-| Linux AppImage   | [主线][cf-linux-x64] / [备线][ghproxy-linux-x64]     | ⚠️ [安装教程][Linux 安装说明]                        |
+| 安卓 电视      | [主线](https://github.com/GrahamZen/animeko/releases/download/$GIT_TAG/ani-$TAG_VERSION-universal.apk)       |                                             |
 
-[github-android-qr]: https://github.com/open-ani/ani/releases/download/$GIT_TAG/ani-$TAG_VERSION-universal.apk.github.qrcode.png
-
-[cf-android-qr]: https://d.myani.org/$GIT_TAG/ani-$TAG_VERSION-universal.apk.cloudflare.qrcode.png
-
-[cf-ios-qr]: https://d.myani.org/$GIT_TAG/ani-$TAG_VERSION.ipa.cloudflare.qrcode.png
-
-| 安卓 手机/平板                     | iOS IPA (需要[自签][iOS 自签])     | 
-|------------------------------|--------------------------|
-| ![Cloudflare][cf-android-qr] | ![Cloudflare][cf-ios-qr] |
-
+[github-android-qr]: https://github.com/GrahamZen/animeko/releases/download/$GIT_TAG/ani-$TAG_VERSION-universal.apk.github.qrcode.png
 
 <details>
 <summary> Android 细分架构下载 </summary>
@@ -102,9 +82,48 @@ $RELEASE_NOTES
 
 | 处理器架构              | 适用于             | 下载                                                                                                      |
 |--------------------|-----------------|---------------------------------------------------------------------------------------------------------|
-| universal (推荐)     | 所有设备            | [主线][cf-android] / [备线][ghproxy-android] / [GitHub][github-android]                                     |
-| arm64-v8a (64 位)   | 几乎所有手机和平板       | [主线][cf-android-arm64-v8a] / [备线][ghproxy-android-arm64-v8a] / [GitHub][github-android-arm64-v8a]       |
-| armeabi-v7a (32 位) | 旧手机             | [主线][cf-android-armeabi-v7a] / [备线][ghproxy-android-armeabi-v7a] / [GitHub][github-android-armeabi-v7a] |
-| x86_64             | Chromebook 及模拟器 | [主线][cf-android-x86_64] / [备线][ghproxy-android-x86_64] / [GitHub][github-android-x86_64]                |
+| universal (推荐)     | 所有设备            | [GitHub][github-android]                                     |
+| arm64-v8a (64 位)   | 几乎所有手机和平板      | [GitHub][github-android-arm64-v8a]       |
+| armeabi-v7a (32 位) | 旧手机             | [GitHub][github-android-armeabi-v7a] |
+| x86_64             | Chromebook 及模拟器 | [GitHub][github-android-x86_64]                |
 
 </details>
+
+## 本次更新
+
+核心页面重新设计。提醒：新版本在电视大屏幕上比较推荐使用深色模式，如果发现卡顿或发热比以往严重可以在设置里切换回旧页面（目前未发现此问题）。
+
+### 电视端
+
+* 独立的电视界面与构建变体；已装用户原地升级，不需要卸载重装。
+* 首页、搜索、追番、详情页按遥控器焦点重做。
+* 新版本提示气泡支持一键下载并自动安装。
+
+### 一些快捷操作
+
+#### 探索页，搜索页，追番页
+
+所有卡片都支持长按设置收藏状态，播放键立刻播放，确认键弹出详情页。
+
+#### 详情页
+
+* 选集按钮的弹窗的方格上长按可跳到该集的选集卡片（在有上千集的情况下也可以快速定位）。
+* 长按开始观看直接跳到当前在看的集的选集卡片。
+* 长按选集卡片弹出本集详情。
+
+#### 播放器
+
+功能演示见 [播放器演示](https://github.com/GrahamZen/animeko#%E6%92%AD%E6%94%BE%E5%99%A8)
+
+* **长按确认键**：播放器选集条的卡片上标记该集看过。
+* **播放 / 暂停键**：播放器内任意层级（控制层 / 选集条 / 详情层）随时切换播放暂停。
+* **快进 / 快退键**：播放器内直接切下一集 / 上一集。
+* **浮出面板的条目上按左 / 右键**：直接横跳到相邻面板。
+
+### 性能优化
+
+降低低端设备性能压力：
+
+* 图片内存缓存按可用内存比例分配，磁盘缓存定容 300MB 并可手动清理。
+
+> Android TV 遥控器使用说明、系统版本要求与已知问题，请见仓库 [README 的「📺 Android TV 版说明」](https://github.com/GrahamZen/animeko#-android-tv-版说明)。
