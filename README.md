@@ -45,72 +45,19 @@ https://github.com/user-attachments/assets/e63636c9-30b7-411c-aa6b-e5b78b900726
 
 ## 主要功能
 
-### 浏览来自 [Bangumi][Bangumi] 的番剧信息以及社区评价
-
-| <img src=".readme/images/features/subject-details.png" alt="" width="200"/> | <img src=".readme/images/features/subject-rating.png" alt="" width="200"/> | 
-|:---------------------------------------------------------------------------:|:--------------------------------------------------------------------------:|
-
-### 丰富的检索方式：新番时间表、标签搜索
-
-> 由 Bangumi 和 Animeko 服务端共同提供的精确新番时间表
-
-| <img src=".readme/images/features/anime-schedule.png" alt="" width="200"/> | <img src=".readme/images/features/search-by-tag.png" alt="" width="200"/> | 
-|:--------------------------------------------------------------------------:|:-------------------------------------------------------------------------:|
-
-### 云同步追番进度
-
-- 省心的追番进度管理，看完视频自动更新进度
-- 打开 APP 立即继续观看，无需回想上次看到了哪
-
-| <img src=".readme/images/features/subject-collection.png" alt="" width="200"/> | <img src=".readme/images/features/home.png" alt="" width="200"/> | 
-|:------------------------------------------------------------------------------:|:----------------------------------------------------------------:|
-
-### 聚合数据源
-
-- [聚合视频数据源](https://github.com/creamycake-anime/ani-subs)，全自动选择
-  > 还支持 BitTorrent、Jellyfin、Emby、以及自定义源
-- 聚合全网弹幕源（[弹弹play][ddplay]），以及 Animeko 自己的[弹幕服务](https://danmaku-cn.myani.org/swagger/index.html)
-
-| <img src=".readme/images/features/mediaselector-simple.png" alt="" width="200"/> | <img src=".readme/images/features/mediaselector-detailed.png" alt="" width="200"/> |
-|:--------------------------------------------------------------------------------:|:----------------------------------------------------------------------------------:|
-
-| <img src=".readme/images/features/episode.png" alt="" width="200"/> | <img src=".readme/images/features/episode-scrolled.png" alt="" width="200"/> |
-|:-------------------------------------------------------------------:|:----------------------------------------------------------------------------:|
-
-### 离线缓存
-
-- 所有数据源都能缓存
-
-| <img src=".readme/images/features/cache-episode.png" alt="" width="200"/> | <img src=".readme/images/features/cache-list.png" alt="" width="200"/> |
-|:-------------------------------------------------------------------------:|:----------------------------------------------------------------------:|
-
-### 精美界面
-
-| <img src=".readme/images/features/player-fullscreen.png" alt="" width="600"/> |
-|:-----------------------------------------------------------------------------:|
-
-- 适配平板和大屏设备
-
-| <img src=".readme/images/features/pc-home.png" alt="" width="600"/> |
-|:-------------------------------------------------------------------:|
-
-| <img src=".readme/images/features/pc-search.png" alt="" width="600"/> |
-|:---------------------------------------------------------------------:|
-
-| <img src=".readme/images/features/pc-search-detail.png" alt="" width="600"/> |
-|:----------------------------------------------------------------------------:|
-
-### 更多个性设置
-
-| <img src=".readme/images/features/danmaku-settings.png" alt="" width="600"/> |
-|:----------------------------------------------------------------------------:|
-
-| <img src=".readme/images/features/theme-settings.png" alt="" width="200"/> | <img src=".readme/images/features/media-preferences.png" alt="" width="200"/> |
-|:--------------------------------------------------------------------------:|:-----------------------------------------------------------------------------:|
+功能与上游一致：浏览 [Bangumi][Bangumi] 番剧信息与社区评价、新番时间表与标签搜索、云同步追番进度、聚合视频与弹幕数据源、离线缓存、多平台精美界面等。完整的功能介绍与应用截图请见[上游仓库 open-ani/animeko](https://github.com/open-ani/animeko#主要功能)。
 
 ## 📺 Android TV 版说明
 
 本 Fork 在上游基础上完成了大部分 Android TV 遥控器适配，并让应用图标显示在电视主屏幕（LEANBACK 启动器）上。安装后在更新 release 之后会在主页提醒，在设置里可以直接更新。
+
+除遥控器焦点适配外，部分页面针对电视大屏**专门重新设计**。例如动画详情页：TMDB 横版剧照全屏背景、Prime Video 式选集轮播（聚焦卡片固定在行首滑动、分集缩略图与播放进度、长按弹出单集菜单）、面向遥控器的全屏布局：
+
+| <img src=".readme/images/features/subject-details.png" alt="TV 动画详情页" width="600"/> |
+|:--------------------------------------------------------------------------------------:|
+
+| <img src=".readme/images/features/subject-details2.png" alt="TV 动画详情页 - 选集轮播" width="600"/> |
+|:---------------------------------------------------------------------------------------------------:|
 
 ### 下载
 
