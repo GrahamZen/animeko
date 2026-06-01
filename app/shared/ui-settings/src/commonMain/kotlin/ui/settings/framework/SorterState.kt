@@ -63,6 +63,14 @@ class SorterState<T>(
         _sortingData = data
     }
 
+    /** 把 [index] 处的项移动到 [index] + [delta] 处 (TV 遥控器按键排序用); 越界时不动. */
+    fun move(index: Int, delta: Int) {
+        val data = _sortingData ?: return
+        val to = index + delta
+        if (index !in data.indices || to !in data.indices) return
+        _sortingData = data.toMutableList().apply { add(to, removeAt(index)) }
+    }
+
     fun complete() {
         val currentData = _sortingData ?: return // We don't need to crash the app :)
         onComplete(currentData)

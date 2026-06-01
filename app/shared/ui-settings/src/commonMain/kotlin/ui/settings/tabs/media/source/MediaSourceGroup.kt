@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -58,6 +59,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -65,6 +67,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
@@ -77,6 +87,7 @@ import kotlinx.coroutines.launch
 import me.him188.ani.app.domain.mediasource.rss.RssMediaSource
 import me.him188.ani.app.domain.mediasource.web.SelectorMediaSource
 import me.him188.ani.app.navigation.LocalNavigator
+import me.him188.ani.app.ui.foundation.LocalAniUiBehavior
 import me.him188.ani.app.ui.foundation.LocalPlatform
 import me.him188.ani.app.ui.foundation.animation.AniAnimatedVisibility
 import me.him188.ani.app.ui.foundation.ifThen
@@ -177,6 +188,9 @@ internal fun SettingsScope.MediaSourceGroup(
     val sorter = rememberSorterState<MediaSourcePresentation>(
         onComplete = { list -> state.reorderMediaSources(newOrder = list.map { it.instanceId }) },
     )
+    val focusDriven = LocalAniUiBehavior.current.focusDrivenNavigation
+    // 焦点驱动形态: 从三点按钮长按进入排序时, 排序列表把初始焦点接到发起项上 (原列表整体消失, 焦点会丢)
+    var sortInitialFocusId by remember { mutableStateOf<String?>(null) }
 
     Group(
         title = { Text(stringResource(Lang.settings_media_source_list, state.mediaSources.size)) },
@@ -237,6 +251,9 @@ internal fun SettingsScope.MediaSourceGroup(
         },
     ) {
         Box {
+            // 焦点驱动排序时不组合普通列表 (alpha 0 的隐形项仍可聚焦, 会干扰遥控器导航);
+            // 指针平台保留它给覆盖层提供尺寸 (matchParentSize)
+            if (!(sorter.isSorting && focusDriven)) {
             Column(
                 Modifier
                     .ifThen(sorter.isSorting) { alpha(0f) }
@@ -256,6 +273,10 @@ internal fun SettingsScope.MediaSourceGroup(
                     val platform = LocalPlatform.current
 
                     var showMoreDropdown by remember { mutableStateOf(false) }
+                    val moreButtonFocus = remember { FocusRequester() }
+                    // item 长按到阈值时立即把焦点交给三点按钮 (不等松开); 同一次按住的残余
+                    // 事件 (后续连发/最终松开) 落到按钮上时全部吞掉 —— 松开后重新按住才算数
+                    var swallowMoreButtonResidualPress by remember { mutableStateOf(false) }
                     var showConfirmDeletionDialog by rememberSaveable { mutableStateOf(false) }
                     if (showConfirmDeletionDialog) {
                         AlertDialog(
@@ -292,20 +313,69 @@ internal fun SettingsScope.MediaSourceGroup(
                         )
                     }
 
+                    // TV: 完全接管确认键, 短按/长按的动作都在松开 (KeyUp) 时才派发.
+                    // 不能用 combinedClickable 的长按 (按住途中就触发): 按住途中切焦点会把
+                    // 按键事件劈成两半 —— item 只收到 KeyDown 收不到 KeyUp, 按压态卡死
+                    // (表现为残留阴影, 且后续长按行为错乱); KeyUp 落到三点按钮上被当成点击误开菜单.
+                    var itemConfirmKeyDownCount by remember { mutableStateOf(0) }
+                    // item 本体是否聚焦 (不含子元素): 焦点在行内的三点按钮上时, 本行的
+                    // preview 拦截器必须放行 —— 否则按钮 (子节点) 永远收不到确认键,
+                    // 短按会被这里判成"编辑"直接进页面
+                    var itemSelfFocused by remember { mutableStateOf(false) }
+                    val itemFocus = remember { FocusRequester() }
                     MediaSourceItem(
                         item,
-                        Modifier.combinedClickable(
-                            onClickLabel = "编辑",
-                            onLongClick = {
-                                if (platform.isMobile()) {
-                                    sorter.start(state.mediaSources)
+                        Modifier
+                            .focusRequester(itemFocus)
+                            .onFocusChanged {
+                                itemSelfFocused = it.isFocused
+                                // 长按把焦点交给按钮后, 本行收不到那次按住的 KeyUp, 计数手动清零
+                                if (!it.isFocused) itemConfirmKeyDownCount = 0
+                            }
+                            .ifThen(focusDriven) {
+                                onPreviewKeyEvent { event ->
+                                    if (!itemSelfFocused) return@onPreviewKeyEvent false
+                                    val isConfirmKey = event.key == Key.DirectionCenter ||
+                                        event.key == Key.Enter || event.key == Key.NumPadEnter
+                                    if (!isConfirmKey) return@onPreviewKeyEvent false
+                                    when (event.type) {
+                                        KeyEventType.KeyDown -> {
+                                            itemConfirmKeyDownCount++
+                                            // 按住到阈值立即把焦点交给三点按钮 (不等松开);
+                                            // 残余事件由按钮的 swallow 保护吞掉, 不会误触排序/菜单
+                                            if (itemConfirmKeyDownCount == SORT_LONG_PRESS_REPEATS) {
+                                                swallowMoreButtonResidualPress = true
+                                                runCatching { moreButtonFocus.requestFocus() }
+                                            }
+                                            true
+                                        }
+
+                                        KeyEventType.KeyUp -> {
+                                            // 只有未达阈值的短按会走到这里 (达阈值时焦点已交出去)
+                                            val longPressed =
+                                                itemConfirmKeyDownCount >= SORT_LONG_PRESS_REPEATS
+                                            itemConfirmKeyDownCount = 0
+                                            if (!longPressed) startEditing()
+                                            true
+                                        }
+
+                                        else -> false
+                                    }
                                 }
+                            }
+                            .combinedClickable(
+                                onClickLabel = "编辑",
+                                onLongClick = {
+                                    // 焦点驱动形态的确认键已被上面接管, 这里只剩手机的触摸长按
+                                    if (!focusDriven && platform.isMobile()) {
+                                        sorter.start(state.mediaSources)
+                                    }
+                                },
+                                onLongClickLabel = "开始排序",
+                                onClick = startEditing,
+                            ).onRightClickIfSupported {
+                                showMoreDropdown = true
                             },
-                            onLongClickLabel = "开始排序",
-                            onClick = startEditing,
-                        ).onRightClickIfSupported {
-                            showMoreDropdown = true
-                        },
                     ) {
                         IconButton({}, enabled = false) { // 放在 button 里保持 padding 一致
                             ConnectionTesterResultIndicator(
@@ -315,7 +385,64 @@ internal fun SettingsScope.MediaSourceGroup(
                         }
 
                         Box {
-                            IconButton(onClick = { showMoreDropdown = true }) {
+                            // 不用 IconButton: TV 需要自定义确认键长按 (进入排序), 且动作必须在
+                            // 松开时才派发 (同 item 的处理, 否则残余按键事件会误触发排序列表);
+                            // 尺寸/圆形指示与 IconButton (40dp 容器 + 24dp 图标) 一致
+                            var moreConfirmKeyDownCount by remember { mutableStateOf(0) }
+                            Box(
+                                Modifier
+                                    .focusRequester(moreButtonFocus)
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .ifThen(focusDriven) {
+                                        onPreviewKeyEvent { event ->
+                                            // 返回键: 焦点退回本行 item (而不是冒泡出去退出设置页)
+                                            if (event.key == Key.Back || event.key == Key.Escape) {
+                                                if (event.type == KeyEventType.KeyUp) {
+                                                    runCatching { itemFocus.requestFocus() }
+                                                }
+                                                return@onPreviewKeyEvent true
+                                            }
+                                            val isConfirmKey = event.key == Key.DirectionCenter ||
+                                                event.key == Key.Enter || event.key == Key.NumPadEnter
+                                            if (!isConfirmKey) return@onPreviewKeyEvent false
+                                            // 残余按住保护: item 长按把焦点交过来时按键还没松开,
+                                            // 这次按住的剩余事件全部吞掉, 松开后重新按住才算数
+                                            if (swallowMoreButtonResidualPress) {
+                                                if (event.type == KeyEventType.KeyUp) {
+                                                    swallowMoreButtonResidualPress = false
+                                                }
+                                                moreConfirmKeyDownCount = 0
+                                                return@onPreviewKeyEvent true
+                                            }
+                                            when (event.type) {
+                                                KeyEventType.KeyDown -> {
+                                                    moreConfirmKeyDownCount++
+                                                    true
+                                                }
+
+                                                KeyEventType.KeyUp -> {
+                                                    val longPressed =
+                                                        moreConfirmKeyDownCount >= SORT_LONG_PRESS_REPEATS
+                                                    moreConfirmKeyDownCount = 0
+                                                    if (longPressed) {
+                                                        // 长按三点按钮: 进入遥控器排序模式
+                                                        sortInitialFocusId = item.instanceId
+                                                        edit.cancelEdit()
+                                                        sorter.start(state.mediaSources)
+                                                    } else {
+                                                        showMoreDropdown = true
+                                                    }
+                                                    true
+                                                }
+
+                                                else -> false
+                                            }
+                                        }
+                                    }
+                                    .clickable(onClick = { showMoreDropdown = true }),
+                                contentAlignment = Alignment.Center,
+                            ) {
                                 Icon(
                                     Icons.Rounded.MoreVert,
                                     contentDescription = "更多",
@@ -334,7 +461,15 @@ internal fun SettingsScope.MediaSourceGroup(
                     }
                 }
             }
-            if (sorter.isSorting) {
+            }
+            if (sorter.isSorting && focusDriven) {
+                // 焦点驱动排序: 可聚焦列表, 按住选中 -> 上下键移动 -> 确认放下
+                FocusSortMediaSourceList(
+                    sorter,
+                    initialFocusInstanceId = sortInitialFocusId,
+                    Modifier.wrapContentHeight(),
+                )
+            } else if (sorter.isSorting) {
                 // 往上面再盖一层, 因为 SettingsTab 已经有 scrollable 了, LazyColumn 如果不加高度限制会出错
                 LazyColumn(
                     state = sorter.listState,
