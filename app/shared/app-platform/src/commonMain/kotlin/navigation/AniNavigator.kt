@@ -273,6 +273,9 @@ private class AniNavigatorImpl : AniNavigator {
         val stack = currentBackStack
         val firstMain = stack.indexOfFirst { it is NavRoutes.Main }
         if (firstMain != -1) {
+            // 弹回不会重建主页, 路由参数 initialPage 不会重新生效 —— 要切的 tab 走这条通路
+            // 告诉主页 (见 MainPageRequest 的文档: Nav3 的栈里没有可挂东西的 entry)
+            MainPageRequest.pending = mainSceneInitialPage
             stack.popTo(firstMain + 1)
             return
         }
