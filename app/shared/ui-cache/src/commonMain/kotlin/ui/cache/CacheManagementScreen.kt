@@ -12,6 +12,7 @@ package me.him188.ani.app.ui.cache
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.combinedClickable
+import me.him188.ani.app.ui.foundation.tvCombinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -69,8 +70,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
@@ -97,6 +101,8 @@ import me.him188.ani.app.ui.cache.components.DownloadStateIcon
 import me.him188.ani.app.ui.cache.components.TestCacheGroupSates
 import me.him188.ani.app.ui.cache.components.createTestMediaStats
 import me.him188.ani.app.ui.cache.components.rememberCacheFilterAndSortState
+import me.him188.ani.app.ui.foundation.LocalPlatform
+import me.him188.ani.app.ui.foundation.isTv
 import me.him188.ani.app.ui.cache.components.rememberCacheSelectionState
 import me.him188.ani.app.ui.foundation.ProvideCompositionLocalsForPreview
 import me.him188.ani.app.ui.foundation.animation.AniAnimatedVisibility
@@ -210,6 +216,21 @@ fun CacheManagementScreen(
     val cacheFilterState = rememberCacheFilterAndSortState()
     val selectionState = rememberCacheSelectionState()
 
+    // TV: 删除某条目时, 聚焦的是该条目行, 行被移出列表 -> 焦点丢失. 删除后把焦点落到 top bar 右上角按钮
+    // (始终存在). 用 pending 标志 + 等 entries 真正更新后再请求, 避免在列表更新前请求(那时行还在).
+    val isTv = LocalPlatform.current.isTv()
+    val topBarActionFocusRequester = remember { FocusRequester() }
+    var pendingTopBarFocus by remember { mutableStateOf(false) }
+    LaunchedEffect(state.entries) {
+        if (pendingTopBarFocus) {
+            pendingTopBarFocus = false
+            if (isTv) {
+                withFrameNanos { }
+                runCatching { topBarActionFocusRequester.requestFocus() }
+            }
+        }
+    }
+
     val navigator = rememberListDetailPaneScaffoldNavigator<String>()
     val listDetailLayoutParameters = ListDetailLayoutParameters.calculate(navigator.scaffoldDirective)
 
@@ -292,6 +313,7 @@ fun CacheManagementScreen(
                 appBarColors = appBarColors,
                 windowInsets = AniWindowInsets.forTopAppBarWithoutDesktopTitle(),
                 scrollBehavior = scrollBehavior,
+                actionFocusRequester = topBarActionFocusRequester,
             )
         },
         selectedGroup = currentViewingGroup,
@@ -313,7 +335,11 @@ fun CacheManagementScreen(
         onPlay = onPlay,
         onResume = onResume,
         onPause = onPause,
-        onDelete = onDelete,
+        // TV: 单条删除后该行被移除会丢焦点, 标记一下, 待 entries 更新后把焦点落到 top bar.
+        onDelete = { entry ->
+            onDelete(entry)
+            pendingTopBarFocus = true
+        },
         onViewDetail = onViewDetail,
         windowInsets = windowInsets,
         listDetailLayoutParameters = listDetailLayoutParameters,
@@ -532,7 +558,26 @@ private fun CacheManagementTopBar(
     appBarColors: TopAppBarColors,
     windowInsets: WindowInsets,
     scrollBehavior: TopAppBarScrollBehavior?,
+    /** TV: 绑到右上角 action 按钮的 FocusRequester. 由上层 hoist, 既用于切换选择模式后夺回焦点, 也用于
+     *  删除条目后把焦点落到这里(top bar 始终存在). */
+    actionFocusRequester: FocusRequester = remember { FocusRequester() },
 ) {
+    // TV: 切换选择模式会把整个 TopAppBar 换成另一套按钮(if/else 两个不同的 AniTopAppBar), 原来聚焦的
+    // 右上角按钮被销毁 -> 焦点丢失. FocusRequester hoist 在上层(不随 if/else 重建), 绑到两个分支右上角的
+    // action 按钮上; 模式切换后请求焦点回该按钮, 焦点就不会丢. 跳过首次组合, 避免进页面就抢焦点.
+    val isTv = LocalPlatform.current.isTv()
+    var selectionModeSeen by remember { mutableStateOf(false) }
+    LaunchedEffect(selectionMode) {
+        if (!isTv) return@LaunchedEffect
+        if (!selectionModeSeen) {
+            selectionModeSeen = true
+            return@LaunchedEffect
+        }
+        withFrameNanos { } // 等新分支布局完成再请求
+        runCatching { actionFocusRequester.requestFocus() }
+    }
+    val actionFocusModifier = if (isTv) Modifier.focusRequester(actionFocusRequester) else Modifier
+
     if (selectionMode) {
         val selectedCountText = stringResource(Lang.cache_management_selected_count, selectionCount)
         val exitSelectionText = stringResource(Lang.cache_management_exit_selection)
@@ -547,6 +592,7 @@ private fun CacheManagementTopBar(
                 IconButton(
                     onClick = onToggleSelectAll,
                     enabled = hasEntries,
+                    modifier = actionFocusModifier,
                 ) {
                     Icon(
                         if (allSelected) Icons.Default.Deselect else Icons.Default.SelectAll,
@@ -575,6 +621,7 @@ private fun CacheManagementTopBar(
                 IconButton(
                     onClick = onEnterSelection,
                     enabled = hasEntries,
+                    modifier = actionFocusModifier,
                 ) {
                     Icon(Icons.Default.Checklist, enterSelectionModeText)
                 }
@@ -632,7 +679,7 @@ private fun CacheSubjectListItem(
         modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.large)
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+            .tvCombinedClickable(onClick = onClick, onLongClick = onLongClick),
         shape = MaterialTheme.shapes.large,
         tonalElevation = if (selected) 6.dp else 1.dp,
         color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
@@ -732,7 +779,7 @@ private fun CacheListItem(
         modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.large)
-            .combinedClickable(
+            .tvCombinedClickable(
                 onClick = {
                     if (selectionMode) {
                         onToggleSelected()
