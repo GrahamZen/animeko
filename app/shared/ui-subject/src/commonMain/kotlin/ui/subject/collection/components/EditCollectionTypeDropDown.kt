@@ -14,6 +14,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -24,10 +25,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
+import me.him188.ani.app.ui.foundation.tvPlayPauseKey
 import me.him188.ani.app.ui.foundation.widgets.LocalToaster
 import me.him188.ani.app.ui.foundation.widgets.showLoadError
 import me.him188.ani.app.ui.lang.*
@@ -39,6 +42,7 @@ import org.jetbrains.compose.resources.*
 fun EditCollectionTypeDropDown(
     state: EditableSubjectCollectionTypeState,
     modifier: Modifier = Modifier,
+    containerColor: Color = MenuDefaults.containerColor,
 ) {
     val presentation by state.presentationFlow.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -58,6 +62,7 @@ fun EditCollectionTypeDropDown(
             }
         },
         modifier = modifier,
+        containerColor = containerColor,
     )
 }
 
@@ -74,13 +79,18 @@ fun EditCollectionTypeDropDown(
     modifier: Modifier = Modifier,
     actions: List<SubjectCollectionAction> = SubjectCollectionActionsForEdit,
     showDelete: Boolean = currentType != UnifiedCollectionType.NOT_COLLECTED,
+    /** 菜单容器色; TV 详情页传半透明色, 其他平台用默认. */
+    containerColor: Color = MenuDefaults.containerColor,
 ) {
     var showConfirmDeleteDialog by rememberSaveable { mutableStateOf(false) }
     DropdownMenu(
         expanded,
         onDismissRequest = onDismissRequest,
         offset = DpOffset(x = 0.dp, y = 4.dp),
-        modifier = modifier,
+        // 菜单是独立窗口, 按键到不了播放页的根按键路由 —— 从播放器内嵌详情页点开时,
+        // 画面还在后面放着, 遥控器播放暂停键仍该管用. 播放页之外为空操作
+        modifier = modifier.tvPlayPauseKey(),
+        containerColor = containerColor,
     ) {
         for (action in actions) {
             if (!showDelete && action == SubjectCollectionActions.DeleteCollection) continue
@@ -111,6 +121,7 @@ fun EditCollectionTypeDropDown(
         if (showConfirmDeleteDialog) {
             AlertDialog(
                 onDismissRequest = { showConfirmDeleteDialog = false },
+                modifier = Modifier.tvPlayPauseKey(), // 同上: 独立窗口, 自己接播放暂停键
                 title = { Text(stringResource(Lang.subject_collection_delete_confirm_title)) },
                 text = { Text(stringResource(Lang.subject_collection_delete_confirm_message)) },
                 icon = { SubjectCollectionActions.DeleteCollection.icon() },
