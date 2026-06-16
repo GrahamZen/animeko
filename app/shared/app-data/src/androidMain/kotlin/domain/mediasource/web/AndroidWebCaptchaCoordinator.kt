@@ -627,15 +627,12 @@ class AndroidWebCaptchaCoordinator(
                 }
 
                 WebViewVideoExtractor.Instruction.LoadPage -> {
-                    if (currentPageUrl == url) {
-                        return false
-                    }
                     if (!state.loadedNestedUrls.add(url)) {
                         return false
                     }
                     webView.post {
-                        if (state.deferred.isActive && currentPageUrl != url) {
-                            currentPageUrl = url
+                        // webView.url must be read on the main thread (shouldInterceptRequest runs on a background thread)
+                        if (state.deferred.isActive && webView.url != url) {
                             webView.loadUrl(url)
                         }
                     }
