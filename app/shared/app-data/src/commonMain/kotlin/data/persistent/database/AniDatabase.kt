@@ -44,6 +44,7 @@ import me.him188.ani.app.data.persistent.database.dao.SubjectCollectionDao
 import me.him188.ani.app.data.persistent.database.dao.SubjectCollectionEntity
 import me.him188.ani.app.data.persistent.database.dao.SubjectRelationsDao
 import me.him188.ani.app.data.persistent.database.dao.SubjectReviewDao
+import me.him188.ani.app.data.persistent.database.dao.TorrentCacheFileEntity
 import me.him188.ani.app.data.persistent.database.dao.TorrentCacheInfoDao
 import me.him188.ani.app.data.persistent.database.dao.TorrentCacheInfoEntity
 import me.him188.ani.app.data.persistent.database.dao.WebSearchEpisodeInfoDao
@@ -80,6 +81,7 @@ import me.him188.ani.utils.httpdownloader.DownloadState
         WebSearchEpisodeInfoEntity::class,
 
         TorrentCacheInfoEntity::class,
+        TorrentCacheFileEntity::class, // 5.7.1: 按集存储种子内文件, 修复全集种子多集共用串台
         DownloadState::class,
         DanmakuEntity::class,
 
@@ -87,7 +89,7 @@ import me.him188.ani.utils.httpdownloader.DownloadState
         PlaybackHistoryRecordEntity::class,
         PlaybackHistoryPendingOpEntity::class,
     ],
-    version = 21,
+    version = 22,
     autoMigrations = [
         AutoMigration(from = 1, to = 2, spec = Migrations.Migration_1_2::class),
         AutoMigration(from = 2, to = 3, spec = Migrations.Migration_2_3::class),
@@ -189,6 +191,56 @@ val MIGRATION_19_20 = object : Migration(startVersion = 19, endVersion = 20) {
         )
         connection.execSQL(
             "CREATE INDEX IF NOT EXISTS `index_episode_comment_parentCommentId` ON `episode_comment` (`parentCommentId`)",
+        )
+    }
+}
+
+/**
+ * 5.7.1: 把 torrent 缓存的"按集字段" (pathInTorrent/completed/下载量) 从种子级 [torrent_cache]
+ * 拆到按集表 [torrent_cache_file] (主键 mediaId+subjectId+episodeId).
+ *
+ * 修复: 全集种子被多集共用时, 各集共享同一行导致 pathInTorrent 互相覆盖、播放/索引到错误集数.
+ *
+ * 迁移策略: 保留种子级数据 (torrentData/relativeDir) 以复用已下载文件; 按集表留空,
+ * 下次播放每集时通过 selectVideoFileEntry 重新按集解析 + libtorrent 校验已有文件 (不重下) 自愈.
+ */
+val MIGRATION_21_22 = object : Migration(startVersion = 21, endVersion = 22) {
+    override fun migrate(connection: SQLiteConnection) {
+        // 1. 把 torrent_cache 重建为"种子级"表 (去掉按集字段), 保留 torrentData / relativeDir
+        connection.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `torrent_cache_new` (
+                `mediaId` TEXT NOT NULL,
+                `torrentData` BLOB NOT NULL,
+                `relativeDir` TEXT NOT NULL,
+                PRIMARY KEY(`mediaId`)
+            )
+            """.trimIndent(),
+        )
+        connection.execSQL(
+            """INSERT OR IGNORE INTO `torrent_cache_new` (`mediaId`, `torrentData`, `relativeDir`)
+                SELECT `mediaId`, `torrentData`, `relativeDir` FROM `torrent_cache`""",
+        )
+        connection.execSQL("DROP TABLE `torrent_cache`")
+        connection.execSQL("ALTER TABLE `torrent_cache_new` RENAME TO `torrent_cache`")
+        connection.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS `index_torrent_cache_mediaId` ON `torrent_cache` (`mediaId`)",
+        )
+
+        // 2. 新建按集文件表 (留空, 自愈)
+        connection.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `torrent_cache_file` (
+                `mediaId` TEXT NOT NULL,
+                `subjectId` TEXT NOT NULL,
+                `episodeId` TEXT NOT NULL,
+                `pathInTorrent` TEXT NOT NULL,
+                `completed` INTEGER NOT NULL,
+                `downloadSize` INTEGER NOT NULL,
+                `uploadSize` INTEGER NOT NULL,
+                PRIMARY KEY(`mediaId`, `subjectId`, `episodeId`)
+            )
+            """.trimIndent(),
         )
     }
 }
