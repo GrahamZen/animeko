@@ -95,6 +95,16 @@ class TorrentMediaCacheStorage(
         }
     }
 
+    override suspend fun deleteFirst(predicate: (MediaCache) -> Boolean): Boolean {
+        // 必须与 refreshCache/cache 互斥: 服务连接抖动触发的 refreshCache 可能持有删除前的 datastore 快照,
+        // 恢复完成后会把刚删除的条目重新发布回 listFlow, 表现为 "删除无效".
+        // 文件删除放在锁外: closeAndDeleteFiles 需要 torrent 服务, 服务不可用时会挂起,
+        // 不能在持锁状态下等待, 否则会卡住所有 refreshCache 和后续删除.
+        val cache = lock.withLock { removeFirstFromListAndStore(predicate) } ?: return false
+        cache.closeAndDeleteFiles()
+        return true
+    }
+
     override suspend fun restoreFile(
         origin: Media,
         metadata: MediaCacheMetadata,
