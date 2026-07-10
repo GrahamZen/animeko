@@ -81,11 +81,17 @@ abstract class AbstractDataStoreMediaCacheStorage(
                 @OptIn(DelicateCoroutinesApi::class)
                 launch(start = CoroutineStart.ATOMIC) {
                     try {
-                        restoreFile(origin, metadata) {
-                            if (it is LocalFileMediaCache) {
-                                restoredLocalFileMediaCacheIds.update { plus(it.origin.mediaId) }
+                        restoreFile(origin, metadata) { restored ->
+                            if (restored is LocalFileMediaCache) {
+                                restoredLocalFileMediaCacheIds.update { plus(restored.origin.mediaId) }
                             }
-                            allRecovered.update { plus(it) }
+                            allRecovered.update { plus(restored) }
+                            // 增量发布: 恢复未完成的 torrent 缓存需要等 torrent 服务连接, 可能长时间挂起.
+                            // 若等全部恢复完才发布 listFlow, 任一挂起项会把整批 (包括已完成的缓存) 都扣住不显示.
+                            // 这里让恢复完的条目 (尤其是走本地文件快路径的已完成缓存) 立即可见.
+                            listFlow.update {
+                                filterNot { it.cacheId == restored.cacheId } + restored
+                            }
                         }
                     } finally {
                         semaphore.release()
@@ -183,7 +189,19 @@ abstract class AbstractDataStoreMediaCacheStorage(
     }
 
     override suspend fun deleteFirst(predicate: (MediaCache) -> Boolean): Boolean {
-        val cache = listFlow.value.firstOrNull(predicate) ?: return false
+        val cache = removeFirstFromListAndStore(predicate) ?: return false
+        cache.closeAndDeleteFiles()
+        return true
+    }
+
+    /**
+     * 从 [listFlow] 与持久层移除第一个满足 [predicate] 的缓存, 返回被移除的缓存 (没有匹配则返回 `null`).
+     *
+     * 子类可在持锁状态下调用本方法以与 [refreshCache] 互斥, 同时把可能长时间挂起的文件删除
+     * ([MediaCache.closeAndDeleteFiles], 例如需要等待 torrent 服务连接) 留在锁外执行.
+     */
+    protected suspend fun removeFirstFromListAndStore(predicate: (MediaCache) -> Boolean): MediaCache? {
+        val cache = listFlow.value.firstOrNull(predicate) ?: return null
         listFlow.update { minus(cache) }
         restoredLocalFileMediaCacheIds.update { minus(cache.origin.mediaId) }
         withContext(Dispatchers.IO_) {
@@ -191,8 +209,7 @@ abstract class AbstractDataStoreMediaCacheStorage(
                 list.filterNot { isSameMediaAndEpisode(cache, it) }
             }
         }
-        cache.closeAndDeleteFiles()
-        return true
+        return cache
     }
 
     override fun close() {
