@@ -59,7 +59,9 @@ fun TmdbEpisodeStills.matchToEpisodes(
         }
     }
 
-    for (episode in episodes) {
+    // 各集按日期锚定命中的 TMDB 日期键 (供下方三明治兜底定位锚点)
+    val matchedDates = arrayOfNulls<String>(episodes.size)
+    episodes.forEachIndexed { index, episode ->
         val date = episode.episodeInfo.airDate
         val local = if (date.isInvalid) null else runCatching {
             LocalDate(date.year, date.month, date.day)
@@ -67,15 +69,18 @@ fun TmdbEpisodeStills.matchToEpisodes(
         val episodeNumber = episode.episodeInfo.sort.number
             ?.takeIf { it == it.toInt().toFloat() }?.toInt()
 
-        val sameDay = local?.let {
-            byAirDate[it.toString()]
-                ?: byAirDate[it.plus(1, DateTimeUnit.DAY).toString()]
-                ?: byAirDate[it.minus(1, DateTimeUnit.DAY).toString()]
+        val sameDayKey = local?.let {
+            sequenceOf(
+                it.toString(),
+                it.plus(1, DateTimeUnit.DAY).toString(),
+                it.minus(1, DateTimeUnit.DAY).toString(),
+            ).firstOrNull(byAirDate::containsKey)
         }
-        val byDate = sameDay?.let { list ->
+        val byDate = sameDayKey?.let(byAirDate::getValue)?.let { list ->
             // 与当日列表按序对位; 两边同日集数不一致时取末位保底
             list.getOrNull(sameDateOrdinals[episode.episodeId] ?: 0) ?: list.lastOrNull()
         }
+        if (byDate != null) matchedDates[index] = sameDayKey
         // 集号兜底仅限 Bangumi 分集完全没有日期的老番: 有日期却对不上说明匹配到的
         // TMDB 条目本身可疑 (如正传名命中单季外传), 按集号硬凑只会拿到错图.
         // 集名精确一致的 S0 特别篇兜底不受此限 —— 特别篇两边日期记录常有出入
@@ -83,7 +88,22 @@ fun TmdbEpisodeStills.matchToEpisodes(
         val media = byDate
             ?: episodeNumber?.takeIf { local == null }?.let { byEpisodeNumber[it] }
             ?: findSpecialByName(episode.episodeInfo.name, episode.episodeInfo.nameCn)
-            ?: continue
+        if (media != null) result[episode.episodeId] = media
+    }
+
+    // 三明治兜底: 单集停播顺延时两边对同一集记的日期能差一周 (SEED DESTINY 第 3 集:
+    // Bangumi 记实播 10-30, TMDB 记原定 10-23), 超出 ±1 天容差. 若前后两集都已按
+    // 日期锚定, 且 TMDB 时间轴上两锚点之间恰好只剩一个日期、当日只有一集, 则该集
+    // 必然就是它 (两侧锚定保证不会错拿邻集的图).
+    episodes.forEachIndexed { index, episode ->
+        if (episode.episodeId in result) return@forEachIndexed
+        if (episode.episodeInfo.airDate.isInvalid) return@forEachIndexed
+        val prev = matchedDates.getOrNull(index - 1) ?: return@forEachIndexed
+        val next = matchedDates.getOrNull(index + 1) ?: return@forEachIndexed
+        if (prev >= next) return@forEachIndexed
+        val media = byAirDate.keys.filter { it > prev && it < next }
+            .singleOrNull()?.let(byAirDate::getValue)?.singleOrNull()
+            ?: return@forEachIndexed
         result[episode.episodeId] = media
     }
     return result
