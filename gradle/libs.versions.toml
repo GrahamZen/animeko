@@ -275,6 +275,9 @@ androidx-media3-ui = { module = "androidx.media3:media3-ui", version.ref = "andr
 androidx-media3-exoplayer = { module = "androidx.media3:media3-exoplayer", version.ref = "androidx-media3" }
 androidx-media3-exoplayer-dash = { module = "androidx.media3:media3-exoplayer-dash", version.ref = "androidx-media3" }
 androidx-media3-exoplayer-hls = { module = "androidx.media3:media3-exoplayer-hls", version.ref = "androidx-media3" }
+# 取帧 (ExperimentalFrameExtractor): 内部起一个 ExoPlayer 把帧解到 GL 纹理再读回,
+# 因此支持 ExoPlayer 能播的一切 (含 HLS) —— 平台的 MediaMetadataRetriever 不支持 HLS
+androidx-media3-transformer = { module = "androidx.media3:media3-transformer", version.ref = "androidx-media3" }
 
 # mediamp
 mediamp-api = { module = "org.openani.mediamp:mediamp-api", version.ref = "mediamp" }
