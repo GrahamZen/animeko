@@ -327,6 +327,51 @@ fun TvEpisodeScreenContent(
     // 长按倍速生效中: 抬起时据此判断"这是长按, 不要切换播放"
     var fastForwarding by remember { mutableStateOf(false) }
 
+    // ---- 跳过 OP/ED 提示 (左下角气泡) ----
+    // 遥控器上这颗"取消"原本够不着: 没有任何东西把焦点送给它, 根路由也不认识它.
+    // 现在提示一出现就把焦点送过去, 走完 (取消 / 返回收起 / 时间到自动跳) 再把焦点还回原处.
+    val skipTipFocusRequester = remember { FocusRequester() }
+    var skipTipFocused by remember { mutableStateOf(false) }
+    // 焦点确实被送到过气泡上: 只有这样才需要善后, 否则 (用户已用方向键自己走开) 别去抢
+    var skipTipTookFocus by remember { mutableStateOf(false) }
+    // 返回键收起本次提示. 与"取消跳过"不同: 收起只是不看它了, 该跳还是跳
+    var skipTipDismissed by remember { mutableStateOf(false) }
+    val skipTipsShowing = vm.playerSkipOpEdState.showSkipTips
+    val skipTipVisible = skipTipsShowing && !skipTipDismissed
+    LaunchedEffect(skipTipsShowing) {
+        // 复位要挂在"本段 OP/ED 结束"上, 不能挂在气泡可见性上 —— 收起会让可见性翻假,
+        // 在那儿复位等于立刻又把气泡放出来 (自激循环)
+        if (!skipTipsShowing) skipTipDismissed = false
+    }
+    LaunchedEffect(skipTipVisible) {
+        if (skipTipVisible) {
+            // 别的东西正管着焦点时不抢: 气泡是常显的, 而这些形态 (详情层 / 回复弹窗 / 弹幕输入 /
+            // 下拉与独立窗口 / 侧边 sheet / 大图) 各有各的焦点归属, 抢了就把它们弄坏.
+            // 判断放在 effect 里而不是组合里: 这几个字段变化很频繁, 在组合里读会让整个播放器界面
+            // 跟着重组 (见 TvPlayerOverlayState 的性能约定)
+            if (overlay.layer == TvPlayerLayer.DETAILS || overlay.replyingComment != null ||
+                overlay.danmakuInputExpanded || overlay.openPopupCount > 0 ||
+                anySheetVisible || imageViewer.viewing.value
+            ) {
+                return@LaunchedEffect
+            }
+            skipTipTookFocus = resolveFocusRepeatedly(attempts = 20, arrived = { skipTipFocused }) {
+                runCatching { skipTipFocusRequester.requestFocus() }
+            }
+            // 气泡在场期间焦点不许离开它, 控制层的自动隐藏却会把焦点连窝端了 (hideAll 收焦回根节点).
+            // 重置一次计时: 提示的存活时间与计时同量级, 足够撑到它自己走
+            if (skipTipTookFocus) overlay.markInteraction()
+            return@LaunchedEffect
+        }
+        // 气泡走了 (取消 / 返回 / 自动跳过) 而焦点还在它身上: 节点一移除焦点就没了, 得还回去.
+        // 控制层开着就回进度条, 纯视频态回根节点 —— 后者不能也送进度条, 否则按个返回
+        // 反而把控制层唤了出来
+        if (skipTipTookFocus) {
+            skipTipTookFocus = false
+            if (overlay.layer == TvPlayerLayer.CONTROLS) overlay.focusProgress() else overlay.requestRootFocus()
+        }
+    }
+
     // 本页是否在前台. 从面板里点开别的页面 (相关推荐 -> 条目详情页) 期间为 false:
     //   - 那时不自动隐藏控制层 (子树被移除的话, 回来时焦点无处可还);
     //   - 重新回到前台时补发一次焦点落点 —— 离开期间聚焦的那个节点被销毁, Compose 会清掉
@@ -396,6 +441,28 @@ fun TvEpisodeScreenContent(
                 return@router true
             }
             return@router false
+        }
+        // 跳过 OP/ED 气泡持焦中: 气泡没消失之前焦点不许离开它 —— 它只活几秒, 期间只有两种
+        // 有意义的选择, 让方向键把焦点挪到别处只会让"取消"再也按不到.
+        //   返回 = 收起气泡 (该跳还是跳), 确认 = 放行给"取消"按钮, 方向键 = 整个吞掉.
+        // 焦点善后统一由上面那个可见性 effect 做 (气泡以何种方式消失都走它).
+        if (skipTipVisible && skipTipFocused) {
+            overlay.markInteraction()
+            when {
+                isBack -> {
+                    if (isKeyUp) skipTipDismissed = true
+                    return@router true
+                }
+
+                key == Key.DirectionCenter || key == Key.Enter || key == Key.NumPadEnter ->
+                    return@router false
+
+                key == Key.DirectionUp || key == Key.DirectionDown ||
+                        key == Key.DirectionLeft || key == Key.DirectionRight ->
+                    return@router true
+
+                else -> {} // 播放/暂停、上下集等不动焦点, 交给下面的分层路由
+            }
         }
         // 侧边 sheet (数据源/选集/弹幕设置) 打开: 返回关闭, 其余交给 sheet 内部导航
         if (anySheetVisible) {
@@ -767,11 +834,16 @@ fun TvEpisodeScreenContent(
                     .graphicsLayer { alpha = if (fastForwarding) 1f else 0f },
             )
 
-            // 跳过 OP/ED 提示 (左下角, 独立于控制层常显)
+            // 跳过 OP/ED 提示 (左下角, 独立于控制层常显).
+            // 不额外画示焦: 气泡在场期间焦点锁在它里面那颗"取消"上 (见根路由), TextButton
+            // 自带的状态层已经够看
             Box(Modifier.align(Alignment.BottomStart).padding(start = 48.dp, bottom = 140.dp)) {
-                AniAnimatedVisibility(visible = vm.playerSkipOpEdState.showSkipTips) {
+                AniAnimatedVisibility(visible = skipTipVisible) {
                     PlayerControllerDefaults.LeftBottomTips(
                         onClick = { vm.playerSkipOpEdState.cancelSkipOpEd() },
+                        modifier = Modifier
+                            .focusRequester(skipTipFocusRequester)
+                            .onFocusChanged { skipTipFocused = it.hasFocus },
                     )
                 }
             }

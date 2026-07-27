@@ -9,6 +9,7 @@
 
 package me.him188.ani.app.ui.update
 
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.navigationBars
@@ -26,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
@@ -34,6 +36,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import me.him188.ani.app.platform.LocalContext
 import me.him188.ani.app.ui.foundation.LocalAniUiBehavior
 import me.him188.ani.app.ui.foundation.animation.AniAnimatedVisibility
+import me.him188.ani.app.ui.foundation.ifThen
 import me.him188.ani.app.ui.foundation.navigation.BackHandler
 import me.him188.ani.app.ui.foundation.focus.resolveFocusRepeatedly
 import kotlinx.coroutines.delay
@@ -115,6 +118,14 @@ fun BoxScope.UpdateNotifier(
     var cardFocused by remember { mutableStateOf(false) }
     BackHandler(enabled = hasUpdateCard && cardFocused) { dismissed = true }
 
+    // 焦点导航设备: 卡片在场期间焦点锁在卡片内, 方向键走到边界即取消这次焦点搜索.
+    // 不锁的话卡片抢到初始焦点后用户随手一按方向键焦点就滑进下层页面, 而卡片还挡在右下角 ——
+    // 既看不出焦点在哪, 也不知道怎么把它关掉. 锁上后出口只剩三个按钮和返回键, 全是一按之遥.
+    // 只锁"有更新"这张卡 (与上面返回键同理): 下载中那张要挂几分钟, 锁住等于扣着整个应用不放.
+    // 20 秒无操作自动消失仍然有效, 是这个模态的兜底时限; 届时焦点由 NavHost 的兜底监视
+    // (见 AniAppContent 的 navHostModifier) 送回页面, 不会丢在根上.
+    val trapFocus = LocalAniUiBehavior.current.focusDrivenNavigation && hasUpdateCard
+
     AniAnimatedVisibility(
         visible = showCard,
         modifier = Modifier
@@ -122,7 +133,14 @@ fun BoxScope.UpdateNotifier(
             .windowInsetsPadding(WindowInsets.navigationBars)
             .padding(24.dp)
             // 观察整棵子树的焦点 (卡片里的按钮), 而不是本节点自己
-            .onFocusChanged { cardFocused = it.hasFocus },
+            .onFocusChanged { cardFocused = it.hasFocus }
+            // focusProperties 只作用于链上其后的 focusTarget 与子布局节点, 且子节点向上取属性时
+            // 会停在最近的一个 focusTarget 上 —— 也就是这里的 focusGroup, 因此卡片内部按钮之间
+            // 的左右移动不会被 onExit 拦截, 只有跨出整张卡的那一步才会.
+            .ifThen(trapFocus) {
+                focusProperties { onExit = { cancelFocusChange() } }
+                    .focusGroup()
+            },
     ) {
         when {
             state is AppUpdateState.HasUpdate -> {
