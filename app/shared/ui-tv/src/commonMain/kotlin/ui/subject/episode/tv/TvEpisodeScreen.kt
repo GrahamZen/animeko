@@ -24,9 +24,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.rounded.Forward5
 import androidx.compose.material.icons.rounded.Replay5
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -61,6 +64,7 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withTimeoutOrNull
+import me.him188.ani.app.utils.formatSpeedValue
 import me.him188.ani.app.ui.foundation.LocalImageLoader
 import me.him188.ani.app.ui.subject.details.sections.episodeStillImageRequest
 import me.him188.ani.app.ui.subject.details.SubjectDetailsUIState
@@ -86,6 +90,7 @@ import me.him188.ani.app.videoplayer.ui.rememberVideoSideSheetsController
 import me.him188.ani.danmaku.ui.DanmakuHostState
 import org.openani.mediamp.MediampPlayer
 import org.openani.mediamp.PlaybackState
+import org.openani.mediamp.features.PlaybackSpeed
 import org.openani.mediamp.isPlaying
 import org.openani.mediamp.togglePause
 
@@ -103,6 +108,16 @@ private const val TV_STILL_PREFETCH_WAIT_MILLIS = 30_000L
 
 /** 预取当前集之后的集数 (往后是主要浏览方向; 选集条一屏 4 张, 多备几张够翻一屏). */
 private const val TV_STILL_PREFETCH_AHEAD = 6
+
+/**
+ * 拖拽预览缩略图的解码尺寸上界.
+ *
+ * 对齐浮窗里帧区域的实际尺寸: 那个 Box 在 `PreviewFrameAndTimeText` 里是**写死的 160x90dp**,
+ * 请求更大只是解出用不上的像素 (TV 的 640dpi 下 160dp 已经是 640px). 数值恰好也和 Prime 实测
+ * 一致 (1920x1080 布局下缩略图约占屏宽 16.5%, 即 158dp).
+ */
+private val TV_SCRUB_PREVIEW_MAX_WIDTH = 160.dp
+private val TV_SCRUB_PREVIEW_MAX_HEIGHT = 90.dp
 
 /** 详情层淡入时长 (毫秒). */
 private const val TV_DETAILS_FADE_IN_MS = 300
@@ -201,7 +216,93 @@ fun TvEpisodeScreenContent(
         vm.progressChaptersFlow,
         onPreview = {},
         onPreviewFinished = { vm.player.seekTo(it) },
+        // 拖拽预览时白色高亮段留在播放位置, 只有圆点跟着遥控器走 (Prime 行为):
+        // 遥控器是一格一格挪的, 高亮段不动才看得出相对原位置走了多远, 而返回键取消后
+        // 也不需要把高亮段倒回去
+        trackFollowsPreview = false,
     )
+
+    // 拖拽预览的帧源 (小圆点上方的缩略图).
+    //
+    // 用 TV 自己那份而不是 rememberMediaProgressFramePreviewState: 后者的 Android 实现打不开
+    // HLS, 而在线源基本都是 m3u8 —— 详见 TvFramePreviewSource 文件头.
+    //
+    // 建在这里而不是控制层内部: 控制层隐藏时整棵子树被移除, 建在里面每次唤出都重建 ——
+    // 预热好的取帧会话 (建 ExoPlayer + 解析播放列表, 秒级) 和帧缓存全丢, 每次进拖拽态
+    // 第一张缩略图都要重等.
+    //
+    // 尊重"显示视频帧预览"设置项 (与手机端同一个开关): 关掉后浮窗只剩时间文本.
+    val framePreview = if (vm.videoScaffoldConfig.enableFramePreview) {
+        rememberTvFramePreviewState(
+            vm.player,
+            maxWidth = TV_SCRUB_PREVIEW_MAX_WIDTH,
+            maxHeight = TV_SCRUB_PREVIEW_MAX_HEIGHT,
+        )
+    } else {
+        null
+    }
+
+    // ---- 拖拽预览态 (Prime 行为) ----
+    //
+    // "态"没有新字段: 它就是 `progressSliderState.isPreviewing` —— 小圆点脱离播放位置,
+    // 画面停着不动, 圆点上方浮缩略图. 进入方式两种, 语义完全一致:
+    //   - 纯视频态连按两次左右键 (第二次落在中央反馈还没消失的窗口里)
+    //   - 控制层里焦点已在进度条, 直接按左右键
+    // 出口只有两个, 与 Prime 一致:
+    //   - 播放/确认键: 提交 (seek 到圆点) + 继续播放 + 收 UI
+    //   - 返回键: **不提交**, 画面留在原位置 (取消), 只收 UI 并保持暂停
+    // 上下键在这个态里一律吞掉不做事: 拖拽时能做的只有挪圆点和决定去不去, 换焦点区域只会
+    // 让圆点位置和界面对不上 (而且高亮段/缩略图都是围绕进度条的, 换了区域就没意义了).
+
+    /** 把小圆点移一步 (不 seek). 首次调用时以当前播放位置为锚. */
+    fun scrubStep(forward: Boolean) {
+        val total = progressSliderState.totalDurationMillis
+        if (total <= 0L) return // 时长未知 (刚起播/直播) 时进度条本身就没有意义
+        val from = if (progressSliderState.isPreviewing) {
+            (progressSliderState.displayPositionRatio * total).toLong()
+        } else {
+            progressSliderState.currentPositionMillis
+        }
+        val step = if (forward) TV_PLAYER_SEEK_STEP_MILLIS else -TV_PLAYER_SEEK_STEP_MILLIS
+        progressSliderState.previewPositionRatio((from + step).coerceIn(0L, total).toFloat() / total)
+    }
+
+    /** 纯视频态连按第二次: 升级成拖拽预览态. */
+    fun enterScrub(forward: Boolean) {
+        // 中央箭头让位: 接下来的反馈是暂停图标 + 进度条, 三个叠在一起没法看
+        seekFlash.cancel()
+        // 暂停反馈不用手动触发, TvPauseFlash 监听状态流自己会闪
+        vm.player.pause()
+        overlay.showControls() // 焦点落进度条
+        scrubStep(forward)
+    }
+
+    /**
+     * 退出拖拽预览并收起 UI.
+     *
+     * [commit] = true 时跳到圆点并继续播放 (播放/确认键); false 时丢弃圆点位置, 画面留在原处
+     * 且保持暂停 (返回键). 非预览态调用时两个方法都是空操作, 等价于单纯 [TvPlayerOverlayState.hideAll].
+     *
+     * 提交路径用 `resume()` 而不是 `togglePause()`, **无条件**变成播放态: 进入拖拽必然先暂停
+     * (见 [enterScrub]), 所以"确认"在这个态里只可能是"从圆点这儿开始播" —— 与进入之前是播放
+     * 还是暂停无关. 换成 toggle 的话从暂停进来的那次会把播放器又切回暂停.
+     */
+    fun exitScrub(commit: Boolean) {
+        if (commit) {
+            // resume 必须在 seek **之前**: mediamp 的 resume() 只在 READY/PAUSED 两个状态下才真的
+            // 动手 (见 AbstractMediampPlayer.resume), 而 seekTo 会把状态推到 PAUSED_BUFFERING ——
+            // ExoPlayer 在 seekTo 内部就同步派发了 STATE_BUFFERING, 所以下一行 resume() 必然
+            // 落在 PAUSED_BUFFERING 上被静默丢弃, 表现为"按确认键后还是暂停"(确定性复现).
+            //
+            // 反过来先 resume: 此刻状态一定是 PAUSED (进拖拽态时暂停的, 拖动期间不 seek),
+            // resume 生效后 playWhenReady=true, 紧接着的 seek 落地即续播
+            vm.player.resume()
+            progressSliderState.finishPreview() // 内部走 onPreviewFinished -> player.seekTo
+        } else {
+            progressSliderState.cancelPreview()
+        }
+        overlay.hideAll()
+    }
 
     val rootFocusRequester = remember { FocusRequester() }
     val progressRowFocusRequester = remember { FocusRequester() }
@@ -212,6 +313,12 @@ fun TvEpisodeScreenContent(
     // 每一档都换一层 (图标行 -> 选集条 -> 详情层), 连发会一路跳到底 —— 观感是选集条刚滑出来就
     // 闪进了详情页. 松手 (KeyUp) 才解锁. 只锁"换层"的那几档, 面板内按住下键滚列表不受影响
     var downKeyLatched by remember { mutableStateOf(false) }
+    // 确认键当前是否按住 + 每次按下自增的计时锚 (长按倍速用, 见下方长按协程).
+    // 用 tick 而不是布尔的上升沿: 快速连按两次时 collectLatest 才能重启计时
+    var confirmKeyHeld by remember { mutableStateOf(false) }
+    var confirmKeyHoldTick by remember { mutableIntStateOf(0) }
+    // 长按倍速生效中: 抬起时据此判断"这是长按, 不要切换播放"
+    var fastForwarding by remember { mutableStateOf(false) }
 
     // ---- 唯一按键路由: 所有 Back 语义与层级切换都在这里, 状态读取只发生在事件回调内 ----
     val onRootKeyEvent: (KeyEvent) -> Boolean = router@{ event ->
@@ -257,11 +364,35 @@ fun TvEpisodeScreenContent(
 
         when (overlay.layer) {
             TvPlayerLayer.HIDDEN -> {
+                // 确认键: 短按切换播放, **长按倍速** (与手机端长按画面同一功能).
+                //
+                // 因此这一档必须等抬起才知道是哪一种, 不能像别的键那样在 KeyDown 上就动手 ——
+                // 在 KeyDown 上暂停的话, 长按会先闪一下暂停再变速. 专用的播放/暂停键不在此列
+                // (它语义单一, 保持按下即响应).
+                if (key == Key.DirectionCenter || key == Key.Enter || key == Key.NumPadEnter) {
+                    if (isKeyDown) {
+                        // 连发 KeyDown (按住时约 50ms 一次) 只算同一次按下
+                        if (!confirmKeyHeld) {
+                            confirmKeyHeld = true
+                            confirmKeyHoldTick++
+                        }
+                    } else if (isKeyUp) {
+                        confirmKeyHeld = false
+                        // 倍速已生效 = 这是长按, 抬起只负责还原 (由下面的长按协程做), 不切换播放.
+                        // 此刻 fastForwarding 一定还是 true: 协程挂在"等松手"上, 要到下一次
+                        // 调度才会走到还原, 而这里是同一次事件回调内同步读的
+                        if (!fastForwarding) {
+                            // 暂停态下恢复播放不唤出控制层 (画面动起来即反馈); 播放态下暂停仍唤出
+                            val resuming = vm.player.playbackState.value == PlaybackState.PAUSED
+                            vm.player.togglePause()
+                            if (!resuming) overlay.showControls()
+                        }
+                    }
+                    return@router true
+                }
                 if (!isKeyDown) return@router false
                 when (key) {
-                    Key.DirectionCenter, Key.Enter, Key.NumPadEnter,
-                    Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause,
-                        -> {
+                    Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause -> {
                         // 暂停态下恢复播放不唤出控制层 (画面动起来即反馈); 播放态下暂停仍唤出
                         val resuming = vm.player.playbackState.value == PlaybackState.PAUSED
                         vm.player.togglePause()
@@ -274,17 +405,24 @@ fun TvEpisodeScreenContent(
                         true
                     }
 
-                    // 快进退不唤出控制层: 调时间轴不该把画面下半压掉一半再等 5 秒自动隐藏.
-                    // 反馈改走中央快进退图标 (与暂停反馈同款), 见 [TvSeekFlash]
-                    Key.DirectionLeft -> {
-                        vm.player.skip(-TV_PLAYER_SEEK_STEP_MILLIS)
-                        seekFlash.flash(forward = false)
-                        true
-                    }
-
-                    Key.DirectionRight -> {
-                        vm.player.skip(TV_PLAYER_SEEK_STEP_MILLIS)
-                        seekFlash.flash(forward = true)
+                    // 单按: 快进退不唤出控制层 (调时间轴不该把画面下半压掉一半再等 5 秒自动
+                    // 隐藏), 反馈走中央快进退图标, 见 [TvSeekFlash].
+                    //
+                    // 连按: 第二次按键落在"中央反馈还没消失"的窗口里 (约 0.6 秒) 就升级成拖拽
+                    // 预览态 —— 连按说明用户不是想微调 5 秒, 而是要找位置, 这时给进度条 +
+                    // 缩略图才有用. 判据直接用 seekFlash.visible, 与用户看到的东西严格一致,
+                    // 不另外开一个跟视觉无关的计时器.
+                    //
+                    // 按住不放的连发 KeyDown 同样会进拖拽态, 是有意的: 之后每一发都推着圆点
+                    // 走, 正好是"长按连续找位置"
+                    Key.DirectionLeft, Key.DirectionRight -> {
+                        val forward = key == Key.DirectionRight
+                        if (seekFlash.visible) {
+                            enterScrub(forward)
+                        } else {
+                            vm.player.skip(if (forward) TV_PLAYER_SEEK_STEP_MILLIS else -TV_PLAYER_SEEK_STEP_MILLIS)
+                            seekFlash.flash(forward)
+                        }
                         true
                     }
 
@@ -307,14 +445,26 @@ fun TvEpisodeScreenContent(
                 overlay.markInteraction()
                 if (isBack) {
                     if (isKeyUp) {
-                        // 面板条目上: 返回回进度条 (面板随焦点区域变化收起); 其余: 全部隐藏
+                        // 面板条目上: 返回回进度条 (面板随焦点区域变化收起); 其余: 全部隐藏.
+                        // 拖拽预览中: 丢弃圆点位置, 画面留在原处并保持暂停 (返回 = 取消)
                         if (overlay.focusRegion == TvPlayerFocusRegion.PANEL) {
                             overlay.focusProgress()
                         } else {
-                            overlay.hideAll()
+                            exitScrub(commit = false)
                         }
                     }
                     return@router true
+                }
+                // 拖拽预览中: 除左右 (挪圆点) / 确认与播放 (去) / 返回 (不去) 之外一律吞掉.
+                // 上下键换焦点区域会让界面和圆点位置对不上, 换集则直接把圆点所指的时间轴换掉.
+                // KeyUp 也吞: 空间焦点导航只吃 KeyDown, 但放行 KeyUp 没有意义
+                if (progressSliderState.isPreviewing) {
+                    when (key) {
+                        Key.DirectionUp, Key.DirectionDown, Key.MediaFastForward, Key.MediaRewind ->
+                            return@router true
+
+                        else -> {}
+                    }
                 }
                 if (!isKeyDown) return@router false
                 when (key) {
@@ -351,33 +501,33 @@ fun TvEpisodeScreenContent(
                             false
                         }
 
-                    // 进度条行: 左右快进退, 确认切换播放
-                    Key.DirectionLeft ->
+                    // 进度条行的左右键 = 拖拽预览 (圆点走, 画面不走), 与纯视频态连按两次进来的
+                    // 是同一个态: 焦点已经在进度条上, 就不必再要求"连按"作为意图确认了.
+                    // 首次进入顺手暂停 —— 画面继续跑而圆点停在别处, 两个位置对不上
+                    Key.DirectionLeft, Key.DirectionRight ->
                         if (overlay.focusRegion == TvPlayerFocusRegion.PROGRESS) {
-                            vm.player.skip(-TV_PLAYER_SEEK_STEP_MILLIS)
+                            if (!progressSliderState.isPreviewing) vm.player.pause()
+                            scrubStep(forward = key == Key.DirectionRight)
                             true
                         } else {
                             false
                         }
 
-                    Key.DirectionRight ->
-                        if (overlay.focusRegion == TvPlayerFocusRegion.PROGRESS) {
-                            vm.player.skip(TV_PLAYER_SEEK_STEP_MILLIS)
-                            true
-                        } else {
-                            false
-                        }
-
+                    // 拖拽预览中: 确认 = 跳到圆点并继续播放, 同时收起 UI (Prime 行为)
                     Key.DirectionCenter, Key.Enter, Key.NumPadEnter ->
                         if (overlay.focusRegion == TvPlayerFocusRegion.PROGRESS) {
-                            vm.player.togglePause()
+                            if (progressSliderState.isPreviewing) exitScrub(commit = true)
+                            else vm.player.togglePause()
                             true
                         } else {
                             false
                         }
 
                     Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause -> {
-                        vm.player.togglePause()
+                        // 播放键在拖拽预览中与确认键同义 (遥控器上播放/暂停通常是同一个物理键,
+                        // 拖拽态本来就是暂停的, 按它的意思只可能是"从这儿开始播")
+                        if (progressSliderState.isPreviewing) exitScrub(commit = true)
+                        else vm.player.togglePause()
                         true
                     }
 
@@ -448,6 +598,41 @@ fun TvEpisodeScreenContent(
         snapshotFlow { overlay.focusRegion }.collectLatest { region ->
             if (region == TvPlayerFocusRegion.PROGRESS || region == TvPlayerFocusRegion.BOTTOM_ROW) {
                 overlay.activePanel = null
+            }
+            // 兜底: 焦点若离开了进度条, 拖拽预览就地取消 (不 seek). 按键路由已经把拖拽态里的
+            // 上下键吞掉了, 正常走不到这里 —— 但焦点也可能被非按键路径挪走 (自动连播换集、
+            // 侧边 sheet 被别处打开), 那时圆点脱离播放位置留在屏上, 后续显示全是错的.
+            //
+            // NONE 不算离开: 它是焦点交接的瞬时值, 也是 showControls() 写下的初值 ——
+            // 连按进拖拽态正是"先置 NONE 再设预览", 按 NONE 取消会当场把刚进的态撤销掉
+            if (region != TvPlayerFocusRegion.PROGRESS && region != TvPlayerFocusRegion.NONE) {
+                progressSliderState.cancelPreview()
+            }
+        }
+    }
+    // 长按确认键倍速播放 (与手机端长按画面同一功能, 见 PlayerFastSkipState).
+    //
+    // 倍数复用设置里的"长按倍速倍率" (默认 2.5x —— 3 倍弹幕会跳, 见上游 #1524), 不另开一个开关.
+    //
+    // collectLatest: 松手前又按一次会重启计时, 而旧一轮的 finally 负责把倍速还原回去,
+    // 不会把"倍速中的倍速"记成原速
+    LaunchedEffect(Unit) {
+        snapshotFlow { confirmKeyHoldTick }.collectLatest { tick ->
+            if (tick == 0) return@collectLatest // 初值, 还没按过
+            delay(TV_FAST_FORWARD_HOLD_MILLIS)
+            if (!confirmKeyHeld) return@collectLatest // 短按, 已经在抬起时当切换播放处理了
+            val playbackSpeed = vm.player.features[PlaybackSpeed] ?: return@collectLatest
+            val originalSpeed = playbackSpeed.value
+            fastForwarding = true
+            try {
+                playbackSpeed.set(vm.videoScaffoldConfig.fastForwardSpeed)
+                // 挂到松手为止. 也监视层级: 松手事件有可能压根收不到 (期间焦点被别处抢走,
+                // 比如自动连播换集), 那样倍速会一直挂着不还原
+                snapshotFlow { confirmKeyHeld && overlay.layer == TvPlayerLayer.HIDDEN }.first { !it }
+            } finally {
+                // 取消 (离屏/重启一轮) 也要还原, 所以放在 finally 而不是挂起之后
+                playbackSpeed.set(originalSpeed)
+                fastForwarding = false
             }
         }
     }
@@ -522,6 +707,15 @@ fun TvEpisodeScreenContent(
             // 快进退反馈: 纯视频态左右键不唤出控制层, 这是唯一的反馈
             TvSeekFlash(seekFlash, Modifier.align(Alignment.Center))
 
+            // 长按倍速指示: 按住期间常显 (不是闪一下就走的反馈, 用户需要知道"现在还在倍速").
+            // 状态读在 graphicsLayer 的 lambda 里: 直接读会让整个播放器界面随它出现/消失重组
+            TvFastForwardIndicator(
+                speed = vm.videoScaffoldConfig.fastForwardSpeed,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .graphicsLayer { alpha = if (fastForwarding) 1f else 0f },
+            )
+
             // 跳过 OP/ED 提示 (左下角, 独立于控制层常显)
             Box(Modifier.align(Alignment.BottomStart).padding(start = 48.dp, bottom = 140.dp)) {
                 AniAnimatedVisibility(visible = vm.playerSkipOpEdState.showSkipTips) {
@@ -542,6 +736,7 @@ fun TvEpisodeScreenContent(
                     page = page,
                     danmakuEditorState = danmakuEditorState,
                     progressSliderState = progressSliderState,
+                    framePreview = framePreview,
                     progressRowFocusRequester = progressRowFocusRequester,
                     bottomRowFocusRequester = bottomRowFocusRequester,
                     episodeStripFocusRequester = episodeStripFocusRequester,
@@ -692,6 +887,11 @@ private class TvSeekFlashState {
     fun onFinished() {
         visible = false
     }
+
+    /** 立即收起 (连按升级成拖拽预览态时: 中央箭头不该和暂停提示叠在一起). */
+    fun cancel() {
+        visible = false
+    }
 }
 
 /**
@@ -712,6 +912,38 @@ private fun TvSeekFlash(
             null,
             mod.size(TV_SEEK_FLASH_ICON_SIZE),
             tint = color,
+        )
+    }
+}
+
+/**
+ * 长按倍速指示 (按住确认键期间常显): 深色药丸 + 双箭头 + 倍数.
+ *
+ * 与暂停/快进退那两个中央反馈不同, 这个**不渐隐** —— 它表示的是一个持续状态, 不是一次动作.
+ * 因此也不用 [TvCenterFlash] 那套投影, 改用药丸底: 常显期间画面还在动, 白字加投影会糊.
+ */
+@Composable
+private fun TvFastForwardIndicator(
+    speed: Float,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier
+            .background(Color.Black.copy(alpha = 0.55f), CircleShape)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Rounded.FastForward,
+            null,
+            Modifier.size(TV_FAST_FORWARD_ICON_SIZE),
+            tint = Color.White,
+        )
+        Text(
+            "${speed.formatSpeedValue()}x",
+            color = Color.White,
+            style = MaterialTheme.typography.titleMedium,
         )
     }
 }
@@ -743,6 +975,15 @@ private val TV_PAUSE_FLASH_BAR_GAP = 7.5.dp
  * 33.3dp, 与 32.5dp 差 3% —— 不能按"图形高度"凑 (那样得 34dp, 外接圆就小了两成).
  */
 private val TV_SEEK_FLASH_ICON_SIZE = 40.dp
+
+/**
+ * 确认键按住多久算长按 (毫秒). 与手机端 [detectLongPressGesture] 的 500ms 对齐 ——
+ * 两端"长按"的手感应当一致.
+ */
+private const val TV_FAST_FORWARD_HOLD_MILLIS = 500L
+
+/** 长按倍速指示里的双箭头尺寸. */
+private val TV_FAST_FORWARD_ICON_SIZE = 26.dp
 
 /** 暂停反馈的渐隐时长与起始停留 (毫秒). */
 private const val TV_PAUSE_FLASH_DURATION_MS = 500

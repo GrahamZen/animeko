@@ -68,6 +68,7 @@ import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -113,12 +114,14 @@ import me.him188.ani.app.ui.subject.episode.video.components.EpisodeVideoSideShe
 import me.him188.ani.app.videoplayer.ui.PlaybackSpeedControllerState
 import me.him188.ani.app.videoplayer.ui.VideoAspectRatioControllerState
 import me.him188.ani.app.videoplayer.ui.VideoSideSheetsController
+import me.him188.ani.app.videoplayer.ui.progress.MediaProgressFramePreviewState
 import me.him188.ani.app.videoplayer.ui.progress.MediaProgressSlider
 import me.him188.ani.app.videoplayer.ui.progress.MediaProgressSliderDefaults
 import me.him188.ani.app.videoplayer.ui.progress.PlayerControllerDefaults
 import me.him188.ani.app.videoplayer.ui.progress.PlayerControllerDefaults.SpeedSwitcher
 import me.him188.ani.app.videoplayer.ui.progress.PlayerControllerDefaults.VideoAspectRatioSelector
 import me.him188.ani.app.videoplayer.ui.progress.PlayerProgressSliderState
+import me.him188.ani.app.videoplayer.ui.progress.ProgressSliderPreviewStyle
 import me.him188.ani.app.videoplayer.ui.progress.SubtitleSwitcher
 import me.him188.ani.app.videoplayer.ui.top.SystemTime
 import org.jetbrains.compose.resources.stringResource
@@ -157,6 +160,8 @@ internal fun TvPlayerControlsOverlay(
     page: EpisodePageState,
     danmakuEditorState: DanmakuEditorState,
     progressSliderState: PlayerProgressSliderState,
+    /** 拖拽预览的帧源 (小圆点上方缩略图); null = 设置里关掉了帧预览, 浮窗只剩时间. */
+    framePreview: MediaProgressFramePreviewState?,
     progressRowFocusRequester: FocusRequester,
     bottomRowFocusRequester: FocusRequester,
     episodeStripFocusRequester: FocusRequester,
@@ -249,19 +254,27 @@ internal fun TvPlayerControlsOverlay(
                         )
                     }
 
-                    // 胶囊按钮行 (+ 弹幕发送展开框)
+                    // 胶囊按钮行 (+ 弹幕发送展开框).
+                    //
+                    // 拖拽预览中按成隐形: 缩略图浮窗就浮在圆点上方, 正好压在这一行上,
+                    // 两层叠着看不清. 只按 alpha 不移出组合 —— 节点还在, 上键的落点请求器
+                    // 保持附着, 而按上键会让焦点离开进度条, 预览随即提交, 这一行同帧就回来了.
+                    // 状态读在 graphicsLayer 的 lambda 里, 圆点每走一步只失效图层不重组整层
                     TvPlayerPillsRow(
                         overlay = overlay,
                         danmakuEditorState = danmakuEditorState,
                         vm = vm,
                         pillFocusRequesters = pillFocusRequesters,
-                        modifier = Modifier.padding(bottom = 18.dp),
+                        modifier = Modifier
+                            .padding(bottom = 18.dp)
+                            .graphicsLayer { alpha = if (progressSliderState.isPreviewing) 0f else 1f },
                     )
 
                     // 进度条行
                     TvPlayerProgressRow(
                         vm = vm,
                         progressSliderState = progressSliderState,
+                        framePreview = framePreview,
                         overlay = overlay,
                         focusRequester = progressRowFocusRequester,
                         // 图标行暂隐期间不能指向它 (节点已移出组合, 未附着的请求器会抛)
@@ -269,9 +282,14 @@ internal fun TvPlayerControlsOverlay(
                         upFocus = pillFocusRequesters.getValue(TV_PILL_VISUAL_ORDER.first()),
                     )
 
-                    // 图标行 (原顶栏按钮并入; 再往下 = 选集条, 由根路由处理)
+                    // 图标行 (原顶栏按钮并入; 再往下 = 选集条, 由根路由处理).
+                    // 拖拽预览中同样按成隐形 (同上: 那会儿唯一该看的是圆点和缩略图)
                     AniAnimatedVisibility(visible = !hideBelowProgress) {
-                        Column {
+                        Column(
+                            Modifier.graphicsLayer {
+                                alpha = if (progressSliderState.isPreviewing) 0f else 1f
+                            },
+                        ) {
                             Spacer(Modifier.height(6.dp))
                             TvPlayerBottomRow(
                                 overlay = overlay,
@@ -448,13 +466,18 @@ private val TV_ICON_SIZE = 20.dp
 private val TV_ICON_SIZE_VISUAL_COMPENSATED = 18.dp
 
 /**
- * 进度条行: 左当前时间 + 中间进度条 + 右总时长; 整行是一个焦点节点 (左右键快进退由根路由
- * 处理), 示焦即进度圆点本身 —— 未聚焦时圆点隐藏, 聚焦时出现 (无光环, 不给整行加底色).
+ * 进度条行: 左当前时间 + 中间进度条 + 右总时长; 整行是一个焦点节点 (左右键由根路由处理),
+ * 示焦即进度圆点本身 —— 未聚焦时圆点隐藏, 聚焦时出现 (无光环, 不给整行加底色).
+ *
+ * 拖拽预览态 (根路由的 scrubStep) 下圆点脱离播放位置, 上方浮出缩略图 + 目标时间:
+ * 那个浮窗是 [MediaProgressSlider] 里 `showPreviewTimeTextOnThumb` 那条分支画的,
+ * 它锚在圆点上, 本来就是给"程序驱动的 detached slider"准备的, TV 这边只要把开关打开.
  */
 @Composable
 private fun TvPlayerProgressRow(
     vm: EpisodeViewModel,
     progressSliderState: PlayerProgressSliderState,
+    framePreview: MediaProgressFramePreviewState?,
     overlay: TvPlayerOverlayState,
     focusRequester: FocusRequester,
     /** 下键的显式落点 (图标行最左按钮): 整行全宽, 交给空间搜索会落到行中间的按钮. */
@@ -479,6 +502,8 @@ private fun TvPlayerProgressRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
+            // 拖拽预览中这里仍是**播放位置** (Prime 实测): 目标时间由圆点上方的浮窗给出,
+            // 两处都显示目标就没人告诉用户"原来播到哪儿了", 返回取消后也失去了参照
             renderTvPlayerTime(progressSliderState.currentPositionMillis),
             color = Color.White,
             style = MaterialTheme.typography.labelLarge,
@@ -499,7 +524,12 @@ private fun TvPlayerProgressRow(
                     trackBackgroundColor = Color.White.copy(alpha = 0.3f),
                 ),
                 enabled = false, // 展示用; 快进退走遥控器左右键 (根路由)
-                showPreviewTimeTextOnThumb = false,
+                // 拖拽预览态时在圆点上方浮出"缩略图 + 目标时间"
+                showPreviewTimeTextOnThumb = true,
+                framePreview = framePreview,
+                // 只显示画面, 时间叠在画面底部居中 (Prime 风格): 卡片样式那一圈底色 + 帧下方
+                // 另占一行的文字, 在电视上比画面本身还显眼
+                previewStyle = ProgressSliderPreviewStyle.FrameOnly,
             )
         }
         Text(
