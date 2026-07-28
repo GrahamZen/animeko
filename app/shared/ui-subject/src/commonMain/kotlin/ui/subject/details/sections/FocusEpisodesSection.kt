@@ -72,6 +72,7 @@ import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.key.Key
@@ -104,6 +105,7 @@ import coil3.size.Size
 import me.him188.ani.app.data.network.tmdbStillCardSizeUrl
 import me.him188.ani.app.ui.foundation.AsyncImage
 import me.him188.ani.app.ui.foundation.focus.resolveFocusRepeatedly
+import me.him188.ani.app.ui.foundation.theme.glassContainerColor
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.subject_details_episodes
 import me.him188.ani.app.ui.lang.subject_episode_cache
@@ -182,6 +184,16 @@ fun FocusEpisodeCarousel(
     endPadding: Dp = horizontalPadding,
     /** 可选标题行 (如 "选集" + 连载进度); null 时不渲染 (TV 详情页该位置放聚焦集小标题). */
     header: (@Composable () -> Unit)? = null,
+    /**
+     * true 时卡片与聚焦描边改用纯黑白 (见 [FocusEpisodeCard] 的同名参数).
+     * 播放器选集条用: 卡片浮在视频画面上, 主题色与画面抢注意力.
+     */
+    monochrome: Boolean = false,
+    /**
+     * true 时无图卡片改用半透明玻璃底 (见 [FocusEpisodeCard] 的同名参数).
+     * TV 详情页用: 底下压着 backdrop 背景图, 实心底色会把图盖掉.
+     */
+    glass: Boolean = false,
     /**
      * 非 null 时卡片按上键固定聚焦到该目标 (如区块标题行右侧的网格入口按钮).
      * 不指定时空间焦点搜索只考虑与聚焦卡片同列 ("beam" 内) 的候选 —— 聚焦卡片固定在行首最左,
@@ -523,18 +535,25 @@ fun FocusEpisodeCarousel(
                             stillUrl = episodeStills[item.episodeId],
                             isPlaying = item.episodeId == currentEpisodeId,
                             onClick = { onEpisodeClick(item) },
+                            monochrome = monochrome,
+                            glass = glass,
                             modifier = Modifier.width(cellWidth)
                                 .then(
                                     if (ringFocused) {
                                         Modifier.border(
                                             FOCUS_RING_WIDTH,
-                                            // 主题动态色渐变 (左上 primary → 右下 secondary)
-                                            Brush.linearGradient(
-                                                listOf(
-                                                    MaterialTheme.colorScheme.primary,
-                                                    MaterialTheme.colorScheme.secondary,
-                                                ),
-                                            ),
+                                            if (monochrome) {
+                                                // 黑白态: 纯白描边 (同播放器面板条目)
+                                                SolidColor(Color.White)
+                                            } else {
+                                                // 主题动态色渐变 (左上 primary → 右下 secondary)
+                                                Brush.linearGradient(
+                                                    listOf(
+                                                        MaterialTheme.colorScheme.primary,
+                                                        MaterialTheme.colorScheme.secondary,
+                                                    ),
+                                                )
+                                            },
                                             RoundedCornerShape(EPISODE_CARD_CORNER),
                                         )
                                     } else Modifier,
@@ -581,6 +600,18 @@ fun FocusEpisodeCarousel(
 
 /** TV 选集卡片聚焦时的外圈描边宽度 (紧贴卡片圆角, 画在卡片边缘内侧, 不会被 LazyRow 裁掉). */
 private val FOCUS_RING_WIDTH = 1.5.dp
+
+/**
+ * 玻璃态无图卡片的墨色浓度 (见 [FocusEpisodeCard] 的 `glass`).
+ *
+ * 比同页标签/按钮那档 ([GLASS_CONTAINER_ALPHA]) 略浓: 卡片面积大得多, 太淡就跟背景糊在一起,
+ * 一排卡片看不出边界. 看过的再减一档, 与不透明那套里 `surfaceContainerLow` 的"退到后面"同义.
+ */
+private const val GLASS_CARD_ALPHA = 0.14f
+private const val GLASS_CARD_WATCHED_ALPHA = 0.07f
+
+/** 玻璃态"正在播放"卡片的底色不透明度: 比墨色档高, 主色调要压得住背景图才认得出是在播的那集. */
+private const val GLASS_CARD_PLAYING_ALPHA = 0.55f
 
 /**
  * 弹窗关闭后把焦点交还给指定卡片时, 目标须连续持有焦点的帧数才算稳.
@@ -676,25 +707,73 @@ fun FocusEpisodeCard(
      */
     swallowConfirmKeys: Boolean = false,
     onConfirmKeysReleased: () -> Unit = {},
+    /**
+     * true 时改用纯黑白配色 (半透明白底 + 白字, 聚焦即白底黑字), 与播放器控制层的胶囊按钮一致.
+     *
+     * 给播放器选集条用: 那片卡片浮在视频画面上, 主题色会跟画面本身抢注意力.
+     */
+    monochrome: Boolean = false,
+    /**
+     * true 时无图卡片改用半透明玻璃底 ([glassContainerColor]) 而不是实心 `surfaceContainer*`.
+     *
+     * 给 TV 详情页用: 那页底下压着 backdrop 背景图, 实心底色会把图整块盖掉, 一排无图卡片
+     * 看起来就是几个色块; 玻璃底透出背景, 与同页的标签/按钮 (它们本来就是这个底) 一致.
+     * 有图的卡片不受影响 —— 图本身就铺满了整张卡.
+     */
+    glass: Boolean = false,
 ) {
     val isWatched = item.isDoneOrDropped
+    val interactionSource = remember { MutableInteractionSource() }
+    val focused by interactionSource.collectIsFocusedAsState()
     val containerColor = when {
+        // 黑白态: 底一律半透明白 (与胶囊按钮同一档 alpha), 聚焦即实心白
+        monochrome -> when {
+            focused -> Color.White
+            isPlaying -> Color.White.copy(alpha = 0.28f)
+            isWatched -> Color.White.copy(alpha = 0.08f)
+            else -> Color.White.copy(alpha = 0.14f)
+        }
+
+        // 玻璃态: 与不透明那套一一对应 (在播=主色调, 看过=更淡, 其余=基准), 只是都透出背景.
+        // 在播那档保留 primaryContainer 的色相 (它是"正在播放"的既有语义色), 只压透明度
+        glass -> when {
+            isPlaying -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = GLASS_CARD_PLAYING_ALPHA)
+            isWatched -> glassContainerColor(GLASS_CARD_WATCHED_ALPHA)
+            else -> glassContainerColor(GLASS_CARD_ALPHA)
+        }
+
         isPlaying -> MaterialTheme.colorScheme.primaryContainer
         isWatched -> MaterialTheme.colorScheme.surfaceContainerLow
         else -> MaterialTheme.colorScheme.surfaceContainerHigh
     }
-    val dimmed = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+    val dimmed = if (monochrome) {
+        Color.White.copy(alpha = 0.6f)
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+    }
     val sortColor = when {
+        // 白底上一律黑字 (反色示焦, 同胶囊按钮)
+        monochrome && focused -> Color.Black
+        monochrome -> if (isWatched) dimmed else Color.White
         isPlaying -> MaterialTheme.colorScheme.primary
         isWatched -> dimmed
         else -> LocalContentColor.current
     }
-    val nameColor = if (isWatched) dimmed else MaterialTheme.colorScheme.onSurfaceVariant
+    val nameColor = when {
+        monochrome && focused -> Color.Black.copy(alpha = 0.75f)
+        monochrome -> if (isWatched) dimmed else Color.White.copy(alpha = 0.85f)
+        isWatched -> dimmed
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    // 进度条: 黑白态下白底上用黑, 否则白 (图上) / 主色 (纯文字卡)
+    val progressColor = when {
+        monochrome && focused -> Color.Black
+        monochrome -> Color.White
+        else -> MaterialTheme.colorScheme.primary
+    }
     // 已看的集固定满条 ("看过"由进度条表达, 图不再压暗); 未看完的显示续播点
     val effectiveProgress = if (isWatched) 1f else progress
 
-    val interactionSource = remember { MutableInteractionSource() }
-    val focused by interactionSource.collectIsFocusedAsState()
     val name = item.nameCn.ifBlank { item.name }
 
     // 图标尺寸用 sp (跟随字体缩放), 并按矢量内部留白补偿, 使可见图形高度 ≈ 集号数字
@@ -815,6 +894,8 @@ fun FocusEpisodeCard(
                     effectiveProgress,
                     trackColor = Color.White.copy(alpha = 0.3f),
                     Modifier.align(Alignment.BottomStart),
+                    // 图上一律白 (scrim 之上), 黑白态也一样
+                    progressColor = if (monochrome) Color.White else MaterialTheme.colorScheme.primary,
                 )
             }
         } else {
@@ -862,8 +943,15 @@ fun FocusEpisodeCard(
                 }
                 FocusEpisodeProgressBar(
                     effectiveProgress,
-                    trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+                    trackColor = if (monochrome && focused) {
+                        Color.Black.copy(alpha = 0.2f)
+                    } else if (monochrome) {
+                        Color.White.copy(alpha = 0.3f)
+                    } else {
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+                    },
                     Modifier.align(Alignment.BottomStart),
+                    progressColor = progressColor,
                 )
             }
         }
@@ -887,6 +975,7 @@ private fun FocusEpisodeProgressBar(
     progress: Float?,
     trackColor: Color,
     modifier: Modifier = Modifier,
+    progressColor: Color = MaterialTheme.colorScheme.primary,
 ) {
     if (progress == null || progress <= 0f) return
     Box(
@@ -903,7 +992,7 @@ private fun FocusEpisodeProgressBar(
         Box(
             Modifier.fillMaxWidth(progress.coerceIn(0f, 1f))
                 .fillMaxHeight()
-                .background(MaterialTheme.colorScheme.primary),
+                .background(progressColor),
         )
     }
 }
@@ -944,6 +1033,42 @@ fun FocusEpisodeMetaColumn(
         }
     }
 }
+
+/**
+ * [FocusEpisodeGridDropdown] 里聚焦集的元数据: 时长与播出日期**并作一行**
+ * ("24 分钟 · 2024-01-15"), 字号与左边的标题一致.
+ *
+ * 不用 [FocusEpisodeMetaColumn] 那种上下两行: 那一行左边只有一行标题, 右边一旦是两行就由它
+ * 决定行高 —— 而时长来自 TMDB, 异步到达且不是每集都有, 于是在"有时长"与"没时长"的集之间移动
+ * 焦点时整行会在一行与两行之间跳. 菜单是从锚点**向上**弹的 (见上面的 positionProvider),
+ * 高度一变整个面板就跟着上下抖.
+ *
+ * 播放器选集条那边不受影响, 不必跟着改: 它左侧是固定三行的简介, 行高由简介决定,
+ * 右边两行还是一行都撑不动它.
+ */
+@Composable
+private fun FocusEpisodeMetaLine(
+    runtimeMinutes: Int?,
+    airDate: PackedDate,
+    modifier: Modifier = Modifier,
+) {
+    val text = listOfNotNull(
+        runtimeMinutes?.let { stringResource(Lang.subject_episode_duration_minutes, it) },
+        formatAirDate(airDate),
+    ).joinToString(EPISODE_META_SEPARATOR)
+    if (text.isEmpty()) return
+    Text(
+        text,
+        modifier,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.bodyMedium,
+        maxLines = 1,
+        softWrap = false,
+    )
+}
+
+/** 时长与播出日期之间的分隔. */
+private const val EPISODE_META_SEPARATOR = " · "
 
 private fun formatAirDate(date: PackedDate): String? {
     if (date == PackedDate.Invalid) return null
@@ -1070,8 +1195,9 @@ fun FocusEpisodeGridDropdown(
                 }
             }
             if (displayed != null) {
-                // 固定单行高度, 避免焦点在方块间移动时下方网格上下跳动;
-                // 标题太长时跑马灯滚动 (basicMarquee 不溢出则静止), 右侧时长/播出日期
+                // 恒为单行: 左标题与右侧元数据同字号、同 maxLines = 1, 行高与"有没有时长/日期"
+                // 无关. 菜单从锚点向上弹, 内容高度一变整个面板就上下抖 (见 [FocusEpisodeMetaLine]).
+                // 标题太长时跑马灯滚动 (basicMarquee 不溢出则静止)
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(24.dp),
@@ -1084,7 +1210,7 @@ fun FocusEpisodeGridDropdown(
                         style = MaterialTheme.typography.bodyMedium,
                         maxLines = 1,
                     )
-                    FocusEpisodeMetaColumn(
+                    FocusEpisodeMetaLine(
                         runtimeMinutes = episodeRuntimes[displayed.episodeId],
                         airDate = displayed.airDate,
                     )

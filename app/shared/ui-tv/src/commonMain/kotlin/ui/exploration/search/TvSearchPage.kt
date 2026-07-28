@@ -169,7 +169,6 @@ import me.him188.ani.app.ui.lang.exploration_search_sort_rank
 import me.him188.ani.app.ui.lang.search_tv_empty
 import me.him188.ani.app.ui.lang.search_tv_filter
 import me.him188.ani.app.ui.lang.search_tv_filter_any
-import me.him188.ani.app.ui.lang.search_tv_filter_cancel
 import me.him188.ani.app.ui.lang.search_tv_filter_confirm
 import me.him188.ani.app.ui.lang.search_tv_filter_rating_min
 import me.him188.ani.app.ui.lang.search_tv_filter_sort
@@ -1344,15 +1343,11 @@ private fun TvSearchFilterDialog(
                         }
                     }
                 }
+                // 只有"确认": 取消 = 返回键 (弹窗出口只留一个, 也不占焦点位)
                 Row(
                     Modifier.fillMaxWidth().padding(top = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
                 ) {
-                    TvSearchFilterChip(
-                        text = stringResource(Lang.search_tv_filter_cancel),
-                        selected = false,
-                        onClick = onDismiss,
-                    )
                     TvSearchFilterChip(
                         text = stringResource(Lang.search_tv_filter_confirm),
                         selected = true,

@@ -11,7 +11,6 @@ package me.him188.ani.app.ui.rating
 
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
@@ -29,6 +28,7 @@ import me.him188.ani.app.data.models.subject.SubjectInfo
 import me.him188.ani.app.data.models.subject.TestSelfRatingInfo
 import me.him188.ani.app.data.models.subject.TestSubjectInfo
 import me.him188.ani.app.tools.MonoTasker
+import me.him188.ani.app.ui.foundation.widgets.DismissDialogButton
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.rating_requires_collection
 import me.him188.ani.app.ui.lang.settings_mediasource_close
@@ -149,9 +149,10 @@ fun EditableRatingDialogsHost(state: EditableRatingState) {
         AlertDialog(
             { state.dismissRatingRequiresCollectionDialog() },
             text = { Text(stringResource(Lang.rating_requires_collection)) },
+            // 纯提示, 唯一的按钮就是"关闭"
             confirmButton = {
-                TextButton({ state.dismissRatingRequiresCollectionDialog() }) {
-                    Text(stringResource(Lang.settings_mediasource_close))
+                DismissDialogButton(stringResource(Lang.settings_mediasource_close)) {
+                    state.dismissRatingRequiresCollectionDialog()
                 }
             },
         )

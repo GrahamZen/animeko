@@ -19,6 +19,7 @@ import me.him188.ani.app.ui.foundation.AniUiBehavior
 val TvAniUiBehavior = AniUiBehavior(
     focusDrivenNavigation = true,
     showBackNavigationButton = false,
+    showDismissButtons = false,
     showNavigationTopAppBar = false,
     pinTopAppBar = true,
     sheetMaxWidthFraction = 0.9f,

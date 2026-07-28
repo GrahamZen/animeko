@@ -9,7 +9,6 @@
 
 package me.him188.ani.app.ui.subject.episode.tv
 
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -24,8 +23,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -40,11 +37,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.isSpecified
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
 import me.him188.ani.app.domain.episode.SetEpisodeCollectionTypeRequest
@@ -73,17 +70,8 @@ private val TV_STRIP_PREV_CARD_PEEK = 16.dp
 /** 选集条展开/收起的滑动动画时长 (毫秒). */
 private const val TV_STRIP_SLIDE_MS = 250
 
-/** 聚焦集简介视口行数 (放不下的部分自动滚动展示). */
+/** 聚焦集简介最多显示几行, 放不下的直接截断 (不滚动: 卡片行上下切换很频繁, 动的文字反而干扰). */
 private const val TV_EPISODE_DESC_VISIBLE_LINES = 3
-
-/** 简介自动滚动: 开始滚动前的等待 (切换聚焦集后重新计时). */
-private const val TV_EPISODE_DESC_SCROLL_START_DELAY_MILLIS = 4_000L
-
-/** 简介自动滚动: 滚到底后的停顿, 之后跳回顶部循环. */
-private const val TV_EPISODE_DESC_SCROLL_END_PAUSE_MILLIS = 3_000L
-
-/** 简介自动滚动速度 (dp/秒). */
-private const val TV_EPISODE_DESC_SCROLL_SPEED_DP_PER_SEC = 14f
 
 /**
  * 播放器控制层里的选集条 (Prime 形态): 复用详情页的选集轮播
@@ -210,6 +198,8 @@ internal fun TvPlayerEpisodeStrip(
                     }
                 },
                 onActionMenuExpandedChanged = { overlay.onPopupExpandedChanged(it) },
+                // 卡片浮在视频画面上, 与进度条旁的胶囊按钮同一套黑白配色 (聚焦即白底黑字)
+                monochrome = true,
                 rowFocusRequester = stripFocusRequester,
             )
             // 卡片行下方: 聚焦集简介 (自动滚动) + 右侧 时长/播出日期 两行
@@ -223,7 +213,7 @@ internal fun TvPlayerEpisodeStrip(
                     mergedEpisodeDesc(episodeOverviews[it.episodeId], it.desc)
                 }.orEmpty()
                 // 简介: 固定 3 行视口自动滚动 (不可聚焦, 无阅读模式)
-                TvAutoScrollEpisodeDesc(desc, Modifier.weight(1f))
+                TvEpisodeDesc(desc, Modifier.weight(1f))
                 displayed?.let {
                     FocusEpisodeMetaColumn(
                         runtimeMinutes = episodeRuntimes[it.episodeId],
@@ -237,42 +227,28 @@ internal fun TvPlayerEpisodeStrip(
 }
 
 /**
- * 选集条聚焦集简介: 固定 [TV_EPISODE_DESC_VISIBLE_LINES] 行视口, 不可聚焦.
- * 文字放不下时等待 [TV_EPISODE_DESC_SCROLL_START_DELAY_MILLIS] 后匀速向下滚动,
- * 滚到底停顿后跳回顶部循环; 切换聚焦集 (文字变化) 时回到顶部重新计时.
+ * 选集条聚焦集简介: 最多 [TV_EPISODE_DESC_VISIBLE_LINES] 行, 放不下直接截断 (省略号), 不可聚焦.
+ *
+ * 高度固定成整数行 (`Modifier.height`) 而不是随文字长短伸缩: 左右切换聚焦集时简介长度不一,
+ * 不定高会让下面的元素跟着上下跳.
  */
 @Composable
-private fun TvAutoScrollEpisodeDesc(desc: String, modifier: Modifier = Modifier) {
+private fun TvEpisodeDesc(desc: String, modifier: Modifier = Modifier) {
     val style = MaterialTheme.typography.bodySmall
     val density = LocalDensity.current
     val lineHeight = if (style.lineHeight.isSpecified) style.lineHeight else 16.sp
     val viewportHeight = with(density) { lineHeight.toDp() } * TV_EPISODE_DESC_VISIBLE_LINES
-    val scrollState = rememberScrollState()
-    LaunchedEffect(desc) {
-        scrollState.scrollTo(0)
-        while (true) {
-            delay(TV_EPISODE_DESC_SCROLL_START_DELAY_MILLIS)
-            val max = scrollState.maxValue
-            // 视口装得下整段文字: 不滚 (文字变化会重启本效应)
-            if (max <= 0) return@LaunchedEffect
-            val durationMillis = with(density) {
-                (max / TV_EPISODE_DESC_SCROLL_SPEED_DP_PER_SEC.dp.toPx() * 1000).toInt()
-            }.coerceAtLeast(1)
-            scrollState.animateScrollTo(max, tween(durationMillis, easing = LinearEasing))
-            delay(TV_EPISODE_DESC_SCROLL_END_PAUSE_MILLIS)
-            scrollState.scrollTo(0)
-        }
-    }
     Box(
         modifier
             .fillMaxWidth()
-            .height(viewportHeight)
-            .verticalScroll(scrollState, enabled = false),
+            .height(viewportHeight),
     ) {
         Text(
             desc,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = style,
+            maxLines = TV_EPISODE_DESC_VISIBLE_LINES,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }

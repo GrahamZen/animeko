@@ -83,6 +83,8 @@ import me.him188.ani.app.domain.mediasource.rss.RssMediaSource
 import me.him188.ani.app.domain.mediasource.web.SelectorMediaSource
 import me.him188.ani.app.navigation.LocalNavigator
 import me.him188.ani.app.ui.foundation.animation.AniAnimatedVisibility
+import me.him188.ani.app.ui.foundation.widgets.DismissDialogButton
+import me.him188.ani.app.ui.foundation.widgets.dismissDialogButton
 import me.him188.ani.app.ui.foundation.ifThen
 import me.him188.ani.app.ui.foundation.interaction.onRightClickIfSupported
 import me.him188.ani.app.ui.lang.Lang
@@ -356,13 +358,9 @@ internal fun SettingsScope.MediaSourceGroup(
                                     )
                                 }
                             },
-                            dismissButton = {
-                                TextButton(
-                                    {
-                                        showConfirmDeletionDialog = false
-                                    },
-                                ) { Text(stringResource(Lang.settings_media_source_cancel)) }
-                            },
+                            dismissButton = dismissDialogButton(
+                                stringResource(Lang.settings_media_source_cancel),
+                            ) { showConfirmDeletionDialog = false },
                         )
                     }
 
@@ -675,10 +673,9 @@ internal fun SelectMediaSourceTemplateDialog(
         title = {
             Text(stringResource(Lang.settings_media_source_select_template))
         },
+        // 唯一的按钮就是"取消" (= 关掉本弹窗)
         confirmButton = {
-            TextButton(onDismissRequest) {
-                Text(stringResource(Lang.settings_media_source_cancel))
-            }
+            DismissDialogButton(stringResource(Lang.settings_media_source_cancel), onDismissRequest)
         },
         text = {
             val scrollState = rememberScrollState()

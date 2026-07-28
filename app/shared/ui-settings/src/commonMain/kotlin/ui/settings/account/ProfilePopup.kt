@@ -43,6 +43,7 @@ import androidx.compose.ui.window.PopupProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.window.core.layout.WindowSizeClass
 import me.him188.ani.app.ui.foundation.ifThen
+import me.him188.ani.app.ui.foundation.widgets.dismissDialogButton
 import me.him188.ani.app.ui.foundation.layout.AniWindowInsets
 import me.him188.ani.app.ui.foundation.layout.currentWindowAdaptiveInfo1
 import me.him188.ani.app.ui.foundation.layout.isHeightAtLeastMedium
@@ -185,10 +186,6 @@ fun AccountLogoutDialog(
                 Text(stringResource(Lang.settings_account_popup_logout_button), color = MaterialTheme.colorScheme.error)
             }
         },
-        dismissButton = {
-            TextButton(onCancel) {
-                Text(stringResource(Lang.settings_account_popup_cancel))
-            }
-        },
+        dismissButton = dismissDialogButton(stringResource(Lang.settings_account_popup_cancel), onCancel),
     )
 }

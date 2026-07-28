@@ -108,6 +108,7 @@ import me.him188.ani.app.ui.foundation.LocalAniUiBehavior
 import me.him188.ani.app.ui.foundation.ifThen
 import me.him188.ani.app.ui.foundation.ProvideCompositionLocalsForPreview
 import me.him188.ani.app.ui.foundation.widgets.AniBottomSheetDefaults
+import me.him188.ani.app.ui.foundation.widgets.dismissDialogButton
 import me.him188.ani.app.ui.foundation.animation.AniAnimatedVisibility
 import me.him188.ani.app.ui.foundation.animation.LocalAniMotionScheme
 import me.him188.ani.app.ui.foundation.layout.AniWindowInsets
@@ -725,11 +726,7 @@ fun DanmakuTimeShiftDialog( // public: 播放页变体 (遥控器形态) 的弹�
                 Text(confirmText)
             }
         },
-        dismissButton = {
-            TextButton(onClick = onDismissRequest) {
-                Text(cancelText)
-            }
-        },
+        dismissButton = dismissDialogButton(cancelText, onDismissRequest),
         title = { Text(titleText) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {

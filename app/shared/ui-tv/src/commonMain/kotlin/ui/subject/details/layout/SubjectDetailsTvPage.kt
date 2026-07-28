@@ -151,6 +151,8 @@ import me.him188.ani.app.ui.foundation.focus.resolveFocusRepeatedly
 import me.him188.ani.app.ui.foundation.focus.restoreFocusAfter
 import me.him188.ani.app.ui.foundation.session.buildTvRailItems
 import me.him188.ani.app.ui.foundation.theme.AniThemeDefaults
+import me.him188.ani.app.ui.foundation.theme.GLASS_CONTAINER_ALPHA
+import me.him188.ani.app.ui.foundation.theme.glassContainerColor
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.subject_details_episodes
 import me.him188.ani.app.ui.lang.subject_details_login_to_collect
@@ -747,6 +749,9 @@ fun SubjectDetailsTvPage(
                 horizontalPadding = pad,
                 // 小标题行/集简介行与上半区文字共用右边界 (给封面让位)
                 endPadding = pad + episodesTextEndReserve,
+                // 无图的集用玻璃底: 本页底下压着 backdrop, 实心底色会把图整块盖掉
+                // (同页的标签/信息带按钮本来就是这个底)
+                glass = true,
                 // 聚焦集简介用阅读模式组件: 平时按高度截断, 按确认键进入滚动阅读;
                 // 视口只有两行高, 一次滚一行
                 // 集简介: 3 行截断, 不可聚焦 (全文在长按卡片的本集详情弹窗里) ——
@@ -1999,7 +2004,7 @@ private val TV_TAGS_ALIGN_TRIM = -8.dp
  * 因此按钮底色以 onSurface 为墨色加此透明度: 暗色主题为白色半透明,
  * 浅色主题自动变为深色半透明; 配合不透明 onSurface 内容色, 任意主题下均清晰.
  */
-private const val TV_GLASS_ALPHA = 0.10f
+private const val TV_GLASS_ALPHA = GLASS_CONTAINER_ALPHA
 
 /** 阅读模式等大面积底色再减淡一档, 避免大块墨色压住文字. */
 private const val TV_GLASS_READING_ALPHA = 0.03f
@@ -2013,16 +2018,9 @@ private val TV_READING_SCROLLBAR_RESERVE = 12.dp
 /** 阅读模式每次按键滚动的动画时长 (ms): 越小滚得越快. */
 private const val TV_READING_SCROLL_ANIM_MS = 120
 
-/**
- * TV 详情页玻璃底色: 以 onSurface 为墨色、向主题动态色 (surfaceTint, 封面取色的 primary)
- * 偏移少许 —— 比纯灰更融入取色主题. 浓度对齐 M3 state-layer 惯例 (8%-12% 的淡层).
- */
+/** TV 详情页玻璃底色, 见 [glassContainerColor] (选集卡片也用它, 所以放在了 ui-foundation). */
 @Composable
-private fun tvGlassColor(alpha: Float = TV_GLASS_ALPHA): Color = lerp(
-    MaterialTheme.colorScheme.onSurface,
-    MaterialTheme.colorScheme.surfaceTint,
-    0.35f,
-).copy(alpha = alpha)
+private fun tvGlassColor(alpha: Float = TV_GLASS_ALPHA): Color = glassContainerColor(alpha)
 
 /** 按钮聚焦时主色填充的不透明度: 留一点透明让背景透出来, 不至于一块实心色块. */
 private const val TV_FOCUSED_CONTAINER_ALPHA = 0.8f

@@ -92,6 +92,7 @@ import me.him188.ani.app.domain.media.cache.engine.MediaCacheEngineKey
 import me.him188.ani.app.domain.media.cache.engine.MediaStats
 import me.him188.ani.app.tools.getOrZero
 import me.him188.ani.app.ui.adaptive.AniListDetailPaneScaffold
+import me.him188.ani.app.ui.foundation.widgets.dismissDialogButton
 import me.him188.ani.app.ui.adaptive.AniTopAppBar
 import me.him188.ani.app.ui.adaptive.AniTopAppBarDefaults
 import me.him188.ani.app.ui.adaptive.ListDetailLayoutParameters
@@ -761,9 +762,7 @@ internal fun DeleteActionDialog(
                 modifier = Modifier.testTag(CacheManagementTestTags.DELETE_CONFIRM_BUTTON),
             ) { Text(stringResource(Lang.cache_subject_delete), color = MaterialTheme.colorScheme.error) }
         },
-        dismissButton = {
-            TextButton(onDismiss) { Text(stringResource(Lang.cache_subject_cancel)) }
-        },
+        dismissButton = dismissDialogButton(stringResource(Lang.cache_subject_cancel), onDismiss),
     )
 }
 
