@@ -83,6 +83,8 @@ import me.him188.ani.app.ui.foundation.animation.NavigationMotionScheme
 import me.him188.ani.app.ui.foundation.animation.ProvideAniMotionCompositionLocals
 import androidx.compose.ui.graphics.Color
 import me.him188.ani.app.ui.foundation.LocalAniUiBehavior
+import me.him188.ani.app.ui.foundation.watchtogether.LocalWatchTogetherEntry
+import me.him188.ani.app.ui.foundation.watchtogether.WatchTogetherEntryState
 import me.him188.ani.app.ui.foundation.ifThen
 import me.him188.ani.app.ui.foundation.layout.currentWindowAdaptiveInfo1
 import me.him188.ani.app.ui.foundation.layout.desktopTitleBar
@@ -140,10 +142,14 @@ fun AniAppContent(aniNavigator: AniNavigator) {
     val rootBackground =
         if (LocalAniUiBehavior.current.blackRootBackground) Color.Black
         else MaterialTheme.colorScheme.background
+    // "一起看" 入口把手: 弹窗本体在下面的 WatchTogetherOverlayHost 里 (与 NavHost 同级),
+    // 入口按钮在 NavHost 内的各页面上 (TV 侧边栏 / 播放器胶囊行), 两边隔着 NavHost 靠它通气
+    val watchTogetherEntry = remember { WatchTogetherEntryState() }
     Box(Modifier.fillMaxSize().background(rootBackground)) {
         CompositionLocalProvider(
             LocalNavigator provides aniNavigator,
             LocalBrowserNavigator providesDefault aniAppViewModel.browserNavigator,
+            LocalWatchTogetherEntry provides watchTogetherEntry,
         ) {
             ProvideAniMotionCompositionLocals {
                 AniAppContentImpl(

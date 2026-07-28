@@ -42,6 +42,7 @@ import androidx.compose.material.icons.rounded.Replay
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.Subtitles
 import androidx.compose.material.icons.rounded.SubtitlesOff
+import androidx.compose.material.icons.rounded.SyncAlt
 import androidx.compose.material.icons.rounded.VideoLibrary
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
@@ -52,6 +53,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -79,12 +81,14 @@ import me.him188.ani.app.ui.danmaku.DanmakuEditorState
 import me.him188.ani.app.ui.episode.share.MediaShareData
 import me.him188.ani.app.ui.external.placeholder.placeholder
 import me.him188.ani.app.ui.foundation.animation.AniAnimatedVisibility
+import me.him188.ani.app.ui.foundation.focus.resolveFocusRepeatedly
 import me.him188.ani.app.ui.foundation.icons.AniIcons
 import me.him188.ani.app.ui.foundation.PlayerFrameHolder
 import me.him188.ani.app.ui.foundation.icons.Forward80
 import me.him188.ani.app.ui.foundation.icons.Forward85
 import me.him188.ani.app.ui.foundation.icons.Forward90
 import me.him188.ani.app.ui.foundation.icons.SubtitleGear
+import me.him188.ani.app.ui.foundation.watchtogether.LocalWatchTogetherEntry
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.episode_comments
 import me.him188.ani.app.ui.lang.subject_details_characters
@@ -103,6 +107,7 @@ import me.him188.ani.app.ui.lang.video_player_stats_title_hide
 import me.him188.ani.app.ui.lang.video_player_stats_title_show
 import me.him188.ani.app.ui.lang.video_player_tv_collection
 import me.him188.ani.app.ui.lang.video_player_tv_restart
+import me.him188.ani.app.ui.lang.watch_together_title
 import me.him188.ani.app.ui.subject.collection.components.EditCollectionTypeDropDown
 import me.him188.ani.app.ui.subject.collection.components.EditableSubjectCollectionTypeDialogsHost
 import me.him188.ani.app.ui.subject.person.PeoplePreviewHost
@@ -377,6 +382,22 @@ private fun TvPlayerPillsRow(
     pillFocusRequesters: Map<TvPlayerPanel, FocusRequester>,
     modifier: Modifier = Modifier,
 ) {
+    // "一起看"胶囊的显隐在本行 (而不是胶囊自己) 判断: 用户可以在弹窗的 ⋮ 里关掉整个功能,
+    // 那一下按钮连同它自己的焦点善后逻辑一起被移除, 只有留在场上的父级能接手 —— 把焦点送回
+    // 进度条 (与从面板按返回同一个落点). 没有这一手就是按钮消失 + 焦点消失, 方向键全失效.
+    val watchTogetherEnabled = LocalWatchTogetherEntry.current.enabled
+    var watchTogetherWasEnabled by remember { mutableStateOf(false) }
+    LaunchedEffect(watchTogetherEnabled) {
+        if (watchTogetherEnabled) {
+            watchTogetherWasEnabled = true
+            return@LaunchedEffect
+        }
+        // 一开始就没开 (或控制层刚组合出来) 不算"刚被关掉", 不能抢焦点
+        if (!watchTogetherWasEnabled) return@LaunchedEffect
+        watchTogetherWasEnabled = false
+        overlay.focusProgress()
+    }
+
     Row(
         modifier.onFocusChanged { if (it.hasFocus) overlay.focusRegion = TvPlayerFocusRegion.PILLS },
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -422,6 +443,80 @@ private fun TvPlayerPillsRow(
             danmakuEditorState = danmakuEditorState,
             vm = vm,
         )
+        if (watchTogetherEnabled) TvWatchTogetherPill(overlay)
+    }
+}
+
+/**
+ * 胶囊行末尾的"一起看"入口 (承担遥控器上没有的悬浮气泡的作用). 弹窗本体挂在应用根部,
+ * 这里只负责开与善后.
+ *
+ * 显隐由 [TvPlayerPillsRow] 判断 —— 功能被关掉时本组合整个消失, 焦点善后只能由父级做.
+ */
+@Composable
+private fun TvWatchTogetherPill(
+    overlay: TvPlayerOverlayState,
+    modifier: Modifier = Modifier,
+) {
+    val entry = LocalWatchTogetherEntry.current
+    val dialogVisible = entry.dialogVisible
+    // 弹窗是独立窗口, 根部那个唯一按键路由收不到它的按键 -> interactionTick 不再自增,
+    // 五秒后控制层连同本按钮一起被自动隐藏吃掉. 按下拉弹层同一套引用计数上报住.
+    DisposableEffect(dialogVisible) {
+        if (dialogVisible) overlay.onPopupExpandedChanged(true)
+        onDispose { if (dialogVisible) overlay.onPopupExpandedChanged(false) }
+    }
+
+    val focusRequester = remember { FocusRequester() }
+    // 到位判据看 hasFocus 而不是 isFocused: 本 onFocusChanged 挂在 Surface 外侧,
+    // 真正可聚焦的是它内部的 clickable 节点, isFocused 恒为 false
+    var hasFocus by remember { mutableStateOf(false) }
+    var everOpened by remember { mutableStateOf(false) }
+    // 关掉后焦点还给本按钮: 弹窗是独立窗口, 关闭时主窗口未必把焦点还到原处,
+    // 不还的话控制层还在但方向键全失效
+    LaunchedEffect(dialogVisible) {
+        if (dialogVisible) {
+            everOpened = true
+            return@LaunchedEffect
+        }
+        if (!everOpened) return@LaunchedEffect
+        resolveFocusRepeatedly(
+            attempts = 20,
+            arrived = { hasFocus },
+            abandon = { overlay.layer != TvPlayerLayer.CONTROLS },
+        ) {
+            runCatching { focusRequester.requestFocus() }
+        }
+    }
+
+    val interactionSource = remember { MutableInteractionSource() }
+    val focused by interactionSource.collectIsFocusedAsState()
+    Surface(
+        onClick = { entry.open(overDarkBackground = true) },
+        modifier = modifier
+            .focusRequester(focusRequester)
+            .onFocusChanged {
+                hasFocus = it.hasFocus
+                // 与弹幕发送圆钮同理: 本按钮不是面板触发器, 聚焦到它时收起浮出的面板
+                if (it.hasFocus) overlay.activePanel = null
+            },
+        shape = CircleShape,
+        color = if (focused) Color.White else Color.White.copy(alpha = 0.14f),
+        contentColor = if (focused) Color.Black else Color.White,
+        interactionSource = interactionSource,
+    ) {
+        Row(
+            Modifier.padding(horizontal = TV_PILL_PADDING_H, vertical = TV_PILL_PADDING_V),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Rounded.SyncAlt, null, Modifier.size(TV_PILL_ICON_SIZE))
+            Text(
+                stringResource(Lang.watch_together_title),
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+            )
+        }
     }
 }
 

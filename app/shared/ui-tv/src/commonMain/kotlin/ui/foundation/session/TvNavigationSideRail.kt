@@ -32,6 +32,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.SyncAlt
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -67,10 +68,12 @@ import me.him188.ani.app.navigation.getIcon
 import me.him188.ani.app.navigation.getText
 import me.him188.ani.app.ui.foundation.avatar.AvatarImage
 import me.him188.ani.app.ui.foundation.theme.AniThemeDefaults
+import me.him188.ani.app.ui.foundation.watchtogether.LocalWatchTogetherEntry
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.exploration_search
 import me.him188.ani.app.ui.lang.login_sign_in
 import me.him188.ani.app.ui.lang.settings
+import me.him188.ani.app.ui.lang.watch_together_title
 import me.him188.ani.app.ui.user.SelfInfoUiState
 import org.jetbrains.compose.resources.stringResource
 
@@ -92,6 +95,12 @@ data class TvNavRailItem(
     val defaultFocus: Boolean = false,
     /** 非 null 时把此 FocusRequester 挂到该条目 (如初始/切页后把焦点落到当前项). */
     val focusRequester: FocusRequester? = null,
+    /**
+     * true 时点击后**不**清焦点. 默认清是为了切页 (见 [TvRailIconItem] 里的注释);
+     * 不切页、只是就地开个弹窗的条目 (如"一起看") 必须留住焦点, 否则弹窗关掉后
+     * 焦点回不到本条目上.
+     */
+    val keepFocusOnClick: Boolean = false,
     val onClick: () -> Unit,
 )
 
@@ -137,6 +146,19 @@ fun buildTvRailItems(
             onClick = onSettings,
         ),
     )
+    // "一起看": 只在设置里打开了功能时出现 —— 遥控器上没有可拖的悬浮气泡, 这颗常驻图标
+    // 与播放器胶囊行末尾那颗一起承担气泡原本的入口作用, 显隐条件与气泡完全一致.
+    val watchTogether = LocalWatchTogetherEntry.current
+    if (watchTogether.enabled) {
+        add(
+            TvNavRailItem(
+                icon = Icons.Rounded.SyncAlt,
+                label = stringResource(Lang.watch_together_title),
+                keepFocusOnClick = true,
+                onClick = { watchTogether.open() },
+            ),
+        )
+    }
 }
 
 /**
@@ -223,6 +245,7 @@ fun TvNavigationSideRail(
                     } else {
                         item.focusRequester
                     },
+                    keepFocusOnClick = item.keepFocusOnClick,
                     onClick = item.onClick,
                 )
             }
@@ -418,6 +441,7 @@ private fun TvRailIconItem(
     expanded: Boolean,
     onExitFocus: (() -> Unit)?,
     focusRequester: FocusRequester?,
+    keepFocusOnClick: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -438,7 +462,8 @@ private fun TvRailIconItem(
                     // 点击后清空焦点, 让 AniAppContent 全局兜底把焦点送入(可能刚切换/弹回的)当前页面
                     // 左上角可聚焦项; 不用 moveFocus(Right): 切页瞬间新内容还没组合出来, moveFocus 会
                     // 落到正在退场的旧页面或失败, 导致丢焦点.
-                    focusManager.clearFocus()
+                    // 就地开弹窗的条目不清 (见 TvNavRailItem.keepFocusOnClick).
+                    if (!keepFocusOnClick) focusManager.clearFocus()
                 },
             ),
         verticalAlignment = Alignment.CenterVertically,
