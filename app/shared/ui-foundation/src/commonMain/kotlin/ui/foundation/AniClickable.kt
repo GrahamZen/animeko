@@ -25,6 +25,7 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import kotlinx.coroutines.delay
 import me.him188.ani.utils.platform.currentTimeMillis
@@ -212,3 +213,44 @@ fun Modifier.aniCombinedClickable(
         )
     }
 }
+
+/**
+ * 吞掉"把本界面开出来的那一次长按"的余波: 从挂载起, 直到看见确认键抬起为止, 所有确认键事件
+ * 一律消费.
+ *
+ * 遥控器按住确认键期间系统会以约 50ms 一次连发 KeyDown. [aniCombinedClickable] 在 500ms 上
+ * 触发 onLongClick 弹出下拉菜单时用户的手还没松 —— 菜单一拿到焦点, 紧接着的那几发 KeyDown
+ * 与随后的 KeyUp 就落在菜单第一项上, 表现为"菜单刚弹出来就自己把第一项选了".
+ *
+ * 挂在弹层内容上 (如 `DropdownMenu(modifier = ...)`): `onPreviewKeyEvent` 自弹层根部向下传,
+ * 会先于菜单项拿到事件.
+ *
+ * 同一条规则在 `FocusEpisodeCard` 里还有一份内联实现 (`swallowConfirmKeys`, 详情页长按播放
+ * 按钮跳到选集卡片后不让残余按键误触那张卡). 那份与卡片自己的确认键计数器绑在一起, 暂未合并.
+ *
+ * @param enabled 仅当本界面**确实是被长按开出来的**时传 true. 短按开出来的弹层不能开 ——
+ *   那会把用户接下来第一次正常按键吃掉.
+ */
+fun Modifier.consumeHeldConfirmKey(enabled: Boolean = true): Modifier = composed {
+    if (!enabled) return@composed this
+
+    var released by remember { mutableStateOf(false) }
+    // 兜底: 抬起有可能在本弹层挂载之前就发生了 (长按到点与松手只差几十毫秒, 那一下 KeyUp 会
+    // 落在原来的行上), 没有这个超时就会一直吞到天荒地老, 把用户下一次正常按键也吃掉
+    LaunchedEffect(Unit) {
+        delay(HELD_CONFIRM_KEY_GRACE_MILLIS)
+        released = true
+    }
+    onPreviewKeyEvent { event ->
+        if (released) return@onPreviewKeyEvent false
+        val isConfirm = event.key == Key.DirectionCenter ||
+                event.key == Key.Enter ||
+                event.key == Key.NumPadEnter
+        if (!isConfirm) return@onPreviewKeyEvent false
+        if (event.type == KeyEventType.KeyUp) released = true
+        true
+    }
+}
+
+/** [consumeHeldConfirmKey] 等待抬起的上限 (与 FocusEpisodeCard 那份内联实现取同一档). */
+private const val HELD_CONFIRM_KEY_GRACE_MILLIS = 1_500L

@@ -404,7 +404,9 @@ fun SettingsScreen(
             }
         },
         detailPaneBottomBar = { currentTab, bottomBarInsets ->
-            if (currentTab == SettingsTab.MEDIA_SOURCE) {
+            // 浮动工具栏只给指针设备: 遥控器上够到屏幕底部这条要穿过整页设置项,
+            // 改成长按选中项出下拉菜单 (见 MediaSourceGroup)
+            if (currentTab == SettingsTab.MEDIA_SOURCE && !LocalAniUiBehavior.current.focusDrivenNavigation) {
                 AniAnimatedVisibility(
                     visible = mediaSourceSelectionState.inSelection,
                     modifier = Modifier.align(Alignment.BottomCenter),

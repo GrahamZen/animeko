@@ -15,7 +15,6 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -72,6 +71,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
@@ -82,7 +84,12 @@ import kotlinx.coroutines.launch
 import me.him188.ani.app.domain.mediasource.rss.RssMediaSource
 import me.him188.ani.app.domain.mediasource.web.SelectorMediaSource
 import me.him188.ani.app.navigation.LocalNavigator
+import me.him188.ani.app.ui.foundation.LocalAniUiBehavior
+import me.him188.ani.app.ui.foundation.aniCombinedClickable
 import me.him188.ani.app.ui.foundation.animation.AniAnimatedVisibility
+import me.him188.ani.app.ui.foundation.consumeHeldConfirmKey
+import me.him188.ani.app.ui.foundation.focus.resolveFocusRepeatedly
+import me.him188.ani.app.ui.foundation.navigation.BackHandler
 import me.him188.ani.app.ui.foundation.widgets.DismissDialogButton
 import me.him188.ani.app.ui.foundation.widgets.dismissDialogButton
 import me.him188.ani.app.ui.foundation.ifThen
@@ -95,12 +102,15 @@ import me.him188.ani.app.ui.lang.settings_media_source_delete
 import me.him188.ani.app.ui.lang.settings_media_source_delete_can_readd
 import me.him188.ani.app.ui.lang.settings_media_source_delete_confirm
 import me.him188.ani.app.ui.lang.settings_media_source_delete_no_config
+import me.him188.ani.app.ui.lang.settings_media_source_delete_selected
 import me.him188.ani.app.ui.lang.settings_media_source_delete_with_config
 import me.him188.ani.app.ui.lang.settings_media_source_deselect_all
 import me.him188.ani.app.ui.lang.settings_media_source_disable
+import me.him188.ani.app.ui.lang.settings_media_source_disable_selected
 import me.him188.ani.app.ui.lang.settings_media_source_disabled
 import me.him188.ani.app.ui.lang.settings_media_source_edit
 import me.him188.ani.app.ui.lang.settings_media_source_enable
+import me.him188.ani.app.ui.lang.settings_media_source_enable_selected
 import me.him188.ani.app.ui.lang.settings_media_source_enter_selection_mode
 import me.him188.ani.app.ui.lang.settings_media_source_exit_selection
 import me.him188.ani.app.ui.lang.settings_media_source_from_subscription
@@ -205,6 +215,59 @@ internal fun SettingsScope.MediaSourceGroup(
         }
     }
 
+    // ---- 遥控器形态 (见 AniUiBehavior.focusDrivenNavigation) 的多选交互 ----
+    // 指针设备保持原样: 长按进多选 + 屏幕底部那条浮动工具栏.
+    // 遥控器上那条浮窗要穿过整页设置项才够得到, 改成"长按行出下拉菜单":
+    //   非多选态 -> 该项自己的菜单 (启用/禁用、编辑、删除) + 一项"多选";
+    //   多选态   -> 批量菜单 (启用/禁用/删除所选、全选、退出多选), 长按的那一项先被选中,
+    //              保证菜单里"所选"至少包含用户正对着的这一项.
+    val focusDriven = LocalAniUiBehavior.current.focusDrivenNavigation
+
+    // 进/退多选与批量删除都会把当前持焦的节点整个换掉 (行的 trailing 按钮片、标题栏的动作按钮、
+    // 被删掉的行), 而 Compose 移除聚焦节点时是把焦点**清掉**, 不交给祖先 —— 不接手就是一屏
+    // 没有焦点, 方向键全失效. 统一记一个"焦点该落到哪一行", 由下面的解析器送过去.
+    var pendingRowFocusId by remember { mutableStateOf<String?>(null) }
+    val pendingRowFocusRequester = remember { FocusRequester() }
+    // 到位判据读实时状态而不是"到过位"的latch: 请求器会在各行之间搬家, latch 不清就会
+    // 拿着上一次的 true 提前收工, 这一次一个 requestFocus 都不发
+    var pendingRowFocused by remember { mutableStateOf(false) }
+    // 退出多选时的落点: 用户最后碰过的那一行 (从标题栏的 ✕ 退出时焦点在标题栏上, 回不到列表)
+    var lastTouchedRowId by remember { mutableStateOf<String?>(null) }
+    val requestRowFocus: (String?) -> Unit = { id ->
+        pendingRowFocused = false
+        pendingRowFocusId = id
+    }
+    LaunchedEffect(pendingRowFocusId) {
+        if (pendingRowFocusId == null) return@LaunchedEffect
+        resolveFocusRepeatedly(attempts = 30, arrived = { pendingRowFocused }) {
+            runCatching { pendingRowFocusRequester.requestFocus() }
+        }
+        pendingRowFocusId = null
+    }
+
+    val bulkActions = rememberMediaSourceBulkActions(state.mediaSources, selectionState, edit)
+    var showBulkDeleteConfirmation by rememberSaveable { mutableStateOf(false) }
+    if (showBulkDeleteConfirmation) {
+        MediaSourceBulkDeleteConfirmation(
+            count = bulkActions.selected.size,
+            onConfirm = {
+                // 删完这些行就没了; 焦点落到第一个幸存的行上 (全删光则交给全局兜底)
+                requestRowFocus(
+                    state.mediaSources.firstOrNull { it.instanceId !in selectionState.selectedIds }?.instanceId,
+                )
+                bulkActions.delete()
+                showBulkDeleteConfirmation = false
+            },
+            onDismissRequest = { showBulkDeleteConfirmation = false },
+        )
+    }
+
+    // 多选态下返回键 = 退出多选. 没有它的话遥控器按返回会直接退出设置页, 多选态莫名其妙留着
+    BackHandler(enabled = focusDriven && selectionState.inSelection) {
+        requestRowFocus(lastTouchedRowId ?: state.mediaSources.firstOrNull()?.instanceId)
+        selectionState.clear()
+    }
+
     Group(
         title = {
             if (selectionState.inSelection) {
@@ -222,7 +285,11 @@ internal fun SettingsScope.MediaSourceGroup(
             if (selectionState.inSelection) {
                 Row {
                     IconButton(
-                        onClick = { selectionState.clear() },
+                        onClick = {
+                            // 本按钮自己会随多选态一起消失, 焦点得先安排好去处
+                            requestRowFocus(lastTouchedRowId ?: state.mediaSources.firstOrNull()?.instanceId)
+                            selectionState.clear()
+                        },
                         modifier = Modifier.testTag(MediaSourceGroupTestTags.EXIT_SELECTION),
                     ) {
                         Icon(
@@ -364,64 +431,129 @@ internal fun SettingsScope.MediaSourceGroup(
                         )
                     }
 
-                    MediaSourceItem(
-                        item,
-                        Modifier
-                            .testTag(MediaSourceGroupTestTags.item(item.instanceId))
-                            .background(
-                                if (selected) {
-                                    MaterialTheme.colorScheme.surfaceContainer
-                                } else {
-                                    Color.Transparent
-                                },
-                            )
-                            .combinedClickable(
-                                onClickLabel = if (selectionState.inSelection) enterSelectionText else editText,
-                                onLongClick = {
-                                    selectionState.enterSelectionWith(item.instanceId)
-                                },
-                                onLongClickLabel = enterSelectionText,
-                                onClick = {
-                                    if (selectionState.inSelection) {
-                                        selectionState.toggleSelection(item.instanceId)
+                    // 多选态下行的 trailing 整片不渲染, 三个点那颗 Box 不能当菜单的锚点,
+                    // 批量菜单只好锚在整行上
+                    var showBulkDropdown by remember { mutableStateOf(false) }
+                    // 三个点那颗菜单两个入口都有 (点按钮 / 长按行), 只有长按那次要吞残余按键 ——
+                    // 点按钮开的菜单再吞就把用户接下来第一次正常按键吃掉了
+                    var moreDropdownFromLongPress by remember { mutableStateOf(false) }
+                    Box {
+                        MediaSourceItem(
+                            item,
+                            Modifier
+                                .testTag(MediaSourceGroupTestTags.item(item.instanceId))
+                                .ifThen(item.instanceId == pendingRowFocusId) {
+                                    focusRequester(pendingRowFocusRequester)
+                                        .onFocusChanged { pendingRowFocused = it.hasFocus }
+                                }
+                                .background(
+                                    if (selected) {
+                                        MaterialTheme.colorScheme.surfaceContainer
                                     } else {
-                                        startEditing()
+                                        Color.Transparent
+                                    },
+                                )
+                                // aniCombinedClickable 而不是原生的: 后者不会把遥控器确认键按住
+                                // 500ms 转成 onLongClick, 用它的话下面这些长按全是死的
+                                .aniCombinedClickable(
+                                    onClickLabel = if (selectionState.inSelection) enterSelectionText else editText,
+                                    onLongClick = {
+                                        lastTouchedRowId = item.instanceId
+                                        when {
+                                            !focusDriven -> selectionState.enterSelectionWith(item.instanceId)
+                                            selectionState.inSelection -> {
+                                                // 长按未选中的项: 先把它选上再出菜单. 静默不响应
+                                                // 在遥控器上和"按键坏了"分不出来, 而"我长按它"
+                                                // 本来就是"连它一起操作"的意思
+                                                if (item.instanceId !in selectionState.selectedIds) {
+                                                    selectionState.toggleSelection(item.instanceId)
+                                                }
+                                                showBulkDropdown = true
+                                            }
+
+                                            else -> {
+                                                moreDropdownFromLongPress = true
+                                                showMoreDropdown = true
+                                            }
+                                        }
+                                    },
+                                    onLongClickLabel = if (focusDriven) moreText else enterSelectionText,
+                                    onClick = {
+                                        lastTouchedRowId = item.instanceId
+                                        if (selectionState.inSelection) {
+                                            selectionState.toggleSelection(item.instanceId)
+                                        } else {
+                                            startEditing()
+                                        }
+                                    },
+                                ).onRightClickIfSupported {
+                                    if (!selectionState.inSelection) {
+                                        moreDropdownFromLongPress = false
+                                        showMoreDropdown = true
                                     }
                                 },
-                            ).onRightClickIfSupported {
-                                if (!selectionState.inSelection) {
-                                    showMoreDropdown = true
-                                }
-                            },
-                        selectionMode = selectionState.inSelection,
-                        selected = selected,
-                        onToggleSelected = { selectionState.toggleSelection(item.instanceId) },
-                    ) {
-                        if (!selectionState.inSelection) {
-                            IconButton({}, enabled = false) { // 放在 button 里保持 padding 一致
-                                ConnectionTesterResultIndicator(
-                                    item.connectionTester,
-                                    showIdle = false,
-                                )
-                            }
-
-                            Box {
-                                IconButton(onClick = { showMoreDropdown = true }) {
-                                    Icon(
-                                        Icons.Rounded.MoreVert,
-                                        contentDescription = moreText,
+                            selectionMode = selectionState.inSelection,
+                            selected = selected,
+                            onToggleSelected = { selectionState.toggleSelection(item.instanceId) },
+                        ) {
+                            if (!selectionState.inSelection) {
+                                IconButton({}, enabled = false) { // 放在 button 里保持 padding 一致
+                                    ConnectionTesterResultIndicator(
+                                        item.connectionTester,
+                                        showIdle = false,
                                     )
                                 }
 
-                                MoreOptionsDropdown(
-                                    showMoreDropdown,
-                                    onDismissRequest = { showMoreDropdown = false },
-                                    onDeleteRequest = { showConfirmDeletionDialog = true },
-                                    item,
-                                    onEnabledChange = { edit.toggleMediaSourceEnabled(item, it) },
-                                    onEdit = startEditing,
-                                )
+                                Box {
+                                    IconButton(
+                                        onClick = {
+                                            moreDropdownFromLongPress = false
+                                            showMoreDropdown = true
+                                        },
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.MoreVert,
+                                            contentDescription = moreText,
+                                        )
+                                    }
+
+                                    MoreOptionsDropdown(
+                                        showMoreDropdown,
+                                        onDismissRequest = { showMoreDropdown = false },
+                                        onDeleteRequest = { showConfirmDeletionDialog = true },
+                                        item,
+                                        onEnabledChange = { edit.toggleMediaSourceEnabled(item, it) },
+                                        onEdit = startEditing,
+                                        // 遥控器上没有浮动工具栏, 进多选的入口只有这里和长按
+                                        onEnterSelection = if (focusDriven) {
+                                            {
+                                                // 本菜单连同整片 trailing 会随多选态一起消失, 焦点交回该行
+                                                requestRowFocus(item.instanceId)
+                                                selectionState.enterSelectionWith(item.instanceId)
+                                            }
+                                        } else {
+                                            null
+                                        },
+                                        openedByLongPress = moreDropdownFromLongPress,
+                                    )
+                                }
                             }
+                        }
+                        if (focusDriven && selectionState.inSelection) {
+                            BulkOptionsDropdown(
+                                showBulkDropdown,
+                                onDismissRequest = { showBulkDropdown = false },
+                                actions = bulkActions,
+                                allSelected = allSelected,
+                                onDeleteRequest = { showBulkDeleteConfirmation = true },
+                                onSelectAllChange = {
+                                    if (allSelected) {
+                                        selectionState.selectAll(emptyList())
+                                    } else {
+                                        selectionState.selectAll(state.mediaSources.map { it.instanceId })
+                                    }
+                                },
+                            )
                         }
                     }
                 }
@@ -612,10 +744,15 @@ private fun MoreOptionsDropdown(
     item: MediaSourcePresentation,
     onEnabledChange: (enabled: Boolean) -> Unit,
     onEdit: () -> Unit,
+    /** 非 null 时菜单末尾多一项"多选"; 指针设备传 null (长按本身就是进多选). */
+    onEnterSelection: (() -> Unit)? = null,
+    /** 本次是被长按开出来的: 吞掉还没松手的那一下确认键, 否则菜单一出来就自己选了第一项. */
+    openedByLongPress: Boolean = false,
 ) {
     DropdownMenu(
         expanded = showMore,
         onDismissRequest = onDismissRequest,
+        modifier = Modifier.consumeHeldConfirmKey(openedByLongPress),
     ) {
         DropdownMenuItem(
             leadingIcon = {
@@ -655,6 +792,100 @@ private fun MoreOptionsDropdown(
             },
             onClick = {
                 onDeleteRequest()
+                onDismissRequest()
+            },
+        )
+        if (onEnterSelection != null) {
+            HorizontalDivider()
+            DropdownMenuItem(
+                leadingIcon = { Icon(Icons.Filled.SelectAll, null) },
+                text = { Text(stringResource(Lang.settings_media_source_enter_selection_mode)) },
+                onClick = {
+                    onDismissRequest()
+                    onEnterSelection()
+                },
+            )
+        }
+    }
+}
+
+/**
+ * 多选态下长按某一选中项弹出的批量菜单 (遥控器专用, 替代屏幕底部那条浮动工具栏).
+ *
+ * 菜单锚在某一行上, 动作却作用于**全部**选中项 —— 顶上那条"已选 N 项"是消歧用的, 不能省.
+ */
+@Composable
+private fun BulkOptionsDropdown(
+    expanded: Boolean,
+    onDismissRequest: () -> Unit,
+    actions: MediaSourceBulkActions,
+    allSelected: Boolean,
+    onDeleteRequest: () -> Unit,
+    onSelectAllChange: () -> Unit,
+) {
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismissRequest,
+        // 本菜单只有长按一个入口, 恒吞掉还没松手的那一下确认键
+        modifier = Modifier.consumeHeldConfirmKey(),
+    ) {
+        Text(
+            stringResource(Lang.settings_media_source_selected_count, actions.selected.size),
+            Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        HorizontalDivider()
+        DropdownMenuItem(
+            leadingIcon = { Icon(Icons.Rounded.Visibility, null) },
+            text = { Text(stringResource(Lang.settings_media_source_enable_selected)) },
+            enabled = actions.canEnable,
+            onClick = {
+                actions.enable()
+                onDismissRequest()
+            },
+        )
+        DropdownMenuItem(
+            leadingIcon = { Icon(Icons.Rounded.VisibilityOff, null) },
+            text = { Text(stringResource(Lang.settings_media_source_disable_selected)) },
+            enabled = actions.canDisable,
+            onClick = {
+                actions.disable()
+                onDismissRequest()
+            },
+        )
+        DropdownMenuItem(
+            leadingIcon = { Icon(Icons.Rounded.Delete, null, tint = MaterialTheme.colorScheme.error) },
+            text = {
+                Text(
+                    stringResource(Lang.settings_media_source_delete_selected),
+                    color = MaterialTheme.colorScheme.error,
+                )
+            },
+            enabled = actions.canDelete,
+            onClick = {
+                onDismissRequest()
+                onDeleteRequest()
+            },
+        )
+        HorizontalDivider()
+        // 全选放进来: 遥控器上没有别的办法触发它 (标题行右边那颗图标按钮要从列表往上够).
+        // "退出多选"不放 —— 返回键已经是退出的出口, 语义完全一样, 多一项只是多占一个焦点位
+        DropdownMenuItem(
+            leadingIcon = { Icon(if (allSelected) Icons.Filled.Deselect else Icons.Filled.SelectAll, null) },
+            text = {
+                Text(
+                    stringResource(
+                        if (allSelected) {
+                            Lang.settings_media_source_deselect_all
+                        } else {
+                            Lang.settings_media_source_select_all
+                        },
+                    ),
+                )
+            },
+            onClick = {
+                onSelectAllChange()
                 onDismissRequest()
             },
         )
