@@ -51,7 +51,7 @@ https://github.com/user-attachments/assets/e63636c9-30b7-411c-aa6b-e5b78b900726
 
 本 Fork 在上游基础上完成了 Android TV 遥控器适配，并让应用图标显示在电视主屏幕（LEANBACK 启动器）上。安装后在更新 release 之后会在主页提醒，在设置里可以直接更新。
 
-除遥控器焦点适配外，大部分页面针对电视大屏**专门重新设计**，(测试版本，未正式发布，欢迎提issue或邮件反馈)，并且支持切换为旧版（低端机可选）：
+除遥控器焦点适配外，大部分页面针对电视大屏**专门重新设计**，(欢迎提issue或邮件反馈)，并且支持切换为旧版（低端机可选）：
 
 ### 探索页
 | <img src=".readme/images/features/tv-home.png" alt="TV 主页 - 热门动画介绍轮播" width="600"/> |
