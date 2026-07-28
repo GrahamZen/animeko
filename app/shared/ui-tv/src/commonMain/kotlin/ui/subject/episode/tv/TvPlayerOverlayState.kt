@@ -133,6 +133,16 @@ class TvPlayerOverlayState {
     /** 打开中的下拉弹层数量 (倍速/画面比例等, 经 onExpandedChanged 上报): >0 时不自动隐藏. */
     var openPopupCount: Int by mutableIntStateOf(0)
 
+    /**
+     * 面板条目焦点找回锚: 每次自增一下, 面板宿主就把焦点送回**当前聚焦的那一条**
+     * (由条目获焦时登记请求器, 见 TvPlayerPanelHost).
+     *
+     * 用于一切"从面板条目点开了别的东西, 那东西关掉之后"的场合: 人物预览、弹幕延迟对话框.
+     * 不这么做的话焦点会停在被移除的节点上 (= 没有焦点), 方向键全失效.
+     */
+    var panelItemFocusTick: Int by mutableIntStateOf(0)
+        private set
+
     /** 播放器统计悬浮层开关 (三个点菜单切换). */
     var showPlayerStats: Boolean by mutableStateOf(false)
 
@@ -192,6 +202,17 @@ class TvPlayerOverlayState {
     /** 把焦点送进当前浮出面板 (点击胶囊按钮时). */
     fun requestPanelFocus() {
         requestFocus(TvPlayerFocusTarget.PANEL)
+    }
+
+    /** 把焦点送回根节点 (纯视频态收按键). */
+    fun requestRootFocus() {
+        requestFocus(TvPlayerFocusTarget.ROOT)
+    }
+
+    /** 把焦点送回面板里当前聚焦的那一条 (见 [panelItemFocusTick]). */
+    fun requestPanelItemFocus() {
+        panelItemFocusTick++
+        markInteraction()
     }
 
     /** 唤出控制层; [focusProgress] = 进入后把焦点放到进度条行 (默认). */

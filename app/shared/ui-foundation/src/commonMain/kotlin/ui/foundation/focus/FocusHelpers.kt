@@ -13,11 +13,15 @@ import androidx.compose.foundation.focusable
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import me.him188.ani.app.ui.foundation.LocalAniUiBehavior
 
 /**
@@ -78,6 +82,44 @@ fun Modifier.defaultFocus(): Modifier = composed {
     } else {
         this
     }
+}
+
+/**
+ * 弹窗/覆盖层关掉之后, 把焦点还回本元素 (= 打开它的那个按钮).
+ *
+ * Compose 在聚焦节点被移除时会清掉整棵树的焦点, **不会**交给祖先; 独立窗口的 Dialog 关闭时
+ * 也不保证把焦点还给下层窗口原来的那个节点. 于是遥控器用户按返回之后就"没有焦点"了 ——
+ * 看不到焦点圈, 方向键全无反应. 凡是打开弹窗的按钮都应该挂这个.
+ *
+ * 用法: `Modifier.restoreFocusAfter(state.showSomeDialog)`.
+ *
+ * 焦点导航设备之外 (手机/桌面鼠标) 不做任何事.
+ *
+ * @param overlayVisible 弹窗是否在场; 由 true 变 false 的那一刻开始找回焦点.
+ */
+@Composable
+fun Modifier.restoreFocusAfter(overlayVisible: Boolean): Modifier {
+    if (!LocalAniUiBehavior.current.focusDrivenNavigation) return this
+    val requester = remember { FocusRequester() }
+    var hasFocus by remember { mutableStateOf(false) }
+    var everVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(overlayVisible) {
+        if (overlayVisible) {
+            everVisible = true
+            return@LaunchedEffect
+        }
+        if (!everVisible) return@LaunchedEffect // 首次组合, 不是"关闭"
+        everVisible = false
+        // 到位判据用本元素的 hasFocus: requestFocus 在节点未附着时是静默失败, 不抛异常,
+        // 拿"没抛异常"当到位会一次就收工 (见 resolveFocusRepeatedly 的文档)
+        resolveFocusRepeatedly(attempts = 30, arrived = { hasFocus }) {
+            runCatching { requester.requestFocus() }
+        }
+    }
+    return this
+        .focusRequester(requester)
+        // hasFocus 而不是 isFocused: 请求器挂在容器上, 真正持焦的是它子树里的可点击节点
+        .onFocusChanged { hasFocus = it.hasFocus }
 }
 
 /**

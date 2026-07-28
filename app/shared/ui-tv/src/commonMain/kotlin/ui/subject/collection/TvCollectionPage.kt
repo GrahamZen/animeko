@@ -92,6 +92,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.paging.compose.collectWithLifecycle
 import androidx.paging.compose.itemKey
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
@@ -342,10 +343,14 @@ fun TvCollectionPage(
     val transitAnchorFocusRequester = remember { FocusRequester() }
     // 当前 tab 内最后聚焦的卡片下标 (跨导航保存, 返回本页恢复焦点); 切 tab 重置
     var lastFocusedCard by rememberSaveable { mutableIntStateOf(-1) }
+    // 收藏状态刚被改掉、正等着离开本 tab 的条目 (见下方等待效应); null = 没有
+    var awaitingRemovalSubjectId by remember { mutableStateOf<Int?>(null) }
     var prevTabIndex by rememberSaveable { mutableIntStateOf(state.selectedTypeIndex) }
     if (prevTabIndex != state.selectedTypeIndex) {
         prevTabIndex = state.selectedTypeIndex
         lastFocusedCard = -1
+        // 用户自己切了 tab: 旧 tab 的卡去哪已无关紧要, 别让等待效应在新 tab 里安排落点
+        awaitingRemovalSubjectId = null
     }
     // 进入本页要恢复的目标卡片下标 (进页那一刻的快照; -1 = 聚焦选中 tab)
     val restoreCardIndex = remember { lastFocusedCard }
@@ -389,6 +394,29 @@ fun TvCollectionPage(
         }
     }
 
+    // 焦点卡因收藏状态改变离开本 tab: 等它真的从列表里消失, 再安排落点.
+    //
+    // 不能在点下拉菜单那一刻就 request: 改收藏要一次网络往返, 那时卡还在, 落点解析第一帧就会
+    // 把焦点聚焦回原卡并判定"到位"结束; 等卡真消失时已无人接管, 焦点悬空 —— Compose 会
+    // clearFocus 整棵树并做一次初始焦点分配 (见 FocusTargetNode.onReset/onDetach, 源码明确
+    // **不**把焦点交给焦点祖先, 那只是注释里的将来打算), 落点是遍历顺序第一个可聚焦元素 =
+    // 第一个 tab 标签; 而标签的"聚焦即选中"刻意不认系统塞来的焦点 (见 selectByFocusArmed),
+    // 于是高亮停在第一个标签而指示条还留在当前 tab 上.
+    //
+    // 一次 request 覆盖两种结局, 由 [GridFocusController.resolve] 自己分岔: 本 tab 还有卡 ->
+    // 夹到相邻下标 (焦点留在原位置); 整个 tab 空了 -> onEmptyIdle 回到选中标签.
+    LaunchedEffect(awaitingRemovalSubjectId) {
+        val subjectId = awaitingRemovalSubjectId ?: return@LaunchedEffect
+        // 超时兜底: 请求成功但列表迟迟不刷新时也要收尾, 否则隐形锚点一直可聚焦, 焦点就停在
+        // 那个不可见节点上 (方向键还能走, 但看不到焦点圈)
+        withTimeoutOrNull(TV_COLLECTION_AWAIT_REMOVAL_TIMEOUT_MILLIS) {
+            snapshotFlow { items.itemSnapshotList.items.none { it.subjectId == subjectId } }
+                .first { it }
+        }
+        awaitingRemovalSubjectId = null
+        gridFocus.request(lastFocusedCard.coerceAtLeast(0))
+    }
+
     // 网格通用返回规则: 不在首卡时按返回先回网格第一张卡 (借统一落点解析:
     // 轮询等滚动/组合完成再聚焦). 已在首卡时不启用, 返回交给上层 (回探索页).
     // derivedStateOf: 焦点下标每移一格都变, 直接读会让整页每格重组, 收窄成布尔
@@ -420,9 +448,28 @@ fun TvCollectionPage(
                     expanded = expanded,
                     onDismissRequest = onDismiss,
                     onClick = { action ->
+                        // 改成别的状态后本条目会离开当前 tab, 焦点此刻正在它的卡片上 (菜单是长按它
+                        // 弹出的). 先把焦点钉到隐形锚点躲开即将到来的销毁 (同跨 tab 导航的做法),
+                        // 再登记等待条目消失 —— 落点由上方的等待效应安排. 直接留在卡上等销毁的话
+                        // 焦点会悬空并被系统重分配到第一个 tab 标签.
+                        //
+                        // 这里读 state 而非捕获外层的 selectedType: 本工厂 remember 无 key
+                        // (避免每次重组换实例让所有可见卡片跟着重组), 捕获的值会停在首次组合那一刻.
+                        if (action.type != COLLECTION_TABS_SORTED[state.selectedTypeIndex]) {
+                            awaitingRemovalSubjectId = info.subjectId
+                            runCatching { transitAnchorFocusRequester.requestFocus() }
+                        }
                         scope.launch {
                             runCatching { setCollectionTypeUseCase(info.subjectId, action.type) }
-                                .onFailure { toaster.showLoadError(LoadError.fromException(it)) }
+                                .onFailure {
+                                    // 改失败, 条目不会离开列表: 立刻收尾并把焦点送回原卡,
+                                    // 否则等待效应要空等到超时, 期间焦点停在不可见锚点上
+                                    if (awaitingRemovalSubjectId == info.subjectId) {
+                                        awaitingRemovalSubjectId = null
+                                        gridFocus.request(lastFocusedCard.coerceAtLeast(0))
+                                    }
+                                    toaster.showLoadError(LoadError.fromException(it))
+                                }
                         }
                     },
                     modifier = Modifier.onPreviewKeyEvent { event ->
@@ -508,7 +555,11 @@ fun TvCollectionPage(
                 Modifier
                     .size(1.dp)
                     .focusRequester(transitAnchorFocusRequester)
-                    .focusProperties { canFocus = gridFocus.pending != null }
+                    // 落点解析期间 + 等条目离开本 tab 期间可聚焦 (后者是给改收藏状态用的:
+                    // 卡片被销毁前焦点先躲到这里, 见 awaitingRemovalSubjectId)
+                    .focusProperties {
+                        canFocus = gridFocus.pending != null || awaitingRemovalSubjectId != null
+                    }
                     .focusable(),
             )
 
@@ -1156,6 +1207,12 @@ private val TV_COLLECTION_TABS = listOf(
     UnifiedCollectionType.DONE,
     UnifiedCollectionType.DROPPED,
 )
+
+/**
+ * 等"改了收藏状态的条目"从当前 tab 列表消失的上限 (毫秒). 需覆盖一次网络往返 + 分页刷新;
+ * 超时只是收尾兜底 (把焦点从隐形锚点送走), 正常路径远早于此.
+ */
+private const val TV_COLLECTION_AWAIT_REMOVAL_TIMEOUT_MILLIS = 5000L
 
 /** 跨 tab 网格滑动过渡时长 (完整动画档). */
 private const val TV_COLLECTION_TAB_SLIDE_MILLIS = 560

@@ -51,6 +51,7 @@ import me.him188.ani.app.ui.comment.UIComment
 import me.him188.ani.app.ui.comment.UIRichText
 import me.him188.ani.app.ui.foundation.LocalAniUiBehavior
 import me.him188.ani.app.ui.foundation.avatar.AvatarImage
+import me.him188.ani.app.ui.foundation.focus.restoreFocusAfter
 import me.him188.ani.app.ui.foundation.layout.desktopTitleBar
 import me.him188.ani.app.ui.foundation.layout.desktopTitleBarPadding
 import me.him188.ani.app.ui.foundation.layout.rememberConnectedScrollState
@@ -244,6 +245,8 @@ fun SubjectCommentsSheet(
     onClickWriteReview: () -> Unit,
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
+    /** 评分弹窗是否开着: 它盖在本 sheet 上面, 关掉后要把焦点还给"写评价"按钮 (仅遥控器形态). */
+    ratingDialogVisible: Boolean = false,
 ) {
     if (LocalAniUiBehavior.current.panelsAsCenteredDialogs) {
         val gridComments = state.list.collectAsLazyPagingItemsWithLifecycle()
@@ -255,7 +258,9 @@ fun SubjectCommentsSheet(
             onDismissRequest = onDismissRequest,
             showRating = true,
             headerAction = {
-                TextButton(onClickWriteReview) {
+                // 评分弹窗关掉之后焦点还回本按钮 (它自己是另一个弹窗窗口里的元素,
+                // 上面那层关掉时不保证把焦点还回来, 遥控器会当场失去焦点)
+                TextButton(onClickWriteReview, Modifier.restoreFocusAfter(ratingDialogVisible)) {
                     Icon(Icons.Rounded.AddComment, contentDescription = null, Modifier.size(18.dp))
                     Text(
                         stringResource(Lang.subject_details_write_review),

@@ -57,6 +57,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableIntState
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -89,6 +90,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.compose.collectAsLazyPagingItemsWithLifecycle
 import androidx.paging.compose.itemKey
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 import me.him188.ani.app.data.models.subject.nameCn
@@ -133,6 +135,23 @@ private val TV_PANEL_CARD_WIDTH = 240.dp
 /** 面板最大高度 (向上最多长到这里, 条目少时按内容收缩). */
 private val TV_PANEL_MAX_HEIGHT = 300.dp
 
+/**
+ * 面板条目的焦点登记处 (焦点找回用).
+ *
+ * [requester] 由条目获焦时登记 —— 不按 focusedIndex 在组合里挂请求器: 那要求每个条目都读
+ * focusedIndex, 一步导航就让在场的所有条目重组.
+ *
+ * [focused] 是找回解析的**到位判据**: 目标未附着时 requestFocus 会被焦点系统静默拒绝
+ * (不抛异常), 所以不能拿"请求没抛异常"当到位 (见 resolveFocusRepeatedly 的文档).
+ * 也不能用 overlay.focusRegion —— 它失焦不清除, 找回开始那一刻还停在 PANEL 上,
+ * 判据会当场为真, 一次请求都不发.
+ */
+@Stable
+internal class TvPanelItemFocusRegistry {
+    var requester: FocusRequester? by mutableStateOf(null)
+    var focused: Boolean by mutableStateOf(false)
+}
+
 /** 面板条目未聚焦底色 (半透明玻璃, 视频上可读). */
 private val TV_PANEL_ITEM_COLOR = Color.Black.copy(alpha = 0.55f)
 
@@ -171,10 +190,15 @@ internal fun TvPlayerPanelHost(
     // 弹幕面板底部 chips 行当前是否存在 (加载早期/全部源失败时不组合), 由面板上报;
     // 左右键跳相邻胶囊的豁免判断依据 —— chips 缺席时 index 0 是普通弹幕行, 不豁免
     val danmakuChipsPresent = remember { mutableStateOf(false) }
+    // 当前聚焦条目的登记 (焦点找回用, 见 overlay.panelItemFocusTick)
+    val itemFocus = remember { TvPanelItemFocusRegistry() }
 
     // 面板每次浮出都复位到底部 (index 0): 进入焦点 (点击胶囊/上键) 永远落在最下面
     // 第一项 —— 保留上次滚动位置会让进入焦点落在"不知道第几项"上, 反直觉
     LaunchedEffect(overlay.activePanel) {
+        // 换面板/关面板: 旧面板条目的登记作废 (它的节点即将被移除, 焦点找回不能落在上面)
+        itemFocus.requester = null
+        itemFocus.focused = false
         val listState = when (overlay.activePanel) {
             TvPlayerPanel.DANMAKU_LIST -> danmakuListState
             TvPlayerPanel.RECOMMENDATIONS -> recommendationsListState
@@ -202,6 +226,28 @@ internal fun TvPlayerPanelHost(
                 overlay.activePanel?.let {
                     runCatching { entryFocusRequesters.getValue(it).requestFocus() }
                 }
+            }
+        }
+    }
+
+    // 焦点找回: 从面板条目点开的东西 (人物预览/弹幕延迟对话框) 关掉之后, 把焦点送回**刚点开
+    // 的那一条**. Compose 移除聚焦节点时会清掉整棵树的焦点且不交给祖先, 所以每一次这样的移除
+    // 都得有人显式还回来, 否则整层没有焦点 (方向键全失效).
+    // drop(1): 初值不是一次真实请求
+    LaunchedEffect(Unit) {
+        snapshotFlow { overlay.panelItemFocusTick }.drop(1).collectLatest {
+            val requester = itemFocus.requester ?: return@collectLatest
+            resolveFocusRepeatedly(
+                attempts = 20,
+                arrived = {
+                    // 面板/控制层已经不在场也算收工 (焦点归属由根路由的解析器负责)
+                    itemFocus.focused || overlay.activePanel == null ||
+                            overlay.layer != TvPlayerLayer.CONTROLS
+                },
+                // 用户自己把焦点挪去了别的区域 (胶囊行/进度条): 别跟他抢
+                abandon = { overlay.focusRegion != TvPlayerFocusRegion.PANEL },
+            ) {
+                runCatching { requester.requestFocus() }
             }
         }
     }
@@ -273,28 +319,28 @@ internal fun TvPlayerPanelHost(
             null -> Box(Modifier.height(0.dp))
 
             TvPlayerPanel.STAFF -> TvStaffPanel(
-                vm, overlay, staffListState, focusedIndex,
+                vm, overlay, staffListState, focusedIndex, itemFocus,
                 entryFocusRequesters.getValue(panel), panelModifier,
             )
 
             TvPlayerPanel.CHARACTERS -> TvCharactersPanel(
-                vm, overlay, charactersListState, focusedIndex,
+                vm, overlay, charactersListState, focusedIndex, itemFocus,
                 entryFocusRequesters.getValue(panel), panelModifier,
             )
 
             TvPlayerPanel.RECOMMENDATIONS -> TvRecommendationsPanel(
-                vm, overlay, recommendationsListState, focusedIndex,
+                vm, overlay, recommendationsListState, focusedIndex, itemFocus,
                 entryFocusRequesters.getValue(panel), panelModifier,
             )
 
             TvPlayerPanel.COMMENTS -> TvCommentsPanel(
-                vm, page, overlay, commentsListState, focusedIndex,
+                vm, page, overlay, commentsListState, focusedIndex, itemFocus,
                 entryFocusRequesters.getValue(panel),
                 setShowEditCommentSheet, pauseOnPlaying, panelModifier,
             )
 
             TvPlayerPanel.DANMAKU_LIST -> TvDanmakuListPanel(
-                vm, page, overlay, danmakuListState, focusedIndex,
+                vm, page, overlay, danmakuListState, focusedIndex, itemFocus,
                 entryFocusRequesters.getValue(panel),
                 onChipsPresentChanged = { danmakuChipsPresent.value = it },
                 modifier = panelModifier,
@@ -350,17 +396,31 @@ private fun TvPanelList(
 private fun TvPanelItem(
     index: Int,
     focusedIndex: MutableIntState,
+    /** 焦点找回登记处: 本条目获焦时把自己的请求器登记进去 (见 [TvPlayerPanelHost]). */
+    itemFocus: TvPanelItemFocusRegistry,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     content: @Composable (focused: Boolean) -> Unit,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val focused by interactionSource.collectIsFocusedAsState()
+    val selfFocusRequester = remember { FocusRequester() }
     Surface(
         onClick = onClick,
         modifier = modifier
             .fillMaxWidth()
-            .onFocusChanged { if (it.isFocused) focusedIndex.intValue = index },
+            .focusRequester(selfFocusRequester)
+            .onFocusChanged {
+                if (it.isFocused) {
+                    focusedIndex.intValue = index
+                    itemFocus.requester = selfFocusRequester
+                    itemFocus.focused = true
+                } else if (itemFocus.requester === selfFocusRequester) {
+                    // 只有"当前登记的那一条"能清标记: 条目间交接时两条的回调先后不定,
+                    // 无条件清的话后到的失焦回调会把新条目刚置的 true 抹掉
+                    itemFocus.focused = false
+                }
+            },
         shape = RoundedCornerShape(12.dp),
         color = if (focused) TV_PANEL_ITEM_FOCUSED_COLOR else TV_PANEL_ITEM_COLOR,
         contentColor = Color.White,
@@ -384,6 +444,7 @@ private fun TvDanmakuListPanel(
     overlay: TvPlayerOverlayState,
     listState: LazyListState,
     focusedIndex: MutableIntState,
+    itemFocus: TvPanelItemFocusRegistry,
     entryFocusRequester: FocusRequester,
     /** 底部 chips 行是否在场 (宿主的左右键豁免判断依据), 变化时上报. */
     onChipsPresentChanged: (Boolean) -> Unit,
@@ -409,7 +470,16 @@ private fun TvDanmakuListPanel(
                         .fillMaxWidth()
                         // 面板入口落点 (index 0, 进焦点落到第一个 chip)
                         .focusRequester(entryFocusRequester)
-                        .onFocusChanged { if (it.hasFocus) focusedIndex.intValue = 0 },
+                        .onFocusChanged {
+                            if (it.hasFocus) {
+                                focusedIndex.intValue = 0
+                                // 焦点找回落到本行第一个 chip (行内具体哪个 chip 不记)
+                                itemFocus.requester = entryFocusRequester
+                                itemFocus.focused = true
+                            } else if (itemFocus.requester === entryFocusRequester) {
+                                itemFocus.focused = false
+                            }
+                        },
                     shape = RoundedCornerShape(12.dp),
                     color = TV_PANEL_ITEM_COLOR,
                     contentColor = Color.White,
@@ -453,6 +523,7 @@ private fun TvDanmakuListPanel(
             TvPanelItem(
                 index = i + itemIndexBase,
                 focusedIndex = focusedIndex,
+                itemFocus = itemFocus,
                 onClick = {},
                 // chips 未组合时首条弹幕即 index 0, 兼任面板入口落点
                 modifier = if (i + itemIndexBase == 0) Modifier.focusRequester(entryFocusRequester) else Modifier,
@@ -489,10 +560,15 @@ private fun TvDanmakuListPanel(
         DanmakuTimeShiftDialog(
             serviceName = renderDanmakuServiceId(editingShiftSource.serviceId),
             currentShiftMillis = editingShiftSource.config.shiftMillis,
-            onDismissRequest = { editingShiftServiceId = null },
+            // 对话框收起后焦点还给 chips 行: 不还的话焦点停在被移除的对话框节点上 (= 没有焦点)
+            onDismissRequest = {
+                editingShiftServiceId = null
+                overlay.requestPanelItemFocus()
+            },
             onConfirm = { newShift ->
                 vm.setDanmakuSourceShiftMillis(editingShiftSource.serviceId, newShift)
                 editingShiftServiceId = null
+                overlay.requestPanelItemFocus()
             },
         )
     }
@@ -515,6 +591,7 @@ private fun TvRecommendationsPanel(
     overlay: TvPlayerOverlayState,
     listState: LazyListState,
     focusedIndex: MutableIntState,
+    itemFocus: TvPanelItemFocusRegistry,
     entryFocusRequester: FocusRequester,
     modifier: Modifier = Modifier,
 ) {
@@ -529,6 +606,7 @@ private fun TvRecommendationsPanel(
             TvPanelItem(
                 index = i,
                 focusedIndex = focusedIndex,
+                itemFocus = itemFocus,
                 modifier = if (i == 0) Modifier.focusRequester(entryFocusRequester) else Modifier,
                 onClick = {
                     val targetSubjectId = recommendation.subjectId?.toInt() ?: return@TvPanelItem
@@ -601,6 +679,7 @@ private fun TvCommentsPanel(
     overlay: TvPlayerOverlayState,
     listState: LazyListState,
     focusedIndex: MutableIntState,
+    itemFocus: TvPanelItemFocusRegistry,
     entryFocusRequester: FocusRequester,
     setShowEditCommentSheet: (Boolean) -> Unit,
     pauseOnPlaying: () -> Unit,
@@ -616,6 +695,7 @@ private fun TvCommentsPanel(
             TvPanelItem(
                 index = i,
                 focusedIndex = focusedIndex,
+                itemFocus = itemFocus,
                 modifier = if (i == 0) Modifier.focusRequester(entryFocusRequester) else Modifier,
                 onClick = {
                     vm.commentEditorState.startEdit(
@@ -689,6 +769,7 @@ private fun TvCharactersPanel(
     overlay: TvPlayerOverlayState,
     listState: LazyListState,
     focusedIndex: MutableIntState,
+    itemFocus: TvPanelItemFocusRegistry,
     entryFocusRequester: FocusRequester,
     modifier: Modifier = Modifier,
 ) {
@@ -707,6 +788,7 @@ private fun TvCharactersPanel(
             TvPanelItem(
                 index = i,
                 focusedIndex = focusedIndex,
+                itemFocus = itemFocus,
                 modifier = if (i == 0) Modifier.focusRequester(entryFocusRequester) else Modifier,
                 onClick = { onClickCharacter(PeoplePreviewTarget.Character(item.character.id)) },
             ) {
@@ -728,6 +810,7 @@ private fun TvStaffPanel(
     overlay: TvPlayerOverlayState,
     listState: LazyListState,
     focusedIndex: MutableIntState,
+    itemFocus: TvPanelItemFocusRegistry,
     entryFocusRequester: FocusRequester,
     modifier: Modifier = Modifier,
 ) {
@@ -746,6 +829,7 @@ private fun TvStaffPanel(
             TvPanelItem(
                 index = i,
                 focusedIndex = focusedIndex,
+                itemFocus = itemFocus,
                 modifier = if (i == 0) Modifier.focusRequester(entryFocusRequester) else Modifier,
                 onClick = { onClickPerson(PeoplePreviewTarget.Person(person.personInfo.id)) },
             ) {

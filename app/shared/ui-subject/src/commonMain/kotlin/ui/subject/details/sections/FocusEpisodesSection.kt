@@ -218,6 +218,9 @@ fun FocusEpisodeCarousel(
         }
     }
     var actionRestoreEpisodeId by remember { mutableStateOf<Int?>(null) }
+    // 本次焦点恢复期间"焦点被还给这张卡"不算用户介入 (见下方 yieldEpisodeId): 窗口关闭时
+    // 系统/focusRestorer 会把焦点还给弹窗打开前聚焦的那张卡, 与显式聚焦目标集竞争
+    var actionRestoreYieldEpisodeId by remember { mutableStateOf<Int?>(null) }
     val actionRestoreFocus = remember { FocusRequester() }
     LaunchedEffect(actionRestoreEpisodeId) {
         val target = actionRestoreEpisodeId ?: return@LaunchedEffect
@@ -225,16 +228,34 @@ fun FocusEpisodeCarousel(
         // LazyRow 的 focusRestorer 又会把它"恢复"到上一张聚焦卡 (或回退卡), 与这里的
         // 显式聚焦竞争, 谁后执行谁生效 (表现为随机跳错集). 另外 scrollToItem 后目标卡
         // 可能还没组合完成, 首次请求会落空.
-        // 起点快照 + 放弃判据: 焦点落到既非起点也非目标的集上 = 用户自己移开了, 不再抢回
+        //
+        // 归还时机不定 (可能在我们抢到之后才发生), 所以到位后不能立刻收手, 也不能把归还
+        // 误判成用户介入:
+        //  - 目标须连续持有焦点 [FOCUS_HOLD_FRAMES] 帧才算稳; 中途被归还抢走就再抢回来;
+        //  - 放弃判据放行 [yieldEpisodeId] (归还的落点). 网格长按跳转的场景下用户此刻还按着
+        //    确认键, 根本没法移动焦点, 焦点出现在旧卡上只可能是归还. 落到第三张卡才算用户介入.
+        // 起点快照同理: 解析开始那一刻焦点通常正停在要离开的元素上, 不算介入.
         val startEpisodeId = activeFocusEpisodeId
+        val yieldEpisodeId = actionRestoreYieldEpisodeId
+        var heldFrames = 0
         resolveFocusRepeatedly(
-            attempts = 20, delayMillis = 0,
-            arrived = { activeFocusEpisodeId == target },
-            abandon = { activeFocusEpisodeId.let { it != null && it != startEpisodeId && it != target } },
+            attempts = 30, delayMillis = 0,
+            arrived = { heldFrames >= FOCUS_HOLD_FRAMES },
+            abandon = {
+                activeFocusEpisodeId.let {
+                    it != null && it != startEpisodeId && it != target && it != yieldEpisodeId
+                }
+            },
         ) {
-            runCatching { actionRestoreFocus.requestFocus() }
+            if (activeFocusEpisodeId == target) {
+                heldFrames++
+            } else {
+                heldFrames = 0
+                runCatching { actionRestoreFocus.requestFocus() }
+            }
         }
         actionRestoreEpisodeId = null
+        actionRestoreYieldEpisodeId = null
     }
     val displayed = episodes.firstOrNull { it.episodeId == (focusedEpisodeId ?: currentEpisodeId) }
         ?: episodes.firstOrNull()
@@ -288,6 +309,12 @@ fun FocusEpisodeCarousel(
         if (revealEpisodeId != null) {
             val index = episodes.indexOfFirst { it.episodeId == revealEpisodeId }
             if (index >= 0) {
+                // 焦点归还的落点 = 跳转前"最后聚焦"的那张卡, 记下来供恢复解析放行 (不算用户介入)
+                actionRestoreYieldEpisodeId = focusedEpisodeId
+                // "最后聚焦"立刻改为目标集: 信息行 / focusRestorer 的兜底请求器 (fallbackIndex)
+                // 都读它, 不改的话它们仍指着旧卡 —— 于是归还与显式聚焦一起把焦点往旧卡上拉,
+                // 表现为"长按 N 却停在旧卡上" (旧卡滚出组合的远距离跳转才碰巧正常)
+                focusedEpisodeId = revealEpisodeId
                 listState.scrollToItem(index, snapOffsetFor(index))
                 actionRestoreEpisodeId = revealEpisodeId
                 swallowHeldConfirm = true
@@ -455,8 +482,14 @@ fun FocusEpisodeCarousel(
         val activeFocusIndex = remember(episodes, activeFocusEpisodeId) {
             activeFocusEpisodeId?.let { id -> episodes.indexOfFirst { it.episodeId == id } } ?: -1
         }
-        LaunchedEffect(activeFocusIndex) {
-            if (activeFocusIndex >= 0) {
+        // 焦点恢复期间 (actionRestoreEpisodeId != null) 焦点可能被系统归还给旧卡一两帧,
+        // 这几帧不跟随滚动: 跟了就是"滑向旧卡又滑回来"的抖动, 而目标位置 reveal 时已经滚到位.
+        // 恢复结束 (置回 null) 时本效应会再跑一次, 按当时真实的聚焦卡补上滚动 —— 用户中途
+        // 自己把焦点移走 (解析放弃) 的情况下, 吸附不会漏做.
+        LaunchedEffect(activeFocusIndex, actionRestoreEpisodeId) {
+            if (activeFocusIndex >= 0 &&
+                actionRestoreEpisodeId.let { it == null || it == activeFocusEpisodeId }
+            ) {
                 listState.animateScrollToItem(activeFocusIndex, snapOffsetFor(activeFocusIndex))
             }
         }
@@ -548,6 +581,14 @@ fun FocusEpisodeCarousel(
 
 /** TV 选集卡片聚焦时的外圈描边宽度 (紧贴卡片圆角, 画在卡片边缘内侧, 不会被 LazyRow 裁掉). */
 private val FOCUS_RING_WIDTH = 1.5.dp
+
+/**
+ * 弹窗关闭后把焦点交还给指定卡片时, 目标须连续持有焦点的帧数才算稳.
+ *
+ * 不是"到位即收手": 系统把焦点还给弹窗打开前那张卡是异步的, 可能晚于我们抢到的那一刻,
+ * 收手太早就被它抢回去 (表现为停在旧卡上). 多押几帧, 归还之后还能再抢回来.
+ */
+private const val FOCUS_HOLD_FRAMES = 3
 
 /**
  * 详情页选集卡片的圆角半径 (网格卡 / TV 卡片本体 / TV 聚焦外圈描边共用, 三者必须一致).

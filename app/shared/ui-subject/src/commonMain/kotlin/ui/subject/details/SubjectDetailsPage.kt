@@ -397,12 +397,16 @@ private fun SubjectDetailsPage(
             var showComments by rememberSaveable { mutableStateOf(false) }
             EditableRatingDialogsHost(state.editableRatingState)
             if (showComments) {
+                // 标记这次评分是从本 sheet 里的"写评价"打开的: 关闭后只有它收回焦点,
+                // 详情页里那个评分组件 (同一个 state) 不跟着抢 (见 EditableRatingState.isEditingFrom)
+                val writeReviewSource = remember { Any() }
                 SubjectCommentsSheet(
                     state = state.subjectCommentState,
                     onClickUrl = onClickCommentUrl,
                     onClickImage = onClickCommentImage,
-                    onClickWriteReview = { state.editableRatingState.requestEdit() },
+                    onClickWriteReview = { state.editableRatingState.requestEdit(writeReviewSource) },
                     onDismissRequest = { showComments = false },
+                    ratingDialogVisible = state.editableRatingState.isEditingFrom(writeReviewSource),
                 )
             }
             // 中大屏点击人物/角色先打开右侧预览 (方案C), 手机上则直接导航到全页

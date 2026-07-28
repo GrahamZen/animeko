@@ -148,6 +148,7 @@ import me.him188.ani.app.ui.foundation.AsyncImage
 import me.him188.ani.app.ui.foundation.ifThen
 import me.him188.ani.app.ui.foundation.session.TvNavigationSideRail
 import me.him188.ani.app.ui.foundation.focus.resolveFocusRepeatedly
+import me.him188.ani.app.ui.foundation.focus.restoreFocusAfter
 import me.him188.ani.app.ui.foundation.session.buildTvRailItems
 import me.him188.ani.app.ui.foundation.theme.AniThemeDefaults
 import me.him188.ani.app.ui.lang.Lang
@@ -2404,9 +2405,14 @@ private fun TvHeroBlock(
                     barHeight = 36.dp,
                 )
                 // 直方图紧贴下方评分: 无额外间距 (直方图自身与刻度行间已有 6dp)
+                // 只认"自己打开的那次"评分弹窗: 同一个 state 也挂在「查看全部」评论里的写评价上,
+                // 不分辨来源的话从那边打开、关闭后焦点会被这里抢过来
+                val ratingSource = remember { Any() }
                 SubjectRatingSummary(
                     info.ratingInfo,
-                    onClick = { state.editableRatingState.requestEdit() },
+                    // 评分弹窗关掉之后焦点还回本按钮 (弹窗是独立窗口, 关掉后不保证还回来)
+                    Modifier.restoreFocusAfter(state.editableRatingState.isEditingFrom(ratingSource)),
+                    onClick = { state.editableRatingState.requestEdit(ratingSource) },
                 )
             }
         }
@@ -2501,9 +2507,11 @@ private fun TvEmbeddedHeroPage(
                     barHeight = 36.dp,
                 )
                 // 直方图紧贴下方评分: 无额外间距 (直方图自身与刻度行间已有 6dp)
+                val ratingSource = remember { Any() }
                 SubjectRatingSummary(
                     info.ratingInfo,
-                    onClick = { state.editableRatingState.requestEdit() },
+                    Modifier.restoreFocusAfter(state.editableRatingState.isEditingFrom(ratingSource)),
+                    onClick = { state.editableRatingState.requestEdit(ratingSource) },
                 )
             }
         }

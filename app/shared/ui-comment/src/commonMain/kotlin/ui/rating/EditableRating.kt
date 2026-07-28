@@ -62,8 +62,25 @@ class EditableRatingState(
     var showRatingDialog by mutableStateOf(false)
         private set
 
-    fun requestEdit() {
+    /**
+     * 本次评分弹窗是**哪个入口**打开的 (调用方给的任意标记对象); 见 [isEditingFrom].
+     *
+     * 同一个 state 会同时挂在好几个入口上 (详情页的评分组件、「查看全部」评论里的写评价…),
+     * 它们都活着且都在观察 [showRatingDialog]. 不分辨来源的话, 弹窗关闭时每个入口都会去抢焦点.
+     */
+    var editRequestSource: Any? by mutableStateOf(null)
+        private set
+
+    /**
+     * 评分弹窗当前是否由 [source] 这个入口打开的.
+     *
+     * 用于 `Modifier.restoreFocusAfter`: 只有打开它的那个入口才该在关闭后把焦点收回来.
+     */
+    fun isEditingFrom(source: Any?): Boolean = showRatingDialog && editRequestSource === source
+
+    fun requestEdit(source: Any? = null) {
         if (isCollected()) {
+            editRequestSource = source
             showRatingDialog = true
             val hasExistingScore = selfRatingInfo.score > 0
             Analytics.recordEvent(RatingEnter) {

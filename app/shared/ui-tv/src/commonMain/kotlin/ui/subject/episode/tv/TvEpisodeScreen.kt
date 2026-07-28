@@ -55,6 +55,8 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.LocalPlatformContext
 import kotlinx.coroutines.delay
@@ -319,6 +321,34 @@ fun TvEpisodeScreenContent(
     var confirmKeyHoldTick by remember { mutableIntStateOf(0) }
     // 长按倍速生效中: 抬起时据此判断"这是长按, 不要切换播放"
     var fastForwarding by remember { mutableStateOf(false) }
+
+    // 本页是否在前台. 从面板里点开别的页面 (相关推荐 -> 条目详情页) 期间为 false:
+    //   - 那时不自动隐藏控制层 (子树被移除的话, 回来时焦点无处可还);
+    //   - 重新回到前台时补发一次焦点落点 —— 离开期间聚焦的那个节点被销毁, Compose 会清掉
+    //     整棵树的焦点且不交给祖先, 回来后面板还在屏上却没有任何焦点 (方向键全失效).
+    // 生命周期信号与组合是否存活无关, 正好覆盖"快速返回时整棵子树一直没被销毁"的情形
+    // (与追番页的返回落点同一套路, 见 TvCollectionPage).
+    var pageResumed by remember { mutableStateOf(true) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(lifecycle) {
+        var resumedBefore = false
+        lifecycle.currentStateFlow.collect { state ->
+            val resumed = state.isAtLeast(Lifecycle.State.RESUMED)
+            pageResumed = resumed
+            if (!resumed) return@collect
+            // 首次 RESUMED 是进屏, 落点由 overlay 的初始 pendingFocus (ROOT) 负责
+            if (!resumedBefore) {
+                resumedBefore = true
+                return@collect
+            }
+            when {
+                overlay.layer == TvPlayerLayer.HIDDEN -> overlay.requestRootFocus()
+                overlay.layer != TvPlayerLayer.CONTROLS -> {} // 详情层内部自己有落点
+                overlay.activePanel != null -> overlay.requestPanelItemFocus()
+                else -> overlay.focusProgress()
+            }
+        }
+    }
 
     // ---- 唯一按键路由: 所有 Back 语义与层级切换都在这里, 状态读取只发生在事件回调内 ----
     val onRootKeyEvent: (KeyEvent) -> Boolean = router@{ event ->
@@ -638,16 +668,21 @@ fun TvEpisodeScreenContent(
     }
     // 自动隐藏 (Prime 行为): 播放中且无面板/侧 sheet/下拉/输入态, 5 秒无按键收起.
     // 用 snapshotFlow 而非 LaunchedEffect key, 避免每次按键使本组合作用域失效
+    //
+    // 本页不在前台 (从面板点开了别的页面, 如相关推荐的条目详情页) 期间一律不隐藏:
+    // 隐藏会把控制层整棵子树移除, 回来时焦点已经无处可还 —— 组件留着, 焦点才回得去
+    // (回来后由上面的生命周期效应送回面板条目/进度条).
     LaunchedEffect(Unit) {
         snapshotFlow {
             listOf(
                 overlay.layer, overlay.interactionTick, overlay.activePanel,
                 overlay.openPopupCount, overlay.danmakuInputExpanded, anySheetVisible,
+                pageResumed,
             )
         }.collectLatest {
             if (overlay.layer != TvPlayerLayer.CONTROLS) return@collectLatest
             if (overlay.activePanel != null || overlay.openPopupCount > 0 ||
-                overlay.danmakuInputExpanded || anySheetVisible
+                overlay.danmakuInputExpanded || anySheetVisible || !pageResumed
             ) {
                 return@collectLatest
             }
