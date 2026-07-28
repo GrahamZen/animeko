@@ -1229,6 +1229,9 @@
     <string name="comment_send_comment">发送评论</string>
     <string name="comment_rendering">渲染中...</string>
     <string name="comment_reply">回复评论</string>
+    <string name="comment_reply_to">回复 %1$s</string>
+    <string name="comment_view_comment">查看评论</string>
+    <string name="comment_reply_unsupported">该评论不支持回复，仅可查看</string>
     <string name="comment_view_more_replies">查看更多 %1$d 条回复&gt;</string>
     <string name="comment_add_emoji">添加表情</string>
     <string name="comment_bold">加粗</string>

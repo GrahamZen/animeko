@@ -166,7 +166,6 @@ internal fun TvPlayerControlsOverlay(
     bottomRowFocusRequester: FocusRequester,
     episodeStripFocusRequester: FocusRequester,
     sheetsController: VideoSideSheetsController<EpisodeVideoSideSheetPage>,
-    setShowEditCommentSheet: (Boolean) -> Unit,
     pauseOnPlaying: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -255,7 +254,6 @@ internal fun TvPlayerControlsOverlay(
                             overlay = overlay,
                             vm = vm,
                             page = page,
-                            setShowEditCommentSheet = setShowEditCommentSheet,
                             pauseOnPlaying = pauseOnPlaying,
                             pillFocusRequesters = pillFocusRequesters,
                         )

@@ -45,6 +45,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Comment
+import androidx.compose.material.icons.automirrored.rounded.Reply
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -68,9 +70,11 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.toArgb
@@ -98,12 +102,15 @@ import me.him188.ani.app.navigation.LocalNavigator
 import me.him188.ani.app.navigation.SubjectDetailPlaceholder
 import me.him188.ani.app.tools.formatDateTime
 import me.him188.ani.app.domain.comment.CommentContext
+import me.him188.ani.app.ui.comment.UIComment
+import me.him188.ani.app.ui.comment.UICommentSource
 import me.him188.ani.app.ui.comment.UIRichText
 import me.him188.ani.app.ui.danmaku.DanmakuEditorState
 import me.him188.ani.app.ui.foundation.AsyncImage
 import me.him188.ani.app.ui.foundation.avatar.AvatarImage
 import me.him188.ani.app.ui.foundation.focus.resolveFocusRepeatedly
 import me.him188.ani.app.ui.lang.Lang
+import me.him188.ani.app.ui.lang.comment_reply_to
 import me.him188.ani.app.ui.lang.episode_send_danmaku
 import me.him188.ani.app.ui.lang.subject_episode_danmaku_list_empty
 import me.him188.ani.app.ui.richtext.UIRichElement
@@ -170,7 +177,6 @@ internal fun TvPlayerPanelHost(
     overlay: TvPlayerOverlayState,
     vm: EpisodeViewModel,
     page: EpisodePageState,
-    setShowEditCommentSheet: (Boolean) -> Unit,
     pauseOnPlaying: () -> Unit,
     /** 各胶囊按钮的焦点请求器: 面板最底项按下键显式回到打开它的那个胶囊. */
     pillFocusRequesters: Map<TvPlayerPanel, FocusRequester>,
@@ -230,9 +236,9 @@ internal fun TvPlayerPanelHost(
         }
     }
 
-    // 焦点找回: 从面板条目点开的东西 (人物预览/弹幕延迟对话框) 关掉之后, 把焦点送回**刚点开
-    // 的那一条**. Compose 移除聚焦节点时会清掉整棵树的焦点且不交给祖先, 所以每一次这样的移除
-    // 都得有人显式还回来, 否则整层没有焦点 (方向键全失效).
+    // 焦点找回: 从面板条目点开的东西 (回复弹窗/人物预览/弹幕延迟对话框) 关掉之后, 把焦点
+    // 送回**刚点开的那一条**. Compose 移除聚焦节点时会清掉整棵树的焦点且不交给祖先, 所以
+    // 每一次这样的移除都得有人显式还回来, 否则整层没有焦点 (方向键全失效).
     // drop(1): 初值不是一次真实请求
     LaunchedEffect(Unit) {
         snapshotFlow { overlay.panelItemFocusTick }.drop(1).collectLatest {
@@ -335,8 +341,7 @@ internal fun TvPlayerPanelHost(
 
             TvPlayerPanel.COMMENTS -> TvCommentsPanel(
                 vm, page, overlay, commentsListState, focusedIndex, itemFocus,
-                entryFocusRequesters.getValue(panel),
-                setShowEditCommentSheet, pauseOnPlaying, panelModifier,
+                entryFocusRequesters.getValue(panel), pauseOnPlaying, panelModifier,
             )
 
             TvPlayerPanel.DANMAKU_LIST -> TvDanmakuListPanel(
@@ -668,9 +673,32 @@ private fun TvRecommendationsPanel(
 
 // ============================ 本集评论面板 ============================
 
+/** 回复卡的左缩进 (给 thread 竖线留出的槽). */
+private val TV_COMMENT_REPLY_INDENT = 28.dp
+
+/** thread 竖线: 在缩进槽里的 x 位置 / 线宽 / 颜色. */
+private val TV_COMMENT_THREAD_LINE_INSET = 12.dp
+private val TV_COMMENT_THREAD_LINE_WIDTH = 2.dp
+private val TV_COMMENT_THREAD_LINE_COLOR = Color.White.copy(alpha = 0.22f)
+
+/** 条目间距. 与 [TvPanelList] 的默认值一致 (即改动前的间距), 竖线跨缝延伸也用它. */
+private val TV_COMMENT_ROW_SPACING = 8.dp
+
+/** 楼与楼的额外分隔留白 (只在上一楼确实展开了回复时给). */
+private val TV_COMMENT_GROUP_GAP = 6.dp
+
+/** 条目里 "回复 X" / 回复数这类元信息的图标尺寸. */
+private val TV_COMMENT_META_ICON_SIZE = 12.dp
+
 /**
- * 本集评论: 紧凑纯文本条目 (保持单条目单焦点, 富文本/大图/回复等完整功能在详情页评论区);
- * 点击条目 = 回复该评论 (与手机版评论列表一致).
+ * 本集评论: 紧凑纯文本条目 (保持单条目单焦点, 富文本/大图等完整功能在详情页评论区).
+ *
+ * 主楼 + 一层回复展平进同一个列表 (见 [flattenTvCommentRows]), 回复用缩进 + thread 竖线
+ * (回复的是同层另一条回复时再加一行 "回复 X") 表达回复关系 —— 不做 Reddit 那样的多层嵌套,
+ * 10 尺 UI 上横向层级没法用方向键导航.
+ *
+ * 点击任一条目 = 回复其**所属主楼** (与改动前一致): 服务端写接口只接受主楼 id,
+ * 见 [me.him188.ani.app.domain.comment.PostCommentUseCase]; 弹窗里回显的是被点的那一条.
  */
 @Composable
 private fun TvCommentsPanel(
@@ -681,60 +709,260 @@ private fun TvCommentsPanel(
     focusedIndex: MutableIntState,
     itemFocus: TvPanelItemFocusRegistry,
     entryFocusRequester: FocusRequester,
-    setShowEditCommentSheet: (Boolean) -> Unit,
     pauseOnPlaying: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val comments = vm.episodeCommentState.list.collectAsLazyPagingItemsWithLifecycle()
-    TvPanelList(listState, overlay, focusedIndex, modifier) {
+    val snapshot = comments.itemSnapshotList
+    val rows = remember(snapshot) { flattenTvCommentRows(snapshot) }
+
+    /**
+     * 打开评论弹窗. [shown] 是弹窗里回显的那一条, 回复实际发到 [thread] (主楼).
+     *
+     * [canReply] 为 false 时弹窗是只读的 (没有输入框和发送按钮): Bangumi 评论在 Ani 内只读,
+     * 楼中回复也没有对应的写接口 —— 与其给个发不出去的输入框, 不如明说只能看.
+     */
+    fun openComment(shown: UIComment, shownText: TvCommentText, thread: UIComment, canReply: Boolean) {
+        val context = CommentContext.EpisodeReply(
+            vm.subjectId,
+            page.episodePresentation.episodeId.toLong(),
+            thread.sourceCommentId,
+        )
+        // 只读态不进编辑态: startEdit 会清掉草稿, 而这里根本不会发送
+        if (canReply) {
+            vm.commentEditorState.startEdit(context)
+        }
+        // TV 走自己那个大弹窗 (见 TvCommentReplyDialog), 不是手机端的底部 sheet
+        overlay.startReply(
+            TvCommentReplyTarget(
+                context = context,
+                authorName = shownText.authorName,
+                timeText = shownText.timeText,
+                // 弹窗按"文本段 + 图片"逐块渲染 (卡片上的 [图片] 占位在这里变成真图)
+                blocks = shown.content.toCommentBlocks(),
+                canReply = canReply,
+            ),
+        )
+        pauseOnPlaying()
+    }
+
+    TvPanelList(listState, overlay, focusedIndex, modifier, itemSpacing = TV_COMMENT_ROW_SPACING) {
         items(
-            count = comments.itemCount,
-            key = comments.itemKey { it.stableId },
+            count = rows.size,
+            key = { rows[it].key },
         ) { i ->
-            val comment = comments[i] ?: return@items
-            TvPanelItem(
-                index = i,
-                focusedIndex = focusedIndex,
-                itemFocus = itemFocus,
-                modifier = if (i == 0) Modifier.focusRequester(entryFocusRequester) else Modifier,
-                onClick = {
-                    vm.commentEditorState.startEdit(
-                        CommentContext.EpisodeReply(
-                            vm.subjectId,
-                            page.episodePresentation.episodeId.toLong(),
-                            comment.sourceCommentId,
-                        ),
-                    )
-                    setShowEditCommentSheet(true)
-                    pauseOnPlaying()
-                },
-            ) {
-                Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            comment.author?.nickname ?: comment.author?.id?.toString().orEmpty(),
-                            Modifier.weight(1f),
-                            style = MaterialTheme.typography.labelLarge,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            formatDateTime(comment.createdAt),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color.White.copy(alpha = 0.6f),
+            val row = rows[i]
+            // 展平后不再是 1 pager item : 1 list item, 读一次以保住 paging 的预取/append 触发
+            comments[row.pagerIndex]
+            val text = rememberTvCommentText(row.comment)
+            // 面板入口落点恒在 index 0 (最底那一条, 不一定还是主楼)
+            val entryModifier = if (i == 0) Modifier.focusRequester(entryFocusRequester) else Modifier
+            when (row) {
+                is TvCommentMainRow -> {
+                    // 楼与楼的分隔. reverseLayout 下视觉上方 = index 更大, 所以看 i + 1;
+                    // 上一楼没展开回复时不加, 全是无回复主楼的列表间距与改动前完全一致
+                    val groupGap = if (rows.getOrNull(i + 1) is TvCommentReplyRow) TV_COMMENT_GROUP_GAP else 0.dp
+                    TvPanelItem(
+                        index = i,
+                        focusedIndex = focusedIndex,
+                        itemFocus = itemFocus,
+                        // reverseLayout 只反排列, 条目内部的上下方向不反
+                        modifier = Modifier.padding(top = groupGap).then(entryModifier),
+                        onClick = {
+                            openComment(row.comment, text, row.comment, canReply = row.comment.canReply)
+                        },
+                    ) {
+                        TvCommentRowContent(
+                            text = text,
+                            isReply = false,
+                            replyCount = row.replyCount,
+                            replyToName = null,
                         )
                     }
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        remember(comment.stableId) { comment.content.toPlainText() },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White.copy(alpha = 0.9f),
-                        maxLines = 4,
-                        overflow = TextOverflow.Ellipsis,
+                }
+
+                is TvCommentReplyRow -> TvPanelItem(
+                    index = i,
+                    focusedIndex = focusedIndex,
+                    itemFocus = itemFocus,
+                    modifier = Modifier
+                        // 竖线画在缩进槽里 (卡片之外), 不和聚焦白描边打架.
+                        // 只向上多画一个条目间距: 顶端接上方 (主楼卡 / 上一条回复) 的下边缘,
+                        // 底端停在自己身上 —— 向下延伸会看起来连到下一楼去
+                        .drawBehind {
+                            val x = TV_COMMENT_THREAD_LINE_INSET.toPx()
+                            drawLine(
+                                color = TV_COMMENT_THREAD_LINE_COLOR,
+                                start = Offset(x, -TV_COMMENT_ROW_SPACING.toPx()),
+                                end = Offset(x, size.height),
+                                strokeWidth = TV_COMMENT_THREAD_LINE_WIDTH.toPx(),
+                            )
+                        }
+                        .padding(start = TV_COMMENT_REPLY_INDENT)
+                        .then(entryModifier),
+                    // 楼中回复没法被单独回复 (写接口只认主楼), 弹窗只读
+                    onClick = { openComment(row.comment, text, row.thread, canReply = false) },
+                ) {
+                    TvCommentRowContent(
+                        text = text,
+                        isReply = true,
+                        replyCount = 0,
+                        replyToName = row.replyToName,
                     )
                 }
             }
         }
+    }
+}
+
+/**
+ * 评论面板的一行. 展平后一行 = 一个焦点目标, index 连续 —— 面板宿主"最底项按下键回胶囊"
+ * 的守卫依赖 `focusedIndex == 0`.
+ */
+private sealed class TvCommentRow {
+    /** 所属主楼在 pager 里的下标 (读一次以保住 paging 预取). */
+    abstract val pagerIndex: Int
+
+    /** 本行展示的评论 (主楼行是主楼自己, 回复行是那条回复). */
+    abstract val comment: UIComment
+    abstract val key: String
+}
+
+private class TvCommentMainRow(
+    override val pagerIndex: Int,
+    override val comment: UIComment,
+    /** 本楼展开的回复条数, 0 表示不显示计数. */
+    val replyCount: Int,
+) : TvCommentRow() {
+    override val key: String = "main-" + comment.stableId
+}
+
+private class TvCommentReplyRow(
+    override val pagerIndex: Int,
+    override val comment: UIComment,
+    /** 所属主楼: 点击回复时用它的 id. */
+    val thread: UIComment,
+    /** 非空 = 回复的是同层某条回复, 要显式指明; null = 直接回复主楼, 缩进已足够表达. */
+    val replyToName: String?,
+) : TvCommentRow() {
+    override val key: String = "reply-" + comment.stableId
+}
+
+/**
+ * 主楼 + 一层回复展平成面板行.
+ *
+ * 面板是 reverseLayout (index 0 在底, 越大越靠上), 所以同一楼里回复要**先**发且倒序,
+ * 主楼最后发 —— 这样视觉自上而下才是 主楼 → 回复1 → 回复2, 方向键上下 = 空间上下.
+ *
+ * Ani 源按无回复关系处理 (服务端不返回被回复者, 见 `AniEpisodeCommentReply`): 只出主楼,
+ * 与改动前完全一致.
+ */
+private fun flattenTvCommentRows(comments: List<UIComment?>): List<TvCommentRow> = buildList {
+    comments.forEachIndexed { pagerIndex, comment ->
+        if (comment == null) return@forEachIndexed
+        val replies = if (comment.source == UICommentSource.ANI) emptyList() else comment.briefReplies
+        replies.asReversed().forEach { reply ->
+            add(TvCommentReplyRow(pagerIndex, reply, comment, reply.replyTo?.authorName))
+        }
+        add(TvCommentMainRow(pagerIndex, comment, replies.size))
+    }
+}
+
+/** 条目文本. 时间要 [formatDateTime] (@Composable), 所以在组合里算好再给非组合的点击回调用. */
+private class TvCommentText(
+    val authorName: String,
+    val timeText: String,
+    val plainContent: String,
+)
+
+@Composable
+private fun rememberTvCommentText(comment: UIComment): TvCommentText {
+    val timeText = formatDateTime(comment.createdAt)
+    val plainContent = remember(comment.stableId) { comment.content.toPlainText() }
+    return remember(comment.stableId, timeText, plainContent) {
+        TvCommentText(
+            authorName = comment.author?.nickname ?: comment.author?.id.orEmpty(),
+            timeText = timeText,
+            plainContent = plainContent,
+        )
+    }
+}
+
+/** 评论/回复条目内容 (纯文本紧凑形态). [isReply] 收紧一号字与行数; [replyToName] 非空时顶部多一行. */
+@Composable
+private fun TvCommentRowContent(
+    text: TvCommentText,
+    isReply: Boolean,
+    replyCount: Int,
+    replyToName: String?,
+) {
+    val secondaryColor = Color.White.copy(alpha = 0.6f)
+    Column(
+        Modifier.padding(
+            horizontal = if (isReply) 10.dp else 12.dp,
+            vertical = if (isReply) 8.dp else 10.dp,
+        ),
+    ) {
+        if (replyToName != null) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.AutoMirrored.Rounded.Reply,
+                    null,
+                    Modifier.size(TV_COMMENT_META_ICON_SIZE),
+                    tint = secondaryColor,
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    stringResource(Lang.comment_reply_to, replyToName),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = secondaryColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.height(3.dp))
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text.authorName,
+                Modifier.weight(1f),
+                style = if (isReply) {
+                    MaterialTheme.typography.labelMedium
+                } else {
+                    MaterialTheme.typography.labelLarge
+                },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (replyCount > 0) {
+                Icon(
+                    Icons.AutoMirrored.Rounded.Comment,
+                    null,
+                    Modifier.size(TV_COMMENT_META_ICON_SIZE),
+                    tint = secondaryColor,
+                )
+                Spacer(Modifier.width(3.dp))
+                Text(
+                    replyCount.toString(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = secondaryColor,
+                )
+                Spacer(Modifier.width(8.dp))
+            }
+            Text(
+                text.timeText,
+                style = MaterialTheme.typography.labelSmall,
+                color = secondaryColor,
+            )
+        }
+        Spacer(Modifier.height(if (isReply) 3.dp else 4.dp))
+        Text(
+            text.plainContent,
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color.White.copy(alpha = 0.9f),
+            maxLines = if (isReply) 3 else 4,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -753,6 +981,43 @@ private fun UIRichText.toPlainText(): String =
             is UIRichElement.Image -> "[图片]"
         }
     }
+
+/**
+ * 富文本拆成弹窗用的正文块: 文本段与图片按原顺序排列, 相邻文本并成一段.
+ *
+ * 引用块与 [toPlainText] 一样跳过 —— 拍平进正文会把别人被引用的话混成本人说的,
+ * 而在这个"整块单焦点"的引用区里没有地方摆引用的边框和出处.
+ */
+private fun UIRichText.toCommentBlocks(): List<TvCommentBlock> {
+    val blocks = mutableListOf<TvCommentBlock>()
+    val pending = StringBuilder()
+
+    fun flushText() {
+        val text = pending.toString().trim()
+        if (text.isNotEmpty()) blocks += TvCommentBlock.Text(text)
+        pending.clear()
+    }
+
+    elements.forEach { element ->
+        when (element) {
+            is UIRichElement.AnnotatedText -> element.slice.forEach { slice ->
+                when (slice) {
+                    is UIRichElement.Annotated.Text -> pending.append(slice.content)
+                    is UIRichElement.Annotated.Sticker -> pending.append("[表情]")
+                }
+            }
+
+            is UIRichElement.Image -> {
+                flushText()
+                blocks += TvCommentBlock.Image(element.imageUrl)
+            }
+
+            is UIRichElement.Quote -> {}
+        }
+    }
+    flushText()
+    return blocks
+}
 
 // ============================ 角色 / 制作人员面板 ============================
 

@@ -134,11 +134,20 @@ class TvPlayerOverlayState {
     var openPopupCount: Int by mutableIntStateOf(0)
 
     /**
+     * 正在回复的评论 (TV 专用回复弹窗, 见 TvCommentReplyDialog); null = 未打开.
+     *
+     * 不用手机端那个底部 sheet: 它带右上角关闭按钮、评论正文挤在输入框下面, 且返回键收起后
+     * 没有任何东西把焦点还回列表 (Compose 移除聚焦节点时会清掉整棵树的焦点, 不会交给祖先).
+     */
+    var replyingComment: TvCommentReplyTarget? by mutableStateOf(null)
+        private set
+
+    /**
      * 面板条目焦点找回锚: 每次自增一下, 面板宿主就把焦点送回**当前聚焦的那一条**
      * (由条目获焦时登记请求器, 见 TvPlayerPanelHost).
      *
-     * 用于一切"从面板条目点开了别的东西, 那东西关掉之后"的场合: 人物预览、弹幕延迟对话框.
-     * 不这么做的话焦点会停在被移除的节点上 (= 没有焦点), 方向键全失效.
+     * 用于一切"从面板条目点开了别的东西, 那东西关掉之后"的场合: 回复弹窗、人物预览、
+     * 弹幕延迟对话框. 不这么做的话焦点会停在被移除的节点上 (= 没有焦点), 方向键全失效.
      */
     var panelItemFocusTick: Int by mutableIntStateOf(0)
         private set
@@ -213,6 +222,19 @@ class TvPlayerOverlayState {
     fun requestPanelItemFocus() {
         panelItemFocusTick++
         markInteraction()
+    }
+
+    /** 打开评论回复弹窗 (面板里点某条评论). */
+    fun startReply(target: TvCommentReplyTarget) {
+        replyingComment = target
+        markInteraction()
+    }
+
+    /** 关闭回复弹窗, 焦点还给刚点开的那条评论. */
+    fun dismissReply() {
+        if (replyingComment == null) return
+        replyingComment = null
+        requestPanelItemFocus()
     }
 
     /** 唤出控制层; [focusProgress] = 进入后把焦点放到进度条行 (默认). */
@@ -291,6 +313,7 @@ class TvPlayerOverlayState {
         layer = TvPlayerLayer.HIDDEN
         danmakuInputExpanded = false
         expandStripWhenReady = false
+        replyingComment = null
         requestFocus(TvPlayerFocusTarget.ROOT)
     }
 
@@ -299,6 +322,7 @@ class TvPlayerOverlayState {
         layer = TvPlayerLayer.DETAILS
         danmakuInputExpanded = false
         expandStripWhenReady = false
+        replyingComment = null
     }
 
     /** 把焦点送回进度条行 (面板内按返回等). */

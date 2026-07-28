@@ -146,6 +146,11 @@ fun TvEpisodeScreenContent(
     page: EpisodePageState,
     danmakuHostState: DanmakuHostState,
     danmakuEditorState: DanmakuEditorState,
+    /**
+     * TV 上不用: 回复评论走自己那个大弹窗 ([TvCommentReplyDialog]), 不是手机端的底部 sheet.
+     * 参数保留是因为 EpisodeScreenVariant 接口要求.
+     */
+    @Suppress("UNUSED_PARAMETER")
     setShowEditCommentSheet: (Boolean) -> Unit,
     pauseOnPlaying: () -> Unit,
     modifier: Modifier = Modifier,
@@ -380,6 +385,16 @@ fun TvEpisodeScreenContent(
                 return@router true
             }
             overlay.markInteraction()
+            return@router false
+        }
+        // 评论回复弹窗: 返回关闭并把焦点还给刚点开的那条评论 (见 overlay.dismissReply),
+        // 其余按键全部交给弹窗内部 (引用区翻页 / 输入框 / IME)
+        if (overlay.replyingComment != null) {
+            overlay.markInteraction()
+            if (isBack) {
+                if (isKeyUp) overlay.dismissReply()
+                return@router true
+            }
             return@router false
         }
         // 侧边 sheet (数据源/选集/弹幕设置) 打开: 返回关闭, 其余交给 sheet 内部导航
@@ -671,18 +686,19 @@ fun TvEpisodeScreenContent(
     //
     // 本页不在前台 (从面板点开了别的页面, 如相关推荐的条目详情页) 期间一律不隐藏:
     // 隐藏会把控制层整棵子树移除, 回来时焦点已经无处可还 —— 组件留着, 焦点才回得去
-    // (回来后由上面的生命周期效应送回面板条目/进度条).
+    // (回来后由下面的焦点看门狗送回面板条目/进度条).
     LaunchedEffect(Unit) {
         snapshotFlow {
             listOf(
                 overlay.layer, overlay.interactionTick, overlay.activePanel,
                 overlay.openPopupCount, overlay.danmakuInputExpanded, anySheetVisible,
-                pageResumed,
+                overlay.replyingComment != null, pageResumed,
             )
         }.collectLatest {
             if (overlay.layer != TvPlayerLayer.CONTROLS) return@collectLatest
             if (overlay.activePanel != null || overlay.openPopupCount > 0 ||
-                overlay.danmakuInputExpanded || anySheetVisible || !pageResumed
+                overlay.danmakuInputExpanded || anySheetVisible ||
+                overlay.replyingComment != null || !pageResumed
             ) {
                 return@collectLatest
             }
@@ -776,7 +792,6 @@ fun TvEpisodeScreenContent(
                     bottomRowFocusRequester = bottomRowFocusRequester,
                     episodeStripFocusRequester = episodeStripFocusRequester,
                     sheetsController = sheetsController,
-                    setShowEditCommentSheet = setShowEditCommentSheet,
                     pauseOnPlaying = pauseOnPlaying,
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -808,6 +823,18 @@ fun TvEpisodeScreenContent(
             // 右侧侧边 sheets (数据源/选集/弹幕设置), 复用现有实现
             Box(Modifier.matchParentSize()) {
                 TvPlayerSideSheets(vm, sheetsController)
+            }
+
+            // 评论回复弹窗 (TV 专用大弹窗): 同窗口内的全屏层, 不用真 Dialog ——
+            // 那是独立窗口, 上面那个唯一按键路由收不到它的按键. 控制层与面板留在下面不动,
+            // 关掉后焦点直接还给刚点开的那条评论
+            overlay.replyingComment?.let { target ->
+                TvCommentReplyDialog(
+                    target = target,
+                    editorState = vm.commentEditorState,
+                    onSent = { overlay.dismissReply() },
+                    modifier = Modifier.matchParentSize(),
+                )
             }
         }
     }
