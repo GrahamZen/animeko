@@ -328,7 +328,7 @@ class SelectorMediaSource(
 
         buildList {
             for (subjectInfo in subjects) {
-                val episodes = try {
+                val rawEpisodes = try {
                     fetchPageOrThrow(
                         subjectInfo.fullUrl,
                         PageExpectation.SubjectDetails(searchConfig, subjectInfo.fullUrl),
@@ -340,6 +340,7 @@ class SelectorMediaSource(
                     logger.warn(e) { "SelectorMediaSource '$mediaSourceId': failed to load subject page ${subjectInfo.fullUrl}" }
                     null
                 } ?: continue
+                val episodes = normalizeSingleEpisodeSort(rawEpisodes)
                 repository.addCache(mediaSourceId, query.subjectName, subjectInfo, episodes)
                 addAll(
                     selectMedia(
@@ -404,6 +405,19 @@ class SelectorMediaSource(
         }
     }
 
+}
+
+/**
+ * 单集作品 (OVA / 剧场版 / 单卷) 的条目页往往只有一集, 且标题就是作品名, 不含集号,
+ * 于是序号只能回落成整个标题 (见 `SelectorChannelFormat.convertSpecialEpisodes`).
+ * 这类资源在 [SelectorSearchConfig.filterByEpisodeSort] 打开时会被全部过滤掉, 所以统一记为第 1 集.
+ *
+ * 仅在整个条目只解析出一集时生效; 多集条目原样返回, 不受影响.
+ */
+private fun normalizeSingleEpisodeSort(episodes: List<WebSearchEpisodeInfo>): List<WebSearchEpisodeInfo> {
+    val single = episodes.singleOrNull() ?: return episodes
+    if (single.episodeSortOrEp is EpisodeSort.Normal) return episodes
+    return listOf(single.copy(episodeSortOrEp = EpisodeSort(1)))
 }
 
 /**
