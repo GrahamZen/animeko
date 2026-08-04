@@ -240,6 +240,11 @@ internal class ImageLoadIssueTracker {
  */
 internal expect fun imageLoadIssueEventListenerFactory(): EventListener.Factory
 
+/**
+ * 平台侧的解码器设置 (Android 上要绕开一个 Coil 的坑, 并补上动图支持; 其他平台无事可做).
+ */
+internal expect fun ImageLoader.Builder.configurePlatformDecoders(): ImageLoader.Builder
+
 @OptIn(ExperimentalCoilApi::class)
 fun createDefaultImageLoader(
     context: PlatformContext,
@@ -263,6 +268,8 @@ fun createDefaultImageLoader(
         coroutineContext(Dispatchers.Default)
 
         eventListenerFactory(imageLoadIssueEventListenerFactory())
+
+        configurePlatformDecoders()
 
         diskCachePolicy(CachePolicy.ENABLED)
         memoryCachePolicy(CachePolicy.ENABLED)
