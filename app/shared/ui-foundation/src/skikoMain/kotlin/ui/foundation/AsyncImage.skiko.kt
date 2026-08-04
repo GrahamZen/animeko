@@ -13,6 +13,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asSkiaBitmap
 import coil3.EventListener
 import coil3.Image
+import coil3.ImageLoader
 import coil3.asImage
 import coil3.fetch.FetchResult
 import coil3.fetch.Fetcher
@@ -24,6 +25,9 @@ import coil3.request.SuccessResult
 actual fun ImageBitmap.asCoilImage(): Image {
     return this.asSkiaBitmap().asImage()
 }
+
+/** Skiko 平台不需要额外设置: 动图由 coil 自带的 Skia 解码器处理, 也没有 Android 那个解码器的坑. */
+internal actual fun ImageLoader.Builder.configurePlatformDecoders(): ImageLoader.Builder = this
 
 internal actual fun imageLoadIssueEventListenerFactory(): EventListener.Factory =
     EventListener.Factory { ImageLoadIssueEventListener() }

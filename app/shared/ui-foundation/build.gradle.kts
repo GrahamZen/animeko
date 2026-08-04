@@ -66,6 +66,10 @@ kotlin {
     sourceSets.androidMain.dependencies {
         api(libs.compose.material3.adaptive.core)
         // Preview only
+
+        // 动图解码器 (GIF). Android 上不加这个 GIF 只出第一帧, 见 configurePlatformDecoders;
+        // skiko 平台的动图由 coil 自带解码器处理, 不需要这个 artifact
+        implementation(libs.coil.gif)
     }
     sourceSets.desktopMain.dependencies {
         implementation(libs.jna)
