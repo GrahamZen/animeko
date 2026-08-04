@@ -53,6 +53,7 @@ import me.him188.ani.app.ui.lang.comment_reply
 import me.him188.ani.app.ui.lang.comment_view_more_replies
 import me.him188.ani.app.ui.richtext.RichText
 import me.him188.ani.app.ui.richtext.RichTextDefaults
+import me.him188.ani.app.ui.richtext.StickerImage
 import me.him188.ani.app.ui.richtext.UIRichElement
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
@@ -94,17 +95,15 @@ object CommentDefaults {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 val previewing = LocalIsPreviewing.current
-                val reactionDrawableRes = reaction.value.bangumiReactionIdOrNull()
-                    ?.let { BangumiCommentSticker[it] }
+                val sticker = reaction.value.bangumiReactionSticker()
 
-                if (previewing || reactionDrawableRes == null) Icon(
+                if (previewing || sticker == null) Icon(
                     imageVector = Icons.Rounded.Face,
                     modifier = Modifier.padding(end = 4.dp).size(24.dp),
                     contentDescription = null,
-                ) else Image(
-                    painter = painterResource(reactionDrawableRes),
+                ) else StickerImage(
+                    sticker = sticker,
                     modifier = Modifier.padding(end = 4.dp).size(24.dp),
-                    contentDescription = null,
                 )
 
                 Text(
@@ -311,8 +310,19 @@ object CommentDefaults {
         UIRichText(it)
     }
 
-    private fun String.bangumiReactionIdOrNull(): Int? {
-        if (!startsWith("bgm")) return null
-        return removePrefix("bgm").toIntOrNull()
+    /**
+     * 回应值 -> 可渲染的表情.
+     *
+     * `bgm` 后面那个数字是**回应编号**而不是表情代码, 两者差 16 —— 以前直接当代码用, 所以一直
+     * 显示的是错的那一枚表情 (`bgm54` 的回应画成了 `(bgm54)`, 实际该是 `(bgm38)`).
+     * 见 [BangumiStickers.reactionStickerToken].
+     */
+    private fun String.bangumiReactionSticker(): UIRichElement.Annotated.Sticker? {
+        val token = BangumiStickers.reactionStickerTokenOf(this) ?: return null
+        val imageUrl = BangumiStickers.imageUrlOf(token)
+        val bundled = token.removeSurrounding("(", ")").removePrefix("bgm").toIntOrNull()
+            ?.let { BangumiCommentSticker[it] }
+        if (imageUrl == null && bundled == null) return null
+        return UIRichElement.Annotated.Sticker(id = token, resource = bundled, imageUrl = imageUrl)
     }
 }
