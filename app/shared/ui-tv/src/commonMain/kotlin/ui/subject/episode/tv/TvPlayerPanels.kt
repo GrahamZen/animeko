@@ -1283,12 +1283,18 @@ internal fun TvDanmakuSendEntry(
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     var fieldFocused by remember { mutableStateOf(false) }
     var everExpanded by remember { mutableStateOf(false) }
+    // 本次展开期间输入框是否真的拿到过焦点. 展开那一刻焦点还在圆钮上、要等一两帧才交到输入框,
+    // 这期间不能把"焦点不在输入框"当成用户离开 (否则刚展开就自己收回去了)
+    var fieldEverFocused by remember(expanded) { mutableStateOf(false) }
+    // 这次收起是因为焦点被挪走 (而不是发送/返回键): 别再把焦点抢回来, 用户正往别处走
+    var collapsedByFocusLoss by remember { mutableStateOf(false) }
     val isSending by danmakuEditorState.isSending.collectAsStateWithLifecycle()
 
     // 展开: 轮询聚焦输入框 + 弹键盘; 收起: 焦点还给圆钮
     LaunchedEffect(expanded) {
         if (expanded) {
             everExpanded = true
+            collapsedByFocusLoss = false
             if (resolveFocusRepeatedly(attempts = 20, arrived = { fieldFocused }) {
                     runCatching { fieldFocusRequester.requestFocus() }
                 }
@@ -1297,6 +1303,10 @@ internal fun TvDanmakuSendEntry(
             }
         } else if (everExpanded) {
             keyboard?.hide()
+            if (collapsedByFocusLoss) {
+                collapsedByFocusLoss = false
+                return@LaunchedEffect
+            }
             // 圆钮是常驻焦点目标, 请求器一附着 (不抛异常) 即视为到位;
             // 控制层已隐藏则放弃 (焦点归属由根路由处理)
             var requested = false
@@ -1336,7 +1346,21 @@ internal fun TvDanmakuSendEntry(
             // 本按钮与面板胶囊同在 PILLS 区域, 但它不是面板触发器: 聚焦到它时收起浮出的
             // 面板 (面板只在焦点区域变成进度条/图标行时才自动清, 从"评论"胶囊右移过来
             // 区域不变, 不收就一直挂着)
-            .onFocusChanged { if (it.hasFocus) overlay.activePanel = null },
+            .onFocusChanged { state ->
+                if (state.hasFocus) {
+                    overlay.activePanel = null
+                    return@onFocusChanged
+                }
+                // 焦点离开这颗胶囊 (hasFocus 含里面的输入框) 就收起输入框.
+                //
+                // 展开态下根路由会把除返回键以外的所有按键让给 IME (见 TvEpisodeScreen), 而焦点
+                // 已经不在输入框上了 —— 表现是遥控器像失灵: 下键拉不出选集条, 只有返回键能救.
+                // 方向键能把焦点带出输入框, 所以这条路是真会走到的.
+                if (overlay.danmakuInputExpanded && fieldEverFocused) {
+                    collapsedByFocusLoss = true
+                    overlay.danmakuInputExpanded = false
+                }
+            },
         shape = CircleShape,
         color = if (focused && !expanded) Color.White else Color.White.copy(alpha = 0.14f),
         contentColor = if (focused && !expanded) Color.Black else Color.White,
@@ -1363,7 +1387,10 @@ internal fun TvDanmakuSendEntry(
                         .focusRequester(fieldFocusRequester)
                         .onFocusChanged {
                             fieldFocused = it.isFocused
-                            if (it.isFocused) overlay.focusRegion = TvPlayerFocusRegion.PILLS
+                            if (it.isFocused) {
+                                fieldEverFocused = true
+                                overlay.focusRegion = TvPlayerFocusRegion.PILLS
+                            }
                         },
                     textStyle = TextStyle(
                         color = Color.White,
