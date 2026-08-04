@@ -13,6 +13,8 @@ import com.github.panpf.sketch.http.HttpStack
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
+import io.ktor.client.plugins.HttpTimeoutCapability
+import io.ktor.client.plugins.HttpTimeoutConfig
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.CompletableDeferred
@@ -202,5 +204,36 @@ private class TrackingScopedHttpClient(
         check(activeCount > 0) { "A client ticket was returned more than once" }
         returnCount++
         activeCount--
+    }
+}
+
+/**
+ * 钉住图片请求的两个超时.
+ *
+ * **读超时不能少**: 只设连接超时的话, "连上了但流假死"这一类会一路等到全局默认的 30 秒 ——
+ * 这台电视上假死是常态 (实测背景图卡住 10.7s/10.2s、剧集图 5.18s, 同期其它请求 200~300ms).
+ * 这两个数字都是行为的一部分, 不是随手填的, 所以在这里钉住 (改动请连带更新
+ * `configureAniImageRequest` 里的说明).
+ */
+class AniImageRequestTimeoutTest {
+    @Test
+    fun `image requests carry both a connect and a socket timeout`() = runTest {
+        var captured: HttpTimeoutConfig? = null
+        val client = HttpClient(
+            MockEngine { request ->
+                captured = request.getCapabilityOrNull(HttpTimeoutCapability)
+                respond("x", HttpStatusCode.OK)
+            },
+        )
+        try {
+            ScopedHttpClientHttpStack(TrackingScopedHttpClient(client))
+                .request("https://example.com/a.jpg", null, null) { it.code }
+        } finally {
+            client.close()
+        }
+
+        val timeouts = requireNotNull(captured) { "图片请求没有带 HttpTimeout" }
+        assertEquals(2_500L, timeouts.connectTimeoutMillis)
+        assertEquals(3_000L, timeouts.socketTimeoutMillis, "流假死必须靠读超时兜住, 否则等到全局的 30 秒")
     }
 }
