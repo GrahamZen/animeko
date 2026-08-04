@@ -1209,6 +1209,7 @@
     <string name="comment_reply_to">Reply to %1$s</string>
     <string name="comment_view_comment">View comment</string>
     <string name="comment_reply_unsupported">Replying is not available for this comment — view only</string>
+    <string name="comment_image_unavailable">Image no longer available</string>
     <string name="comment_view_more_replies">View %1$d more replies &gt;</string>
     <string name="comment_add_emoji">Add emoji</string>
     <string name="comment_bold">Bold</string>

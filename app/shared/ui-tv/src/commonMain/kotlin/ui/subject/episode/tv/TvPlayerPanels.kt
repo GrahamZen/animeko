@@ -1091,7 +1091,7 @@ private fun UIRichText.toInlineText(): TvInlineText {
         when (element) {
             is UIRichElement.AnnotatedText -> builder.append(element.slice)
             is UIRichElement.Quote -> {}
-            is UIRichElement.Image -> builder.append("[图片]")
+            is UIRichElement.Image -> builder.append(TV_IMAGE_FALLBACK_TEXT)
         }
     }
     return builder.build()

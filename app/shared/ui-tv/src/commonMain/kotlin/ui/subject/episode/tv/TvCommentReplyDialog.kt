@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -38,6 +39,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Send
+import androidx.compose.material.icons.rounded.BrokenImage
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -46,6 +48,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -86,6 +89,7 @@ import me.him188.ani.app.ui.foundation.widgets.AniFocusActionButton
 import me.him188.ani.app.ui.foundation.widgets.centeredPanelColor
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.comment_ani_only_notice
+import me.him188.ani.app.ui.lang.comment_image_unavailable
 import me.him188.ani.app.ui.lang.comment_reply
 import me.him188.ani.app.ui.lang.comment_reply_unsupported
 import me.him188.ani.app.ui.lang.comment_send
@@ -536,7 +540,30 @@ private fun TvCommentReactionRow(reactions: List<TvCommentReaction>, modifier: M
 @Composable
 private fun TvCommentQuoteImage(url: String) {
     val context = LocalPlatformContext.current
-    var loaded by remember(url) { mutableStateOf(false) }
+    // 0: 加载中, 1: 出图了, 2: 失败
+    var state by remember(url) { mutableIntStateOf(0) }
+
+    // 评论里贴的是外部图床, 挂掉/被删是常态 (实测有评论贴的是已经没有 A 记录的域名).
+    // 原来失败后整块塌成 0 高度, 观感是"骨架屏闪一下然后凭空消失", 而卡片上明明写着 [图片];
+    // 退化成一行说明: 交代这里原本有张图且它已经取不回来了, 同时不再让正文高度跳变
+    if (state == 2) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Rounded.BrokenImage,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = hintColor,
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                stringResource(Lang.comment_image_unavailable),
+                style = MaterialTheme.typography.bodyMedium,
+                color = hintColor,
+            )
+        }
+        return
+    }
+
     AsyncImage(
         model = remember(url, context) {
             ImageRequest.Builder(context)
@@ -547,14 +574,13 @@ private fun TvCommentQuoteImage(url: String) {
         contentDescription = null,
         modifier = Modifier
             .fillMaxWidth()
-            .ifThen(!loaded) { heightIn(min = TV_REPLY_IMAGE_PLACEHOLDER_HEIGHT) }
+            .ifThen(state != 1) { heightIn(min = TV_REPLY_IMAGE_PLACEHOLDER_HEIGHT) }
             .animateContentSize()
-            .placeholder(!loaded)
+            .placeholder(state == 0)
             .clip(RoundedCornerShape(12.dp)),
         contentScale = ContentScale.FillWidth,
-        onSuccess = { loaded = true },
-        // 失败也要收掉占位: 否则那块 160dp 的骨架屏会一直闪着, 看起来像还在加载
-        onError = { loaded = true },
+        onSuccess = { state = 1 },
+        onError = { state = 2 },
     )
 }
 
