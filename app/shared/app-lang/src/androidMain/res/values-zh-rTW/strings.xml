@@ -1170,6 +1170,7 @@
     <string name="comment_reply_to">回覆 %1$s</string>
     <string name="comment_view_comment">查看評論</string>
     <string name="comment_reply_unsupported">此評論不支援回覆，僅可查看</string>
+    <string name="comment_image_unavailable">圖片已失效或無法存取</string>
     <string name="comment_view_more_replies">查看更多 %1$d 則回覆&gt;</string>
     <string name="comment_add_emoji">添加表情</string>
     <string name="comment_bold">粗體</string>

@@ -58,6 +58,9 @@ private const val TV_INLINE_STICKER_SCALE = 1.3f
 /** 没有配图的表情退化成这个占位文本 —— 不写点什么就成了一块看不见的空白. */
 private const val TV_STICKER_FALLBACK_TEXT = "[表情]"
 
+/** 图片在紧凑形态 (评论卡片) 与加载失败时的占位文本. */
+internal const val TV_IMAGE_FALLBACK_TEXT = "[图片]"
+
 /** 压平过程中的一段: 文字或表情, 按原顺序排. 首尾去空白要能认出"这段是文字", 所以不能直接拼字符串. */
 private sealed interface TvTextPiece {
     class Text(val text: String) : TvTextPiece
