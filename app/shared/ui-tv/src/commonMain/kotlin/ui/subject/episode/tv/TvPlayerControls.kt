@@ -179,7 +179,6 @@ internal fun TvPlayerControlsOverlay(
     bottomRowFocusRequester: FocusRequester,
     episodeStripFocusRequester: FocusRequester,
     sheetsController: VideoSideSheetsController<EpisodeVideoSideSheetPage>,
-    pauseOnPlaying: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier) {
@@ -275,7 +274,6 @@ internal fun TvPlayerControlsOverlay(
                             overlay = overlay,
                             vm = vm,
                             page = page,
-                            pauseOnPlaying = pauseOnPlaying,
                             pillFocusRequesters = pillFocusRequesters,
                             // NaN (尚未测得) 由面板侧兜底成固定高度
                             availableHeightPx = { pillsRowTopPx.floatValue - topInfoBottomPx.floatValue },
