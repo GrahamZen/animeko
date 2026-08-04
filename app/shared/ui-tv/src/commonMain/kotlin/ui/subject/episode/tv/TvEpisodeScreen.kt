@@ -96,8 +96,46 @@ import org.openani.mediamp.features.PlaybackSpeed
 import org.openani.mediamp.isPlaying
 import org.openani.mediamp.togglePause
 
-/** 遥控器左右键单次快进/快退步长. */
+/** 遥控器左右键单次快进/快退步长. 也是长按拖拽预览的起步步长, 见 [TV_SCRUB_MAX_SPEEDUP]. */
 internal const val TV_PLAYER_SEEK_STEP_MILLIS = 5_000L
+
+/**
+ * 长按左右键挪圆点时步长的最大倍率 (相对 [TV_PLAYER_SEEK_STEP_MILLIS]).
+ *
+ * 按住越久走得越快 (与常见流媒体一致), 松手即归零回到起步步长 —— 恒速的话找远处的位置要按很久,
+ * 而一上来就很快又没法微调.
+ */
+private const val TV_SCRUB_MAX_SPEEDUP = 12f
+
+/**
+ * 每多少发连发把倍率加 1. 遥控器按住约 50ms 一发, 所以 8 发 ≈ 0.4 秒加一档,
+ * 到顶 ([TV_SCRUB_MAX_SPEEDUP]) 约 4.4 秒.
+ */
+private const val TV_SCRUB_RAMP_REPEATS = 8
+
+/**
+ * 加速到顶时, 至少也要这么多发连发才走得完整条时间轴.
+ *
+ * 倍率是相对固定步长的, 而节目长度差很远: 12 倍 (60 秒一发) 对两小时的电影正合适, 对 3 分钟的
+ * PV 却是一发就冲到头. 按总时长再压一道上限, 短片才留得住可控性 (60 发 ≈ 3 秒走完全程).
+ */
+private const val TV_SCRUB_MIN_REPEATS_ACROSS = 60
+
+/**
+ * 长按挪圆点时这一发该走多少毫秒.
+ *
+ * [repeats] = 本次按住已收到的第几发 (1 = 刚按下, 松手归零). 第一发恒为
+ * [TV_PLAYER_SEEK_STEP_MILLIS] —— 单按与长按起手的手感要和中央那个"5 秒"反馈图标对得上.
+ */
+private fun scrubStepMillis(totalDurationMillis: Long, repeats: Int): Long {
+    val speedup = (1f + (repeats - 1).coerceAtLeast(0) / TV_SCRUB_RAMP_REPEATS.toFloat())
+        .coerceAtMost(TV_SCRUB_MAX_SPEEDUP)
+    val ramped = TV_PLAYER_SEEK_STEP_MILLIS * speedup
+    // 按总时长压的那道上限不能反过来把起步步长压小 (短到 5 分钟以内的片子)
+    val cap = (totalDurationMillis.toFloat() / TV_SCRUB_MIN_REPEATS_ACROSS)
+        .coerceAtLeast(TV_PLAYER_SEEK_STEP_MILLIS.toFloat())
+    return ramped.coerceAtMost(cap).toLong()
+}
 
 /** 控制层自动隐藏延时 (播放中且无面板/弹层/输入时, Prime 行为). */
 internal const val TV_PLAYER_AUTO_HIDE_MILLIS = 5_000L
@@ -267,7 +305,10 @@ fun TvEpisodeScreenContent(
     // 让圆点位置和界面对不上 (而且高亮段/缩略图都是围绕进度条的, 换了区域就没意义了).
 
     /** 把小圆点移一步 (不 seek). 首次调用时以当前播放位置为锚. */
-    fun scrubStep(forward: Boolean) {
+    /**
+     * 挪一次圆点. [repeats] 是本次按住已经收到的第几发 (1 = 刚按下), 用来加速, 见 [scrubStepMillis].
+     */
+    fun scrubStep(forward: Boolean, repeats: Int) {
         val total = progressSliderState.totalDurationMillis
         if (total <= 0L) return // 时长未知 (刚起播/直播) 时进度条本身就没有意义
         val from = if (progressSliderState.isPreviewing) {
@@ -275,18 +316,19 @@ fun TvEpisodeScreenContent(
         } else {
             progressSliderState.currentPositionMillis
         }
-        val step = if (forward) TV_PLAYER_SEEK_STEP_MILLIS else -TV_PLAYER_SEEK_STEP_MILLIS
+        val magnitude = scrubStepMillis(total, repeats)
+        val step = if (forward) magnitude else -magnitude
         progressSliderState.previewPositionRatio((from + step).coerceIn(0L, total).toFloat() / total)
     }
 
     /** 纯视频态连按第二次: 升级成拖拽预览态. */
-    fun enterScrub(forward: Boolean) {
+    fun enterScrub(forward: Boolean, repeats: Int) {
         // 中央箭头让位: 接下来的反馈是暂停图标 + 进度条, 三个叠在一起没法看
         seekFlash.cancel()
         // 暂停反馈不用手动触发, TvPauseFlash 监听状态流自己会闪
         vm.player.pause()
         overlay.showControls() // 焦点落进度条
-        scrubStep(forward)
+        scrubStep(forward, repeats)
     }
 
     /**
@@ -325,6 +367,12 @@ fun TvEpisodeScreenContent(
     // 每一档都换一层 (图标行 -> 选集条 -> 详情层), 连发会一路跳到底 —— 观感是选集条刚滑出来就
     // 闪进了详情页. 松手 (KeyUp) 才解锁. 只锁"换层"的那几档, 面板内按住下键滚列表不受影响
     var downKeyLatched by remember { mutableStateOf(false) }
+    // 左右键按住期间的连发计数 + 当前按住的是哪一边: 挪圆点的步长据此加速 (见 scrubStepMillis),
+    // 松手归零. 维护放在路由最前面而不是各分支里 —— 下面每一层都有 `if (!isKeyDown) return false`,
+    // KeyUp 到不了分支; 换方向 (右按住中改按左) 也要重新起步, 所以连方向一起记.
+    // 只在事件回调里读写, 不在组合里读, 不会引起重组
+    var scrubHoldKey by remember { mutableStateOf<Key?>(null) }
+    var scrubHoldRepeats by remember { mutableIntStateOf(0) }
     // 确认键当前是否按住 + 每次按下自增的计时锚 (长按倍速用, 见下方长按协程).
     // 用 tick 而不是布尔的上升沿: 快速连按两次时 collectLatest 才能重启计时
     var confirmKeyHeld by remember { mutableStateOf(false) }
@@ -417,6 +465,25 @@ fun TvEpisodeScreenContent(
                 downKeyLatched = false
             } else if (isKeyDown && downKeyLatched) {
                 return@router true
+            }
+        }
+
+        // 左右键按住计数 (挪圆点的加速依据, 见 scrubHoldRepeats 的声明处).
+        // 不消费事件, 只记账 —— 左右键在别处 (面板、选集条) 另有语义
+        if (key == Key.DirectionLeft || key == Key.DirectionRight) {
+            when {
+                isKeyUp -> {
+                    scrubHoldKey = null
+                    scrubHoldRepeats = 0
+                }
+
+                isKeyDown -> {
+                    if (scrubHoldKey != key) {
+                        scrubHoldKey = key
+                        scrubHoldRepeats = 0
+                    }
+                    scrubHoldRepeats++
+                }
             }
         }
 
@@ -535,7 +602,7 @@ fun TvEpisodeScreenContent(
                     Key.DirectionLeft, Key.DirectionRight -> {
                         val forward = key == Key.DirectionRight
                         if (seekFlash.visible) {
-                            enterScrub(forward)
+                            enterScrub(forward, scrubHoldRepeats)
                         } else {
                             vm.player.skip(if (forward) TV_PLAYER_SEEK_STEP_MILLIS else -TV_PLAYER_SEEK_STEP_MILLIS)
                             seekFlash.flash(forward)
@@ -624,7 +691,7 @@ fun TvEpisodeScreenContent(
                     Key.DirectionLeft, Key.DirectionRight ->
                         if (overlay.focusRegion == TvPlayerFocusRegion.PROGRESS) {
                             if (!progressSliderState.isPreviewing) vm.player.pause()
-                            scrubStep(forward = key == Key.DirectionRight)
+                            scrubStep(forward = key == Key.DirectionRight, repeats = scrubHoldRepeats)
                             true
                         } else {
                             false
