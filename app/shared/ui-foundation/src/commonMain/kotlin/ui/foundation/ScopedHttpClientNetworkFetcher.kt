@@ -20,6 +20,7 @@ import coil3.network.NetworkResponseBody
 import coil3.network.ktor3.internal.writeTo
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.ClientRequestException
+import io.ktor.client.plugins.contentnegotiation.exclude
 import io.ktor.client.plugins.retry
 import io.ktor.client.plugins.timeout
 import io.ktor.client.request.HttpRequestBuilder
@@ -27,8 +28,10 @@ import io.ktor.client.request.prepareRequest
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsChannel
+import io.ktor.http.ContentType
 import io.ktor.http.Headers
 import io.ktor.http.HeadersBuilder
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.takeFrom
 import io.ktor.utils.io.ByteReadChannel
@@ -75,6 +78,18 @@ private suspend fun NetworkRequest.toHttpRequestBuilder(): HttpRequestBuilder {
     request.url.takeFrom(url)
     request.method = HttpMethod.parse(method)
     request.headers.takeFrom(headers)
+    // 明说"我要图": 共享的 HttpClient 给 ContentNegotiation 注册了 text/html 与 text/xml
+    // (见 DefaultClient.kt, 影视源要拿它解析网页), 而这个插件会把**每个注册过的类型**都塞进出站
+    // Accept 头, 于是图片请求发出去的是 `Accept: application/json, text/html, text/xml`.
+    // imgur 按 Accept 做内容协商: 见到 text/html 就把 `i.imgur.com/xxx.jpeg` 当成"要网页",
+    // 回一个 200 + text/html 的 7KB 落地页 —— 图当然解不出来, 表现是占位撑开后又塌掉 (已实测复现).
+    //
+    // exclude 是 ktor 的 per-request 开关, 挡住插件往 Accept 里追加那几个类型;
+    // `*/*;q=0.8` 兜底: 有些图床把图发成 application/octet-stream, 只写 image/* 会被 406.
+    if (request.headers[HttpHeaders.Accept] == null) {
+        request.exclude(ContentType.Application.Json, ContentType.Text.Html, ContentType.Text.Xml)
+        request.headers[HttpHeaders.Accept] = "${ContentType.Image.Any},*/*;q=0.8"
+    }
     // 图床 (image.tmdb.org 等) 解析出的部分 IP 直连不通, 全局默认 30s 连接超时会让
     // 单张图挂满半分钟才轮到重试; 短超时快速失败, 交给下面的重试换连接
     request.timeout {
@@ -83,13 +98,18 @@ private suspend fun NetworkRequest.toHttpRequestBuilder(): HttpRequestBuilder {
     // 覆盖全局重试 (只认 IOException 且仅 1 次): HTTP/2 连接复用可能把请求发到
     // 同 IP 的错误主机 (421 Misdirected Request, 实测 lain.bangumi.one 封面偶发),
     // 换新连接重试即可恢复 —— 421 无论以响应还是异常形态出现都要重试
+    //
+    // 次数放到 3 并改指数退避: 墙内访问 image.tmdb.org 会挨 RST (`SocketException:
+    // Connection reset`), 实测同一张 backdrop 连挨两次直接让 UI 退化成封面兜底
+    // (issue #7 报告者日志). RST 是一阵一阵的, 立刻重发多半还撞在枪口上, 退避着多试
+    // 两次拿到图的机会明显更大; 通的网络本来就不会走到重试, 不受影响.
     request.retry {
-        maxRetries = 2
+        maxRetries = 3
         retryIf { _, response -> response.status.value == 421 }
         retryOnExceptionIf { _, cause ->
             cause is IOException || (cause as? ClientRequestException)?.response?.status?.value == 421
         }
-        constantDelay(500)
+        exponentialDelay(base = 2.0, maxDelayMs = 2000)
     }
     body?.readByteArray()?.let(request::setBody)
     return request
