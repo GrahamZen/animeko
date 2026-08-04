@@ -19,6 +19,7 @@ import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -29,6 +30,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -91,18 +93,20 @@ import me.him188.ani.app.ui.lang.comment_send_comment
 import me.him188.ani.app.ui.lang.comment_send_failed_network
 import me.him188.ani.app.ui.lang.comment_send_failed_unknown
 import me.him188.ani.app.ui.lang.comment_view_comment
+import me.him188.ani.app.ui.richtext.StickerImage
+import me.him188.ani.app.ui.richtext.UIRichElement
 import org.jetbrains.compose.resources.stringResource
 
 /**
  * 弹窗正文块: 文本段与图片按原顺序排列.
  *
  * 只拆到"文本 / 图片"这一层, 不上完整富文本 ([me.him188.ani.app.ui.richtext.RichText]):
- * 那套带遮罩、可点链接、行内表情, 会在引用区里塞进一堆可点击目标, 与"整块单焦点 + 上下键翻页"
- * 的导航模型冲突. 表情按 `[表情]` 压进文本 (与面板卡片一致).
+ * 那套带遮罩、可点链接, 会在引用区里塞进一堆可点击目标, 与"整块单焦点 + 上下键翻页"
+ * 的导航模型冲突. 表情不占焦点, 所以按行内小图出图 (见 [TvInlineText], 与面板卡片一致).
  */
 @Immutable
 sealed class TvCommentBlock {
-    class Text(val text: String) : TvCommentBlock()
+    class Text(val text: TvInlineText) : TvCommentBlock()
     class Image(val url: String) : TvCommentBlock()
 }
 
@@ -116,12 +120,24 @@ class TvCommentReplyTarget(
     val timeText: String,
     val blocks: List<TvCommentBlock>,
     /**
+     * 别人给这条评论贴的表情 (Bangumi 的"回应"), 按数量降序. 只展示不可点 —— TV 上贴表情
+     * 得先做一套选表情的导航, 而看别人贴了什么本身就是评论的一部分信息.
+     */
+    val reactions: List<TvCommentReaction> = emptyList(),
+    /**
      * 这条评论到底能不能回复. `false` 时弹窗退化成只读 (不出输入框和发送按钮, 顶部给出提示).
      *
      * 能回复的只有 Ani 源且服务端给了 `canReply` 的**主楼**: Bangumi 评论在 Ani 内只读,
      * 楼中回复也没有对应的写接口 (`createEpisodeReply` 只接受主楼 id).
      */
     val canReply: Boolean,
+)
+
+/** 一枚回应: 一个表情 + 贴的人数. */
+@Immutable
+class TvCommentReaction(
+    val sticker: UIRichElement.Annotated.Sticker,
+    val count: Int,
 )
 
 /** 回复弹窗宽度占屏比 (TV 上 dp 视口约 960x540, 0.62 约合 600dp). */
@@ -135,6 +151,12 @@ private const val TV_REPLY_QUOTE_PAGE_FRACTION = 0.8f
 
 /** 图片加载完成前的占位高度. */
 private val TV_REPLY_IMAGE_PLACEHOLDER_HEIGHT = 160.dp
+
+/** 正文与回应行之间的间距. */
+private val TV_REPLY_REACTION_GAP = 10.dp
+
+/** 回应里表情图的边长 (与正文行内表情差不多大, 一眼能认出是哪一枚). */
+private val TV_REPLY_REACTION_STICKER_SIZE = 22.dp
 
 /** 弹窗外的压暗层: 这层要的就是"把下面的画面按下去", 与主题无关, 用黑. */
 private val TV_REPLY_SCRIM_COLOR = Color.Black.copy(alpha = 0.55f)
@@ -159,6 +181,16 @@ private val hintColor: Color
     @Composable get() = MaterialTheme.colorScheme.onSurfaceVariant
 
 /**
+ * 回应胶囊的底: 在引用区的底色上再蒙一层内容色, 比引用区**浅**一档.
+ *
+ * 不用 surfaceContainer 那一档档的容器色: 引用区用的已经是最亮的 surfaceContainerHighest,
+ * 往下取任何一档在深色配色里都是更暗 (surfaceContainerLow 直接黑成一块), 而 surfaceBright
+ * 与 highest 只差几个灰度、看不出层次. 蒙一层半透明的 onSurface 才能保证"比底下那层浅".
+ */
+private val reactionChipColor: Color
+    @Composable get() = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.14f)
+
+/**
  * TV 评论回复弹窗.
  *
  * 与手机端的底部 sheet ([me.him188.ani.app.ui.comment.EditComment]) 相比:
@@ -175,6 +207,13 @@ internal fun TvCommentReplyDialog(
     target: TvCommentReplyTarget,
     editorState: CommentEditorState,
     onSent: () -> Unit,
+    /**
+     * 引用区聚焦时按左右键: 原地翻到相邻的一条评论 (`delta` = -1/+1), 由调用方换 [target]
+     * 并同步滚动背后的评论面板. 到端点等无效场合由调用方忽略.
+     *
+     * 用左右键而不是上下键: 上下键在这个弹窗里是"翻长评论正文 / 翻到底进输入框", 抢不得.
+     */
+    onNavigate: ((delta: Int) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -197,6 +236,11 @@ internal fun TvCommentReplyDialog(
     // 焦点进出输入框时开合软键盘 (TV 上没有物理键盘, 不主动弹就没法打字)
     LaunchedEffect(fieldFocused) {
         if (fieldFocused) keyboard?.show() else keyboard?.hide()
+    }
+    // 左右键原地换了一条评论 (见 [onNavigate]): 正文回到顶部. 不归零的话新评论会从上一条
+    // 停在的那个像素位置开始显示 —— 短评论直接看起来是空白
+    LaunchedEffect(target) {
+        scrollState.scrollTo(0)
     }
 
     val send: () -> Unit = send@{
@@ -251,8 +295,12 @@ internal fun TvCommentReplyDialog(
                         .weight(1f)
                         .fillMaxWidth()
                         // 翻到底 (canScrollForward = false) 才把下键放行, 由 down 指定落点进输入框;
-                        // 短评论一按即穿透. 上键对称: 翻到顶再往上没有目标, 焦点组会拦住
+                        // 短评论一按即穿透. 上键对称: 翻到顶再往上没有目标, 焦点组会拦住.
+                        //
+                        // 左右键交给 [onNavigate] 换相邻评论: 引用区里左右无处可去, 原本只是被
+                        // 焦点组拦住. 恒返回 true (没给回调时也吞掉), 免得焦点飘出弹窗
                         .onPreviewKeyEvent { event ->
+                            // 焦点搜索只发生在 KeyDown, 所以 KeyUp 一律放行即可
                             if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                             val page = (scrollState.viewportSize * TV_REPLY_QUOTE_PAGE_FRACTION)
                                 .coerceAtLeast(1f)
@@ -264,6 +312,16 @@ internal fun TvCommentReplyDialog(
 
                                 event.key == Key.DirectionUp && scrollState.canScrollBackward -> {
                                     scope.launch { scrollState.animateScrollBy(-page) }
+                                    true
+                                }
+
+                                event.key == Key.DirectionLeft -> {
+                                    onNavigate?.invoke(-1)
+                                    true
+                                }
+
+                                event.key == Key.DirectionRight -> {
+                                    onNavigate?.invoke(1)
                                     true
                                 }
 
@@ -289,34 +347,42 @@ internal fun TvCommentReplyDialog(
                             color = if (quoteFocused) MaterialTheme.colorScheme.primary else idleBorderColor,
                             shape = RoundedCornerShape(12.dp),
                         )
-                        .verticalScroll(scrollState)
                         .padding(16.dp),
                 ) {
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                target.authorName,
-                                Modifier.weight(1f),
-                                style = MaterialTheme.typography.labelLarge,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                target.timeText,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = hintColor,
-                            )
-                        }
-                        target.blocks.forEach { block ->
-                            Spacer(Modifier.height(8.dp))
-                            when (block) {
-                                is TvCommentBlock.Text -> Text(
-                                    block.text,
-                                    style = MaterialTheme.typography.bodyMedium,
+                    // 回应行钉在框底 (不随正文滚): 正文可能很长, 跟在末尾就得翻到底才看得见,
+                    // 而它是"这条评论收到了什么反响"的概览, 该和作者行一样一直在
+                    Column(Modifier.fillMaxSize()) {
+                        Column(Modifier.weight(1f, fill = false).verticalScroll(scrollState)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    target.authorName,
+                                    Modifier.weight(1f),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
-
-                                is TvCommentBlock.Image -> TvCommentQuoteImage(block.url)
+                                Text(
+                                    target.timeText,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = hintColor,
+                                )
                             }
+                            target.blocks.forEach { block ->
+                                Spacer(Modifier.height(8.dp))
+                                when (block) {
+                                    is TvCommentBlock.Text -> Text(
+                                        block.text.text,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        inlineContent = tvStickerInlineContent(block.text.stickers),
+                                    )
+
+                                    is TvCommentBlock.Image -> TvCommentQuoteImage(block.url)
+                                }
+                            }
+                        }
+                        if (target.reactions.isNotEmpty()) {
+                            Spacer(Modifier.height(TV_REPLY_REACTION_GAP))
+                            TvCommentReactionRow(target.reactions)
                         }
                     }
                 }
@@ -416,6 +482,44 @@ internal fun TvCommentReplyDialog(
                         upFocusRequester = fieldFocusRequester,
                     )
                 }
+            }
+        }
+    }
+}
+
+/**
+ * 回应行: 一枚表情 + 人数, 一行放不下就折行.
+ *
+ * 折出来的行往上长 (整块钉在框底, 变高就把上面的正文区压小), 与 bgm 网页端"回应堆在评论下方"
+ * 的观感一致. 不设行数上限: 回应只能取自那一包里 Bangumi 放开的二十来枚, 折不出几行.
+ *
+ * 不可聚焦、不可点: 见 [TvCommentReplyTarget.reactions].
+ */
+@Composable
+private fun TvCommentReactionRow(reactions: List<TvCommentReaction>, modifier: Modifier = Modifier) {
+    FlowRow(
+        modifier,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        reactions.forEach { reaction ->
+            Row(
+                Modifier
+                    .clip(CircleShape)
+                    .background(reactionChipColor)
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                StickerImage(
+                    reaction.sticker,
+                    Modifier.size(TV_REPLY_REACTION_STICKER_SIZE),
+                )
+                Spacer(Modifier.width(5.dp))
+                Text(
+                    reaction.count.toString(),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = hintColor,
+                )
             }
         }
     }

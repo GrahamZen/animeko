@@ -64,6 +64,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -100,9 +101,13 @@ import kotlinx.coroutines.launch
 import me.him188.ani.app.data.models.subject.nameCn
 import me.him188.ani.app.navigation.LocalNavigator
 import me.him188.ani.app.navigation.SubjectDetailPlaceholder
+import me.him188.ani.app.tools.LocalTimeFormatter
+import me.him188.ani.app.tools.TimeFormatter
 import me.him188.ani.app.tools.formatDateTime
 import me.him188.ani.app.domain.comment.CommentContext
 import me.him188.ani.app.ui.comment.UIComment
+import me.him188.ani.app.ui.comment.BangumiStickers
+import me.him188.ani.app.ui.comment.UICommentReaction
 import me.him188.ani.app.ui.comment.UICommentSource
 import me.him188.ani.app.ui.comment.UIRichText
 import me.him188.ani.app.ui.danmaku.DanmakuEditorState
@@ -190,7 +195,6 @@ internal fun TvPlayerPanelHost(
     overlay: TvPlayerOverlayState,
     vm: EpisodeViewModel,
     page: EpisodePageState,
-    pauseOnPlaying: () -> Unit,
     /** 各胶囊按钮的焦点请求器: 面板最底项按下键显式回到打开它的那个胶囊. */
     pillFocusRequesters: Map<TvPlayerPanel, FocusRequester>,
     /**
@@ -374,7 +378,7 @@ internal fun TvPlayerPanelHost(
 
             TvPlayerPanel.COMMENTS -> TvCommentsPanel(
                 vm, page, overlay, commentsListState, focusedIndex, itemFocus,
-                entryFocusRequesters.getValue(panel), pauseOnPlaying, panelModifier,
+                entryFocusRequesters.getValue(panel), panelModifier,
             )
 
             TvPlayerPanel.DANMAKU_LIST -> TvDanmakuListPanel(
@@ -438,11 +442,26 @@ private fun TvPanelItem(
     itemFocus: TvPanelItemFocusRegistry,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * 为 true 时: [focusedIndex] 指到本条目就把自己登记进 [itemFocus], 即使没获焦.
+     *
+     * 平时**不能**这么干 —— 条目一旦读 focusedIndex, 一次上下键就会让在场的所有条目重组
+     * (正常情况下登记由获焦回调完成, 不需要读). 只有"焦点在弹窗里而当前项被弹窗内的按键换掉了"
+     * 的场合才需要改锚 (评论弹窗左右键翻相邻评论): 关闭弹窗时的通用找回记的是**上一次真正
+     * 获焦**的条目, 不改锚焦点就会跳回当初点开的那一条, 而列表已经滚到新的一条了.
+     */
+    reanchorFocusRegistry: Boolean = false,
     content: @Composable (focused: Boolean) -> Unit,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val focused by interactionSource.collectIsFocusedAsState()
     val selfFocusRequester = remember { FocusRequester() }
+    if (reanchorFocusRegistry) {
+        val current = focusedIndex.intValue
+        LaunchedEffect(current) {
+            if (current == index) itemFocus.requester = selfFocusRequester
+        }
+    }
     Surface(
         onClick = onClick,
         modifier = modifier
@@ -742,20 +761,30 @@ private fun TvCommentsPanel(
     focusedIndex: MutableIntState,
     itemFocus: TvPanelItemFocusRegistry,
     entryFocusRequester: FocusRequester,
-    pauseOnPlaying: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val comments = vm.episodeCommentState.list.collectAsLazyPagingItemsWithLifecycle()
     val snapshot = comments.itemSnapshotList
     val rows = remember(snapshot) { flattenTvCommentRows(snapshot) }
+    // 弹窗里正在显示的是哪一行 (左右键翻相邻评论的锚). -1 = 没开弹窗
+    var shownRowIndex by remember { mutableIntStateOf(-1) }
+    val dialogOpen = overlay.replyingComment != null
+    // 非组合环境 (弹窗翻页的 effect、点击回调) 里也要算时间戳, 所以在这里取一次格式器
+    val timeFormatter = LocalTimeFormatter.current
 
     /**
-     * 打开评论弹窗. [shown] 是弹窗里回显的那一条, 回复实际发到 [thread] (主楼).
+     * 打开评论弹窗, 显示第 [index] 行. 回复实际发到该行所属的主楼.
      *
-     * [canReply] 为 false 时弹窗是只读的 (没有输入框和发送按钮): Bangumi 评论在 Ani 内只读,
-     * 楼中回复也没有对应的写接口 —— 与其给个发不出去的输入框, 不如明说只能看.
+     * 楼中回复的弹窗是只读的 (没有输入框和发送按钮): Bangumi 评论在 Ani 内只读, 楼中回复也
+     * 没有对应的写接口 —— 与其给个发不出去的输入框, 不如明说只能看.
      */
-    fun openComment(shown: UIComment, shownText: TvCommentText, thread: UIComment, canReply: Boolean) {
+    fun openCommentAt(index: Int) {
+        val row = rows.getOrNull(index) ?: return
+        val thread = when (row) {
+            is TvCommentMainRow -> row.comment
+            is TvCommentReplyRow -> row.thread
+        }
+        val canReply = row is TvCommentMainRow && row.comment.canReply
         val context = CommentContext.EpisodeReply(
             vm.subjectId,
             page.episodePresentation.episodeId.toLong(),
@@ -769,14 +798,39 @@ private fun TvCommentsPanel(
         overlay.startReply(
             TvCommentReplyTarget(
                 context = context,
-                authorName = shownText.authorName,
-                timeText = shownText.timeText,
+                authorName = row.comment.displayAuthorName(),
+                timeText = timeFormatter.formatCommentTime(row.comment.createdAt),
                 // 弹窗按"文本段 + 图片"逐块渲染 (卡片上的 [图片] 占位在这里变成真图)
-                blocks = shown.content.toCommentBlocks(),
+                blocks = row.comment.content.toCommentBlocks(),
+                reactions = row.comment.reactions.toTvReactions(),
                 canReply = canReply,
             ),
         )
-        pauseOnPlaying()
+        shownRowIndex = index
+        // 不动播放状态: 这个弹窗多数时候只是"看完整评论" (Bangumi 评论在 Ani 内只读), 与弹幕列表、
+        // 推荐这些面板一样是边看边翻, 停一下再自己按播放很烦
+    }
+
+    // effect 里不能直接调上面那个 openCommentAt / 读上面那个 rows: 它们是**当次组合**的值,
+    // 分页 append 换掉 rows 之后, 长期存活的 effect 捕获到的就是旧列表了
+    val openLatest by rememberUpdatedState<(Int) -> Unit> { openCommentAt(it) }
+    val rowCount by rememberUpdatedState(rows.size)
+
+    // 弹窗内左右键: 原地翻到相邻的一条评论, 并让背后的面板跟着滚 (focusedIndex 一改,
+    // TvPanelList 就把那一行吸到底缘) —— 关掉弹窗时焦点也就落在最后看的那条上 (改锚见
+    // TvPanelItem 的 reanchorFocusRegistry).
+    //
+    // 在这里消费而不是把回调塞进弹窗: 只有本面板手上有展平后的行列表
+    LaunchedEffect(Unit) {
+        snapshotFlow { overlay.replyNavRequest }.drop(1).collect { (delta, _) ->
+            if (overlay.replyingComment == null) return@collect
+            val from = shownRowIndex
+            val next = from + delta
+            // 到端点无动作 (与选集详情弹窗左右键一致)
+            if (from < 0 || next < 0 || next >= rowCount) return@collect
+            openLatest(next)
+            focusedIndex.intValue = next
+        }
     }
 
     TvPanelList(listState, overlay, focusedIndex, modifier, itemSpacing = TV_COMMENT_ROW_SPACING) {
@@ -801,9 +855,8 @@ private fun TvCommentsPanel(
                         itemFocus = itemFocus,
                         // reverseLayout 只反排列, 条目内部的上下方向不反
                         modifier = Modifier.padding(top = groupGap).then(entryModifier),
-                        onClick = {
-                            openComment(row.comment, text, row.comment, canReply = row.comment.canReply)
-                        },
+                        onClick = { openCommentAt(i) },
+                        reanchorFocusRegistry = dialogOpen,
                     ) {
                         TvCommentRowContent(
                             text = text,
@@ -834,7 +887,8 @@ private fun TvCommentsPanel(
                         .padding(start = TV_COMMENT_REPLY_INDENT)
                         .then(entryModifier),
                     // 楼中回复没法被单独回复 (写接口只认主楼), 弹窗只读
-                    onClick = { openComment(row.comment, text, row.thread, canReply = false) },
+                    onClick = { openCommentAt(i) },
+                    reanchorFocusRegistry = dialogOpen,
                 ) {
                     TvCommentRowContent(
                         text = text,
@@ -905,21 +959,48 @@ private fun flattenTvCommentRows(comments: List<UIComment?>): List<TvCommentRow>
 private class TvCommentText(
     val authorName: String,
     val timeText: String,
-    val plainContent: String,
+    val content: TvInlineText,
 )
 
 @Composable
 private fun rememberTvCommentText(comment: UIComment): TvCommentText {
     val timeText = formatDateTime(comment.createdAt)
-    val plainContent = remember(comment.stableId) { comment.content.toPlainText() }
-    return remember(comment.stableId, timeText, plainContent) {
+    val content = remember(comment.stableId) { comment.content.toInlineText() }
+    return remember(comment.stableId, timeText, content) {
         TvCommentText(
-            authorName = comment.author?.nickname ?: comment.author?.id.orEmpty(),
+            authorName = comment.displayAuthorName(),
             timeText = timeText,
-            plainContent = plainContent,
+            content = content,
         )
     }
 }
+
+/** 昵称缺失时退到用户 id (匿名/注销用户). 卡片与弹窗共用一套取法. */
+private fun UIComment.displayAuthorName(): String = author?.nickname ?: author?.id.orEmpty()
+
+/**
+ * 回应 -> 弹窗用的展示模型, 按人数降序 (与 bgm 网页端一致).
+ *
+ * 认不出的编号整条丢掉: 回应只有"表情 + 人数"两样, 表情画不出来就只剩一个数字, 没有意义.
+ * 注意编号要过 [BangumiStickers.reactionStickerTokenOf] 换算, 不能直接当表情代码用.
+ */
+private fun List<UICommentReaction>.toTvReactions(): List<TvCommentReaction> =
+    sortedByDescending { it.count }
+        .mapNotNull { reaction ->
+            val token = BangumiStickers.reactionStickerTokenOf(reaction.value) ?: return@mapNotNull null
+            val imageUrl = BangumiStickers.imageUrlOf(token) ?: return@mapNotNull null
+            TvCommentReaction(
+                sticker = UIRichElement.Annotated.Sticker(id = token, resource = null, imageUrl = imageUrl),
+                count = reaction.count,
+            )
+        }
+
+/**
+ * 时间戳 -> 展示文本, 与 [formatDateTime] 同语义 (0 = 未知, 显示空).
+ * 弹窗那边在非组合环境里算 (见 `openCommentAt`), 所以不能直接用那个 @Composable 版本.
+ */
+private fun TimeFormatter.formatCommentTime(millis: Long): String =
+    if (millis == 0L) "" else format(millis)
 
 /** 评论/回复条目内容 (纯文本紧凑形态). [isReply] 收紧一号字与行数; [replyToName] 非空时顶部多一行. */
 @Composable
@@ -990,55 +1071,51 @@ private fun TvCommentRowContent(
         }
         Spacer(Modifier.height(if (isReply) 3.dp else 4.dp))
         Text(
-            text.plainContent,
+            text.content.text,
             style = MaterialTheme.typography.bodyMedium,
             color = Color.White.copy(alpha = 0.9f),
             maxLines = if (isReply) 3 else 4,
             overflow = TextOverflow.Ellipsis,
+            inlineContent = tvStickerInlineContent(text.content.stickers),
         )
     }
 }
 
-/** 富文本压成纯文本 (面板紧凑形态; 完整富文本在详情页评论区). */
-private fun UIRichText.toPlainText(): String =
-    elements.joinToString(separator = "") { element ->
+/**
+ * 富文本压成一段文字 + 行内表情 (面板紧凑形态; 完整富文本在详情页评论区), 见 [TvInlineText].
+ * 图片在卡片上只留 `[图片]` 占位, 点开弹窗才是真图 (见 [toCommentBlocks]).
+ */
+private fun UIRichText.toInlineText(): TvInlineText {
+    val builder = TvInlineTextBuilder()
+    elements.forEach { element ->
         when (element) {
-            is UIRichElement.AnnotatedText -> element.slice.joinToString(separator = "") { slice ->
-                when (slice) {
-                    is UIRichElement.Annotated.Text -> slice.content
-                    is UIRichElement.Annotated.Sticker -> "[表情]"
-                }
-            }
-
-            is UIRichElement.Quote -> ""
-            is UIRichElement.Image -> "[图片]"
+            is UIRichElement.AnnotatedText -> builder.append(element.slice)
+            is UIRichElement.Quote -> {}
+            is UIRichElement.Image -> builder.append("[图片]")
         }
     }
+    return builder.build()
+}
 
 /**
  * 富文本拆成弹窗用的正文块: 文本段与图片按原顺序排列, 相邻文本并成一段.
  *
- * 引用块与 [toPlainText] 一样跳过 —— 拍平进正文会把别人被引用的话混成本人说的,
+ * 引用块与 [toInlineText] 一样跳过 —— 拍平进正文会把别人被引用的话混成本人说的,
  * 而在这个"整块单焦点"的引用区里没有地方摆引用的边框和出处.
  */
 private fun UIRichText.toCommentBlocks(): List<TvCommentBlock> {
     val blocks = mutableListOf<TvCommentBlock>()
-    val pending = StringBuilder()
+    val pending = TvInlineTextBuilder()
 
     fun flushText() {
-        val text = pending.toString().trim()
-        if (text.isNotEmpty()) blocks += TvCommentBlock.Text(text)
+        val text = pending.build()
+        if (!text.isEmpty) blocks += TvCommentBlock.Text(text)
         pending.clear()
     }
 
     elements.forEach { element ->
         when (element) {
-            is UIRichElement.AnnotatedText -> element.slice.forEach { slice ->
-                when (slice) {
-                    is UIRichElement.Annotated.Text -> pending.append(slice.content)
-                    is UIRichElement.Annotated.Sticker -> pending.append("[表情]")
-                }
-            }
+            is UIRichElement.AnnotatedText -> pending.append(element.slice)
 
             is UIRichElement.Image -> {
                 flushText()

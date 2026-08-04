@@ -34,6 +34,7 @@ import me.him188.ani.app.data.network.AutoSkipRepository
 import me.him188.ani.app.data.network.BangumiBangumiCommentServiceImpl
 import me.him188.ani.app.data.network.BangumiCommentService
 import me.him188.ani.app.data.network.BangumiRelatedPeopleService
+import me.him188.ani.app.data.network.BangumiReplyRelationService
 import me.him188.ani.app.data.network.DefaultWatchTogetherApiService
 import me.him188.ani.app.data.network.EpisodeService
 import me.him188.ani.app.data.network.EpisodeServiceImpl
@@ -384,7 +385,13 @@ private fun KoinApplication.otherModules(getContext: () -> Context, coroutineSco
     single<EpisodeScreenshotRepository> { WhatslinkEpisodeScreenshotRepository() }
     single<BangumiCommentService> { BangumiBangumiCommentServiceImpl(get<AniApiProvider>().subjectApi) }
     single<AniEpisodeCommentService> { AniEpisodeCommentService(get<AniApiProvider>().episodesApi) }
-    single<EpisodeCommentRepository> { EpisodeCommentRepository(aniCommentService = get()) }
+    // 匿名客户端 (与 BangumiClient 同一个): 只读公开的评论关系, 不带任何 token
+    single<BangumiReplyRelationService> {
+        BangumiReplyRelationService(get<HttpClientProvider>().get(userAgent = ScopedHttpClientUserAgent.ANI))
+    }
+    single<EpisodeCommentRepository> {
+        EpisodeCommentRepository(aniCommentService = get(), replyRelationService = get())
+    }
     single<MediaSourceInstanceRepository> {
         MediaSourceInstanceRepositoryImpl(getContext().dataStores.mediaSourceSaveStore)
     }

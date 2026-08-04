@@ -224,9 +224,24 @@ class TvPlayerOverlayState {
         markInteraction()
     }
 
+    /**
+     * 评论弹窗内左右键"翻到相邻评论"的请求 (delta, 序号). 由评论面板消费 —— 只有它手上有
+     * 展平后的行列表, 而弹窗是屏幕级的兄弟节点 (见 TvEpisodeScreen).
+     *
+     * 序号使同方向的连续请求也能重新触发; delta 为 +1/-1, 到端点由面板自行忽略.
+     */
+    var replyNavRequest: Pair<Int, Int> by mutableStateOf(0 to 0)
+        private set
+
     /** 打开评论回复弹窗 (面板里点某条评论). */
     fun startReply(target: TvCommentReplyTarget) {
         replyingComment = target
+        markInteraction()
+    }
+
+    /** 评论弹窗内左右键: 请求翻到相邻的一条评论 (见 [replyNavRequest]). */
+    fun navigateReply(delta: Int) {
+        replyNavRequest = delta to (replyNavRequest.second + 1)
         markInteraction()
     }
 

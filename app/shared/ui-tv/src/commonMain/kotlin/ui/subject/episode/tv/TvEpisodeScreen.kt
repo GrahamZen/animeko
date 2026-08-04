@@ -152,6 +152,11 @@ fun TvEpisodeScreenContent(
      */
     @Suppress("UNUSED_PARAMETER")
     setShowEditCommentSheet: (Boolean) -> Unit,
+    /**
+     * TV 上不用: 各个浮出层 (弹幕列表、推荐、评论及其完整评论弹窗) 一律不动播放状态, 边看边翻.
+     * 参数保留是因为 EpisodeScreenVariant 接口要求.
+     */
+    @Suppress("UNUSED_PARAMETER")
     pauseOnPlaying: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -864,7 +869,6 @@ fun TvEpisodeScreenContent(
                     bottomRowFocusRequester = bottomRowFocusRequester,
                     episodeStripFocusRequester = episodeStripFocusRequester,
                     sheetsController = sheetsController,
-                    pauseOnPlaying = pauseOnPlaying,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -905,6 +909,8 @@ fun TvEpisodeScreenContent(
                     target = target,
                     editorState = vm.commentEditorState,
                     onSent = { overlay.dismissReply() },
+                    // 左右键翻相邻评论: 由评论面板消费 (行列表在它手上), 见 overlay.replyNavRequest
+                    onNavigate = { overlay.navigateReply(it) },
                     modifier = Modifier.matchParentSize(),
                 )
             }
