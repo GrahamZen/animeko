@@ -9,6 +9,7 @@
 
 package me.him188.ani.app.ui.settings.tabs.theme
 
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.FlowRow
@@ -189,7 +190,10 @@ fun SettingsScope.ThemeGroup(
     ) {
         Group(title = { Text(stringResource(Lang.settings_theme_palette)) }) {
             FlowRow(
-                modifier = Modifier.fillMaxWidth(),
+                // focusGroup: 色块只在组内横向移动. 不包组时色块是详情滚动 scope 里的散装
+                // 候选, 且位于内容左缘 —— 其他行按左键会被它捕获 (2D 搜索在最内层 scope 内
+                // 命中即止, 到不了左侧导航); 包组后组矩形全宽, 不满足横向候选条件.
+                modifier = Modifier.fillMaxWidth().focusGroup(),
                 horizontalArrangement = Arrangement.Center,
             ) {
                 AniThemeDefaults.themeColorOptions.forEach { color ->
