@@ -79,6 +79,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
+import me.him188.ani.app.data.models.preference.VideoScaffoldConfig
 import me.him188.ani.app.navigation.LocalNavigator
 import me.him188.ani.app.ui.danmaku.DanmakuEditorState
 import me.him188.ani.app.ui.episode.share.MediaShareData
@@ -586,6 +587,16 @@ private fun TvPlayerPill(
     }
 }
 
+/**
+ * 遥控器形态下可调的倍速范围: 固定用播放器支持的全范围 (0.25x–4x), 见 [PlaybackSpeedControllerState] 处的注释.
+ *
+ * 直接开到硬上限而不是默认的 0.5x–2.5x: 既然"倍速范围"这条设置在遥控器上已经去掉了, 就别再替用户
+ * 收窄. 代价是能选到 3 倍以上 —— 那时弹幕会跳 (上游 #1524, 长按倍速默认 2.5 就是为此), 低端盒子的
+ * 解码与音频变速也会吃力, 但这是用户自己选的档位.
+ */
+private val TV_PLAYBACK_SPEED_RANGE =
+    VideoScaffoldConfig.MIN_SUPPORTED_PLAYBACK_SPEED..VideoScaffoldConfig.MAX_SUPPORTED_PLAYBACK_SPEED
+
 // ---- 控件尺寸 (Prime 密度: 初版的 80%) ----
 internal val TV_PILL_ICON_SIZE = 14.dp
 internal val TV_PILL_PADDING_H = 14.dp
@@ -780,8 +791,23 @@ private fun TvPlayerBottomRow(
                 }
             }
             // 倍速 / 画面比例 (下拉展开时上报, 抑制自动隐藏)
+            //
+            // rangeProvider / onCommitSpeed 必须给 (与手机端 EpisodePage 一致): 少了它们,
+            // 滑块用的是默认 0.5x–2.5x 而不是用户设的范围, 且这里调的倍速既不写回配置也不写进
+            // ViewModel 的 override —— 而 PlaybackSpeedExtension 会在切集/重新起播时按配置里的
+            // playbackSpeed 重新应用, 于是用户在播放器里改的倍速会莫名其妙被弹回去
             val speedController = remember(vm) {
-                vm.player.features[PlaybackSpeed]?.let { PlaybackSpeedControllerState(it, scope = scope) }
+                vm.player.features[PlaybackSpeed]?.let {
+                    PlaybackSpeedControllerState(
+                        playbackSpeed = it,
+                        // 固定用默认范围, 不读配置里的 min/max: 遥控器形态下"倍速范围"那条设置
+                        // 已经不提供了 (见 AppSettingsTab.PlaybackSpeedItems), 而配置里可能还
+                        // 留着以前被改窄的值, 读它就等于永远调不回来
+                        rangeProvider = { TV_PLAYBACK_SPEED_RANGE },
+                        onCommitSpeed = { speed -> vm.setPlaybackSpeed(speed) },
+                        scope = scope,
+                    )
+                }
             }
             speedController?.let {
                 TvBottomRowLabeled(label = null) {

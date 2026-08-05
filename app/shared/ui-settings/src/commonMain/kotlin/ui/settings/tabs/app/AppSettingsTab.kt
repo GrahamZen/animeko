@@ -617,7 +617,19 @@ private fun SettingsScope.PlaybackSpeedItems(
     config: VideoScaffoldConfig,
     videoScaffoldConfig: SettingsState<VideoScaffoldConfig>,
 ) {
-    val persistedRange = config.minPlaybackSpeed..config.maxPlaybackSpeed
+    // 遥控器形态下不提供"倍速范围": RangeSlider 的两个 thumb 在遥控器上没有明确的切换语义,
+    // 根本调不动; 而它偏偏是唯一会**顺带改掉**常驻倍速与长按倍速的入口 —— withPlaybackSpeedRange
+    // 会把这两个值一起夹进新范围, 而范围调回来它们不还原, 于是配置里可能留下一个用户在界面上
+    // 看不见、也改不掉的倍速 (「记住播放倍速」开着时默认倍速那条滑块是隐藏的).
+    //
+    // 此时范围固定用播放器支持的全范围 (0.25x–4x), 并且**不读**配置里的 min/max: 既然这条设置
+    // 已经不给了, 就别再替用户收窄, 而且以前被改窄过的配置也不该永远生效.
+    val rangeConfigurable = !LocalAniUiBehavior.current.focusDrivenNavigation
+    val persistedRange = if (rangeConfigurable) {
+        config.minPlaybackSpeed..config.maxPlaybackSpeed
+    } else {
+        VideoScaffoldConfig.MIN_SUPPORTED_PLAYBACK_SPEED..VideoScaffoldConfig.MAX_SUPPORTED_PLAYBACK_SPEED
+    }
 
     // 范围拖动期间的瞬态值, 提交后清空; 拖动期间下方长按倍速 Slider 实时使用该范围
     var rangeDragOverride by remember { mutableStateOf<ClosedFloatingPointRange<Float>?>(null) }
@@ -629,29 +641,31 @@ private fun SettingsScope.PlaybackSpeedItems(
         }
     }
 
-    RangeSliderItem(
-        value = effectiveRange,
-        onValueChange = {
-            rangeDragging = true
-            rangeDragOverride = VideoScaffoldConfig.normalizePlaybackSpeedRange(it, effectiveRange)
-        },
-        onValueChangeFinished = {
-            val finalRange = rangeDragOverride ?: return@RangeSliderItem
-            // 缩小范围时把相关值一并 clamp 进新区间；保留最终范围直到配置写回，避免短暂回跳
-            val committedConfig = config.withPlaybackSpeedRange(finalRange)
-            rangeDragging = false
-            rangeDragOverride = committedConfig.minPlaybackSpeed..committedConfig.maxPlaybackSpeed
-            videoScaffoldConfig.update(committedConfig)
-        },
-        valueRange = VideoScaffoldConfig.MIN_SUPPORTED_PLAYBACK_SPEED..VideoScaffoldConfig.MAX_SUPPORTED_PLAYBACK_SPEED,
-        steps = 14,
-        valueIndicator = { Text(it.formatSpeedValue()) },
-        valueLabel = {
-            Text("${effectiveRange.start.formatSpeedValue()}x–${effectiveRange.endInclusive.formatSpeedValue()}x")
-        },
-        title = { Text(stringResource(Lang.settings_player_playback_speed_range)) },
-        description = { Text(stringResource(Lang.settings_player_playback_speed_range_description)) },
-    )
+    if (rangeConfigurable) {
+        RangeSliderItem(
+            value = effectiveRange,
+            onValueChange = {
+                rangeDragging = true
+                rangeDragOverride = VideoScaffoldConfig.normalizePlaybackSpeedRange(it, effectiveRange)
+            },
+            onValueChangeFinished = {
+                val finalRange = rangeDragOverride ?: return@RangeSliderItem
+                // 缩小范围时把相关值一并 clamp 进新区间；保留最终范围直到配置写回，避免短暂回跳
+                val committedConfig = config.withPlaybackSpeedRange(finalRange)
+                rangeDragging = false
+                rangeDragOverride = committedConfig.minPlaybackSpeed..committedConfig.maxPlaybackSpeed
+                videoScaffoldConfig.update(committedConfig)
+            },
+            valueRange = VideoScaffoldConfig.MIN_SUPPORTED_PLAYBACK_SPEED..VideoScaffoldConfig.MAX_SUPPORTED_PLAYBACK_SPEED,
+            steps = 14,
+            valueIndicator = { Text(it.formatSpeedValue()) },
+            valueLabel = {
+                Text("${effectiveRange.start.formatSpeedValue()}x–${effectiveRange.endInclusive.formatSpeedValue()}x")
+            },
+            title = { Text(stringResource(Lang.settings_player_playback_speed_range)) },
+            description = { Text(stringResource(Lang.settings_player_playback_speed_range_description)) },
+        )
+    }
 
     // 范围变化以动画过渡, 避免 thumb 映射位置瞬移
     val animatedRangeStart by animateFloatAsState(effectiveRange.start, label = "playbackSpeedRangeStart")
@@ -659,7 +673,10 @@ private fun SettingsScope.PlaybackSpeedItems(
     val displayRange =
         if (animatedRangeStart < animatedRangeEnd) animatedRangeStart..animatedRangeEnd else effectiveRange
 
-    HorizontalDividerItem()
+    // 上一条被隐藏时这里就是本组的第一条, 不能再画一道分隔线 (调用方已经画过一道)
+    if (rangeConfigurable) {
+        HorizontalDividerItem()
+    }
 
     SwitchItem(
         checked = config.rememberPlaybackSpeed,
