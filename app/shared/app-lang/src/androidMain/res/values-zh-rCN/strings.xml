@@ -13,6 +13,13 @@
     <string name="developer_list">开发者名单</string>
     <string name="acknowledgements">鸣谢</string>
     <string name="settings">设置</string>
+    <string name="playback_session_now_playing">正在播放</string>
+    <string name="playback_session_close">关闭</string>
+    <string name="playback_session_ready_toast">数据源已就绪，可从「正在播放」继续观看</string>
+    <string name="playback_session_problem_toast">后台播放遇到问题：%1$s，可从「正在播放」返回处理</string>
+    <string name="playback_session_cause_player_error">播放器无法播放该数据源</string>
+    <string name="playback_session_cause_no_media">所有数据源都没有可播放的结果</string>
+    <string name="playback_session_cause_manual_selection">需要手动选择数据源</string>
     <string name="playback_history_title">播放记录</string>
     <string name="playback_history_empty">暂无播放记录</string>
     <string name="playback_history_unknown_subject">未知番剧</string>
@@ -591,6 +598,8 @@
     <string name="settings_theme_tv_ui_scale_description">整体放大或缩小界面。电视 / 盒子上报的屏幕密度不准、导致界面过大或过小时可用此项校正，100% 为跟随系统。离开设置页时界面会重载一次，使弹窗与菜单一并生效</string>
     <string name="settings_theme_tv_full_visual_effects">完整视觉效果</string>
     <string name="settings_theme_tv_full_visual_effects_description">切换追番分类时卡片滑动过渡、加载占位脉动、长标题持续滚动、背景剧照用原图。默认关闭以保证低端设备流畅，设备性能充裕可开启</string>
+    <string name="settings_theme_tv_retain_playback_session">退出播放页后保留播放状态</string>
+    <string name="settings_theme_tv_retain_playback_session_description">退出后播放器与数据源搜索都继续保留，可从侧边栏「正在播放」秒回原处（焦点落在该条目时下方浮出「关闭」按钮）；数据源在后台加载好会提示一声。关闭则退出即结束播放，每次进播放页都要重新搜索数据源</string>
     <string name="settings_theme_palette">调色板</string>
     <string name="settings_theme_mode_light">浅色</string>
     <string name="settings_theme_mode_dark">深色</string>

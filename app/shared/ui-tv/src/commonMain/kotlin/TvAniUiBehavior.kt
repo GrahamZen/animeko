@@ -30,4 +30,5 @@ val TvAniUiBehavior = AniUiBehavior(
     panelsAsCenteredDialogs = true,
     autoInstallUpdates = true,
     forceDarkInPlayer = true,
+    retainPlaybackSession = true,
 )

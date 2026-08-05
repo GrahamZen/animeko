@@ -13,6 +13,13 @@
     <string name="developer_list">Developers List</string>
     <string name="acknowledgements">Acknowledgements</string>
     <string name="settings">Settings</string>
+    <string name="playback_session_now_playing">Now Playing</string>
+    <string name="playback_session_close">Close</string>
+    <string name="playback_session_ready_toast">Source ready — resume from Now Playing</string>
+    <string name="playback_session_problem_toast">Background playback: %1$s. Return from Now Playing to fix it</string>
+    <string name="playback_session_cause_player_error">the player cannot play this source</string>
+    <string name="playback_session_cause_no_media">no playable result from any source</string>
+    <string name="playback_session_cause_manual_selection">a source has to be picked manually</string>
     <string name="playback_history_title">Playback History</string>
     <string name="playback_history_empty">No playback history</string>
     <string name="playback_history_unknown_subject">Unknown anime</string>
@@ -551,6 +558,8 @@
     <string name="settings_theme_tv_ui_scale_description">Scale the whole interface up or down. Use this when your TV or box reports a wrong screen density and everything looks too large or too small. 100% follows the system. The interface reloads once when you leave settings so that dialogs and menus match</string>
     <string name="settings_theme_tv_full_visual_effects">Full visual effects</string>
     <string name="settings_theme_tv_full_visual_effects_description">Slide transitions between collection categories, animated loading placeholders, endless title marquee, and full-resolution hero stills. Off by default to keep low-end devices smooth; turn on if your device is powerful</string>
+    <string name="settings_theme_tv_retain_playback_session">Keep playback session after leaving</string>
+    <string name="settings_theme_tv_retain_playback_session_description">Leaving the player keeps the session alive (player, source search, loaded stream), so you can return instantly from "Now Playing" in the sidebar — focus it and press down for the Close button. A toast tells you when a slow source finishes loading in the background. Off: the session is discarded on exit and every visit searches again</string>
     <string name="settings_theme_palette">Color Palette</string>
     <string name="settings_theme_mode_light">Light</string>
     <string name="settings_theme_mode_dark">Dark</string>

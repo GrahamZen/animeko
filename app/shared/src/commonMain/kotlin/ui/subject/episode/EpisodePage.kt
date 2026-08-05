@@ -1196,18 +1196,22 @@ private fun EpisodeCommentColumn(
 
 
 /**
- * 切后台自动暂停
+ * 切后台自动暂停 (以及切回前台自动恢复).
+ *
+ * "是否自动暂停过"的标志存在 [EpisodeViewModel.autoPausedOnLeave] 而不是组合里 ——
+ * 保留会话的形态下退出播放页会销毁组合但 VM 还活着, 原因见那个字段的文档.
+ * 离开播放页时的暂停另有一条不依赖生命周期事件的路径 ([RetainedPlaybackSessionHolder]),
+ * 两条都只在"正在播放"时动作, 重复触发无害.
  */
 @Composable
 private fun AutoPauseEffect(viewModel: EpisodeViewModel, enabled: Boolean) {
-    var pausedVideo by rememberSaveable { mutableStateOf(true) } // live after configuration change
     if (LocalIsPreviewing.current || !enabled) return
 
     val autoPauseTasker = rememberUiMonoTasker()
     OnLifecycleEvent {
         if (it == Lifecycle.Event.ON_STOP) {
             if (viewModel.player.playbackState.value.isPlaying) {
-                pausedVideo = true
+                viewModel.autoPausedOnLeave = true
                 autoPauseTasker.launch {
                     // #160, 切换全屏时视频会暂停半秒
                     // > 这其实是之前写切后台自动暂停导致的，检测了 lifecycle 事件，切全屏和切后台是一样的事件。延迟一下就可以了
@@ -1215,13 +1219,13 @@ private fun AutoPauseEffect(viewModel: EpisodeViewModel, enabled: Boolean) {
                 }
             } else {
                 // 如果不是正在播放, 则不操作暂停, 当下次切回前台时, 也不要恢复播放
-                pausedVideo = false
+                viewModel.autoPausedOnLeave = false
             }
-        } else if (it == Lifecycle.Event.ON_START && pausedVideo) {
+        } else if (it == Lifecycle.Event.ON_START && viewModel.autoPausedOnLeave) {
             autoPauseTasker.launch {
                 viewModel.player.resume() // 切回前台自动恢复, 当且仅当之前是自动暂停的
             }
-            pausedVideo = false
+            viewModel.autoPausedOnLeave = false
         }
     }
 }

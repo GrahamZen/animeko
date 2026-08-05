@@ -282,6 +282,18 @@ class EpisodeViewModel(
     val player: MediampPlayer =
         playerStateFactory.create(context, backgroundScope.coroutineContext)
 
+    /**
+     * 上次离开播放页时是不是"正在播放而被自动暂停"的 —— 回到播放页要不要自动恢复的依据.
+     *
+     * 放在 VM 上而不是组合里: 保留会话的形态下 (见 `AniUiBehavior.retainPlaybackSession`)
+     * 退出播放页会销毁组合但本 VM 还活着, 存在组合里的话再进来必然是初值, 用户自己按的暂停
+     * 会被误恢复成播放. 初值 `true` 与原先那个 `rememberSaveable` 一致 (首次进页面也会尝试
+     * 恢复一次, 此时播放器还没有内容, 是空操作).
+     *
+     * 只在按键/生命周期回调里读写, 不在组合里读, 因此是普通 var.
+     */
+    var autoPausedOnLeave: Boolean = true
+
     /** `null` 表示本次播放尚未调整过倍速, 此时跟随配置. */
     private val playbackSpeedOverride = MutableStateFlow<Float?>(null)
 

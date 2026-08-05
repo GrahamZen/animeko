@@ -55,6 +55,8 @@ import me.him188.ani.app.ui.lang.settings_theme_tv_immersive_exploration
 import me.him188.ani.app.ui.lang.settings_theme_tv_immersive_exploration_description
 import me.him188.ani.app.ui.lang.settings_theme_tv_immersive_schedule
 import me.him188.ani.app.ui.lang.settings_theme_tv_immersive_schedule_description
+import me.him188.ani.app.ui.lang.settings_theme_tv_retain_playback_session
+import me.him188.ani.app.ui.lang.settings_theme_tv_retain_playback_session_description
 import me.him188.ani.app.ui.lang.settings_theme_tv_ui_scale
 import me.him188.ani.app.ui.lang.settings_theme_tv_ui_scale_description
 import me.him188.ani.app.ui.settings.framework.SettingsState
@@ -181,6 +183,17 @@ fun SettingsScope.ThemeGroup(
                 },
                 title = { Text(stringResource(Lang.settings_theme_tv_full_visual_effects)) },
                 description = { Text(stringResource(Lang.settings_theme_tv_full_visual_effects_description)) },
+            )
+
+            SwitchItem(
+                checked = themeSettings.tvRetainPlaybackSession,
+                onCheckedChange = { checked ->
+                    state.update(themeSettings.copy(tvRetainPlaybackSession = checked))
+                },
+                title = { Text(stringResource(Lang.settings_theme_tv_retain_playback_session)) },
+                description = {
+                    Text(stringResource(Lang.settings_theme_tv_retain_playback_session_description))
+                },
             )
         }
     }
