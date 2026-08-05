@@ -20,6 +20,7 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.SliderDefaults.TickSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,6 +40,13 @@ import me.him188.ani.app.ui.foundation.LocalAniUiBehavior
 import me.him188.ani.app.ui.foundation.SliderValueIndicator
 import me.him188.ani.app.ui.foundation.rememberHoverExitFilteredInteractionSource
 
+/**
+ * 遥控器上 slider 聚焦时把返回键改成"向左移焦点": 左键被 slider 当成调值吃掉,
+ * 返回键代替它退出 slider (向左进入左侧导航列表时经其 focusGroup 的 onEnter 跳回选中项).
+ *
+ * 默认关闭: slider 也出现在播放器面板等场景, 那里返回键有各自的语义, 只有设置页打开.
+ */
+internal val LocalSliderBackKeyExitsLeft = compositionLocalOf { false }
 
 @SettingsDsl
 @Composable
@@ -51,16 +59,30 @@ fun SettingsScope.SliderItem(
 ) {
     // 方向键驱动的界面上, M3 Slider 会把上下键也当成调值吃掉, 焦点困在 slider 上
     val focusDriven = LocalAniUiBehavior.current.focusDrivenNavigation
+    val backKeyExitsLeft = LocalSliderBackKeyExitsLeft.current
     val focusManager = LocalFocusManager.current
     val effectiveModifier = if (focusDriven) {
         modifier.onPreviewKeyEvent { keyEvent ->
-            if (keyEvent.type == KeyEventType.KeyDown) {
-                when (keyEvent.key) {
-                    Key.DirectionUp -> { focusManager.moveFocus(FocusDirection.Up); true }
-                    Key.DirectionDown -> { focusManager.moveFocus(FocusDirection.Down); true }
-                    else -> false
+            when (keyEvent.key) {
+                Key.DirectionUp, Key.DirectionDown -> {
+                    if (keyEvent.type == KeyEventType.KeyDown) {
+                        focusManager.moveFocus(
+                            if (keyEvent.key == Key.DirectionUp) FocusDirection.Up else FocusDirection.Down,
+                        )
+                        true
+                    } else false
                 }
-            } else false
+
+                // 返回键不退出页面, 把焦点向左送出 slider; KeyDown/KeyUp 都消费, 否则
+                // 焦点移走后残余的 KeyUp 会漏给系统触发整页返回
+                Key.Back, Key.Escape -> {
+                    if (!backKeyExitsLeft) return@onPreviewKeyEvent false
+                    if (keyEvent.type == KeyEventType.KeyUp) focusManager.moveFocus(FocusDirection.Left)
+                    true
+                }
+
+                else -> false
+            }
         }
     } else modifier
     Item(
