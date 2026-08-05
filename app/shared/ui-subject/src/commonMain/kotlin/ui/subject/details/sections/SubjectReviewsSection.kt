@@ -40,6 +40,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -85,6 +86,11 @@ fun ReviewsPreviewSection(
      * 的拦截挂在这里 —— 挂整个区块会把标题行"查看全部"按钮的下键也吃掉 (导航不到卡片).
      */
     cardsModifier: Modifier = Modifier,
+    /**
+     * true 时评论卡改用半透明黑底 + 白字 (见 [ReviewPreviewCard]): TV 播放器内嵌介绍页整页浮在
+     * 视频画面上, 不透明的 `surfaceContainerLow` 会把画面整块盖掉, 观感是页底压了两块黑砖.
+     */
+    videoBackground: Boolean = false,
 ) {
     if (comments.itemCount == 0) return
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -98,13 +104,17 @@ fun ReviewsPreviewSection(
             if (maxWidth < STACK_REVIEW_CARDS_BELOW_WIDTH) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     repeat(count) { i ->
-                        comments[i]?.let { ReviewPreviewCard(it, onClick = onShowAll, Modifier.fillMaxWidth()) }
+                        comments[i]?.let {
+                            ReviewPreviewCard(it, onShowAll, Modifier.fillMaxWidth(), videoBackground)
+                        }
                     }
                 }
             } else {
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     repeat(count) { i ->
-                        comments[i]?.let { ReviewPreviewCard(it, onClick = onShowAll, Modifier.weight(1f)) }
+                        comments[i]?.let {
+                            ReviewPreviewCard(it, onShowAll, Modifier.weight(1f), videoBackground)
+                        }
                     }
                 }
             }
@@ -114,13 +124,34 @@ fun ReviewsPreviewSection(
 
 private val STACK_REVIEW_CARDS_BELOW_WIDTH = 480.dp
 
+/**
+ * 视频背景态下评论卡的墨色浓度: 只要把画面按下去到正文读得清, 不必压成实心.
+ *
+ * 页面本身已经压了一层基础遮罩 (TV 内嵌介绍页的 `TV_VIDEO_SCRIM_BASE_ALPHA`), 与它叠加后
+ * 卡片区约 0.6 —— 卡片边界看得出来, 画面也还透得出来. 用黑而不是 `glassContainerColor`
+ * (那套是提亮的墨色): 卡里是两行长文, 得靠压暗背景取对比.
+ */
+private const val REVIEW_CARD_VIDEO_SCRIM_ALPHA = 0.4f
+
 @Composable
-private fun ReviewPreviewCard(comment: UIComment, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun ReviewPreviewCard(
+    comment: UIComment,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    videoBackground: Boolean = false,
+) {
     Surface(
         onClick = onClick,
         modifier = modifier,
         shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        color = if (videoBackground) {
+            Color.Black.copy(alpha = REVIEW_CARD_VIDEO_SCRIM_ALPHA)
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerLow
+        },
+        // 半透明底色在配色表里查不到对应的 "on" 色, Surface 会退回 LocalContentColor,
+        // 而它的默认值是纯黑 (material3 的 compositionLocalOf { Color.Black }) —— 必须显式给白
+        contentColor = if (videoBackground) Color.White else MaterialTheme.colorScheme.onSurface,
     ) {
         ReviewPreviewItem(
             comment,

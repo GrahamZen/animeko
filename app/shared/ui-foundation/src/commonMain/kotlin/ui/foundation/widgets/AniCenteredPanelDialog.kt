@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import me.him188.ani.app.ui.foundation.dialogs.DialogWindowDimAmount
 
 /**
  * 半透明居中大面板弹窗: 按窗口比例定尺寸, 下层内容 (视频画面 / 页面) 经系统遮罩隐约透出.
@@ -72,6 +73,9 @@ fun AniCenteredPanelDialog(
         onDismissRequest = onDismissRequest,
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
+        // 面板占掉大半个屏幕, 窗口默认那档 0.6 的压暗会把四周压得几乎全黑 (电视上尤其明显).
+        // 0.35 接近 M3 给模态遮罩的 32%, 面板边界照样分得清, 下层页面/视频还透得出来
+        DialogWindowDimAmount(CENTERED_PANEL_WINDOW_DIM)
         Surface(
             // maxWidth 必须**在外层**: widthIn 会先服从传进来的约束, 而 fillMaxWidth 给的是
             // min = max = 比例宽度, 放在它后面等于没写 (实测宽度仍是整整那个比例)
@@ -141,5 +145,14 @@ val centeredPanelColor: Color
     @Composable
     get() = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = CENTERED_PANEL_ALPHA)
 
-/** 背景图上的遮罩不透明度: 够暗才能压住亮色剧照, 又留得住图的轮廓. */
-private const val CENTERED_PANEL_SCRIM_ALPHA = 0.72f
+/**
+ * 背景图上的遮罩不透明度: 压住亮色剧照到正文读得清即可, 不必压到只剩轮廓.
+ *
+ * 0.72 时剧照只剩不到三成亮度, 图基本是个影子; 0.55 下还剩四成半, 看得出画的是哪一幕 ——
+ * 这层遮罩之上是白字 (背景态下面板固定给白内容色), 亮部剧照仍撑得住对比. 遇到实在压不住的亮图,
+ * 优先给标题/正文加投影 (同 TvHeroBlock 的 titleShadow), 而不是把整张图再压暗一档.
+ */
+private const val CENTERED_PANEL_SCRIM_ALPHA = 0.55f
+
+/** 弹窗窗口外的系统压暗 (见 [DialogWindowDimAmount]); 系统对话框默认 0.6, 大面板上太黑. */
+private const val CENTERED_PANEL_WINDOW_DIM = 0.35f

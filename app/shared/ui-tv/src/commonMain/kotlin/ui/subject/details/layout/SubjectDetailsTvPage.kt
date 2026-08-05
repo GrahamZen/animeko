@@ -1962,17 +1962,28 @@ private fun TvVideoBackgroundScrim(scrollState: ScrollState) {
     )
 }
 
-/** 视频背景遮罩: 首屏基础整屏压暗 (调大更暗, 文字更清晰但视频更不可见). */
-private const val TV_VIDEO_SCRIM_BASE_ALPHA = 0.55f
+/**
+ * 视频背景遮罩: 首屏基础整屏压暗 (调大更暗, 文字更清晰但视频更不可见).
+ *
+ * 调这四个值前先算叠加: 四层都是画在一起的黑, 观感亮度是 `1-(1-a)(1-b)` 连乘, 不是各自的值.
+ * 当前一档下: 首屏 0.38, 滚到底 0.48, 底缘 0.66 (滚动后 0.71), 左缘 0.66 —— 都还能透出画面.
+ * 之前一档 (0.55/0.25/0.95/0.7) 的底缘叠到 0.98, 等于纯黑, 就是"底部几乎全黑"的来源.
+ */
+private const val TV_VIDEO_SCRIM_BASE_ALPHA = 0.38f
 
 /** 视频背景遮罩: 滚动后在基础之上叠加的压暗量 (滚过 FADE_DISTANCE 后满额). */
-private const val TV_VIDEO_SCRIM_SCROLL_EXTRA_ALPHA = 0.25f
+private const val TV_VIDEO_SCRIM_SCROLL_EXTRA_ALPHA = 0.16f
 
-/** 视频背景遮罩: 底部渐变的最深处不透明度. */
-private const val TV_VIDEO_SCRIM_BOTTOM_ALPHA = 0.95f
+/**
+ * 视频背景遮罩: 底部渐变的最深处不透明度.
+ *
+ * 这层只为对齐独立页 backdrop 的底部渐隐 (那边下面是页面底色, 这边下面是视频),
+ * 不承担可读性 —— 底部那点文字已经压在基础层上了, 所以可以给得比别处松.
+ */
+private const val TV_VIDEO_SCRIM_BOTTOM_ALPHA = 0.45f
 
 /** 视频背景遮罩: 左缘渐变 (标题可读性) 的最深处不透明度. */
-private const val TV_VIDEO_SCRIM_LEFT_ALPHA = 0.7f
+private const val TV_VIDEO_SCRIM_LEFT_ALPHA = 0.45f
 
 /** 滚动多远后背景图淡到 [HERO_BACKDROP_MIN_ALPHA]. */
 private val HERO_BACKDROP_FADE_DISTANCE = 300.dp
@@ -2600,6 +2611,8 @@ private fun TvEmbeddedHeroPage(
                 modifier = Modifier.fillMaxWidth()
                     .padding(bottom = TV_EMBEDDED_BOTTOM_MARGIN),
                 cardsModifier = Modifier.tvSectionEdge(sectionNav, TvDetailsSection.HERO, down = true),
+                // 本页整个浮在视频画面上: 评论卡改半透明黑底, 否则页底是两块不透明的黑砖
+                videoBackground = true,
             )
         }
     }
