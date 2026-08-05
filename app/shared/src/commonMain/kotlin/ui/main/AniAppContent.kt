@@ -28,7 +28,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,8 +46,10 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.CreationExtras
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavBackStackEntry
+import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -83,12 +87,16 @@ import me.him188.ani.app.ui.foundation.animation.NavigationMotionScheme
 import me.him188.ani.app.ui.foundation.animation.ProvideAniMotionCompositionLocals
 import androidx.compose.ui.graphics.Color
 import me.him188.ani.app.ui.foundation.LocalAniUiBehavior
+import me.him188.ani.app.ui.foundation.playback.LocalPlaybackSessionEntry
+import me.him188.ani.app.ui.foundation.playback.PlaybackSessionEntry
 import me.him188.ani.app.ui.foundation.watchtogether.LocalWatchTogetherEntry
 import me.him188.ani.app.ui.foundation.watchtogether.WatchTogetherEntryState
 import me.him188.ani.app.ui.foundation.ifThen
 import me.him188.ani.app.ui.foundation.layout.currentWindowAdaptiveInfo1
 import me.him188.ani.app.ui.foundation.layout.desktopTitleBar
+import me.him188.ani.app.ui.foundation.theme.LocalThemeSettings
 import me.him188.ani.app.ui.foundation.widgets.BackNavigationIconButton
+import me.him188.ani.app.ui.foundation.widgets.LocalToaster
 import me.him188.ani.app.ui.foundation.widgets.TopAppBarActionButton
 import me.him188.ani.app.ui.login.EmailLoginStartScreen
 import me.him188.ani.app.ui.login.EmailLoginVerifyScreen
@@ -121,6 +129,8 @@ import me.him188.ani.app.ui.subject.person.PersonDetailsViewModel
 import me.him188.ani.app.ui.subject.details.SubjectDetailsViewModel
 import me.him188.ani.app.ui.subject.episode.EpisodeScreen
 import me.him188.ani.app.ui.subject.episode.EpisodeViewModel
+import me.him188.ani.app.ui.subject.episode.RetainedPlaybackSessionHolder
+import me.him188.ani.app.ui.subject.episode.rememberRetainedPlaybackNoticeTexts
 import me.him188.ani.app.ui.user.SelfInfoStateProducer
 import me.him188.ani.app.ui.watchtogether.LocalWatchTogetherPlayerController
 import me.him188.ani.app.ui.watchtogether.WatchTogetherOverlayHost
@@ -151,18 +161,52 @@ fun AniAppContent(aniNavigator: AniNavigator) {
     // "一起看" 入口把手: 弹窗本体在下面的 WatchTogetherOverlayHost 里 (与 NavHost 同级),
     // 入口按钮在 NavHost 内的各页面上 (TV 侧边栏 / 播放器胶囊行), 两边隔着 NavHost 靠它通气
     val watchTogetherEntry = remember { WatchTogetherEntryState() }
+    // 保留播放会话 (遥控器形态, 可在设置里关): 播放页退出后播放器与整条起播流水线不销毁,
+    // 由侧边栏"正在播放"条目回去. holder 挂在这里 (NavHost 之外) 才能不随播放页那个返回栈条目
+    // 一起死; 它同时是入口把手 (PlaybackSessionEntry), 经 CompositionLocal 给到 NavHost 内的入口.
+    val retainPlaybackSession = LocalAniUiBehavior.current.retainPlaybackSession &&
+            LocalThemeSettings.current.tvRetainPlaybackSession
+    val sessionHolder = viewModel { RetainedPlaybackSessionHolder() }
+    // 设置里关掉时把已经保留着的会话结束掉, 否则它会一直活到应用退出
+    LaunchedEffect(sessionHolder, retainPlaybackSession) {
+        if (!retainPlaybackSession) sessionHolder.close()
+    }
+    val playbackSessionHolder = sessionHolder.takeIf { retainPlaybackSession }
+    if (playbackSessionHolder != null) {
+        // 播放页是否在前台: 由导航状态驱动, 而不是播放页自己的生命周期事件 —— 返回栈条目被 pop 时
+        // ON_STOP 与界面销毁的先后不保证, 漏一次就成了"画面没了声音还在".
+        // holder 据此把后台的会话按住不出声 (数据源解析完成后流水线会自己 resume).
+        val currentEntry by navigator.currentBackStackEntryAsState()
+        val onPlayerPage = currentEntry?.destination?.hasRoute(NavRoutes.EpisodeDetail::class) == true
+        // 用 SideEffect 而不是 LaunchedEffect: 组合成功后同步落地, 早于回到播放页时那次
+        // 自动恢复播放 (ON_START), 否则 holder 会以为还在后台, 刚恢复就又被按下去
+        SideEffect {
+            playbackSessionHolder.setPlayerPageVisible(onPlayerPage)
+        }
+        // 后台会话的状态变化提示一声: 慢的源要十几秒, 用户正是为了不干等才退出去的 —— 就绪了要叫他
+        // 回来, 而卡住了 (换源也救不回来/没搜到/等他手选) 更要说, 否则他会一直等一个不会来的就绪提示
+        val toaster = LocalToaster.current
+        val noticeTexts = rememberRetainedPlaybackNoticeTexts()
+        LaunchedEffect(playbackSessionHolder, toaster, noticeTexts) {
+            playbackSessionHolder.notices.collect { toaster.toast(noticeTexts.textOf(it)) }
+        }
+        // 会话在后台也要有个组合挂载点 (WEB 源解析的 WebView 宿主), 详见该函数的注释
+        playbackSessionHolder.ComposeRetainedContent()
+    }
     Box(Modifier.fillMaxSize().background(rootBackground)) {
         CompositionLocalProvider(
             LocalNavigator provides aniNavigator,
             LocalBrowserNavigator providesDefault aniAppViewModel.browserNavigator,
             LocalWatchTogetherPlayerController provides watchTogetherPlayerController,
             LocalWatchTogetherEntry provides watchTogetherEntry,
+            LocalPlaybackSessionEntry provides (playbackSessionHolder ?: PlaybackSessionEntry.None),
         ) {
             ProvideAniMotionCompositionLocals {
                 AniAppContentImpl(
                     aniNavigator,
                     appState.initialNavRoute, // 只有在 APP 首次启动的时候加载这个, 只加载一次
                     appState.mainSceneInitialPage,
+                    playbackSessionHolder,
                     Modifier.fillMaxSize(),
                 )
                 BangumiSessionExpiredPromptHost(
@@ -186,6 +230,8 @@ private fun AniAppContentImpl(
     aniNavigator: AniNavigator,
     initialRoute: NavRoutes,
     mainSceneInitialPage: MainScreenPage,
+    /** 非 null 时播放页的 VM 挂到它上面, 退出播放页不销毁会话; null = 本形态不保留会话. */
+    playbackSessionHolder: RetainedPlaybackSessionHolder?,
     modifier: Modifier = Modifier,
 ) {
     val navController by aniNavigator.collectNavigatorAsState()
@@ -521,15 +567,36 @@ private fun AniAppContentImpl(
             ) { backStackEntry ->
                 val route = backStackEntry.toRoute<NavRoutes.EpisodeDetail>()
                 val context = LocalContext.current
-                val vm = viewModel<EpisodeViewModel>(
-                    key = route.toString(),
-                ) {
+                val initializer: CreationExtras.() -> EpisodeViewModel = {
                     EpisodeViewModel(
                         subjectId = route.subjectId,
                         initialEpisodeId = route.episodeId,
                         initialIsFullscreen = false,
                         context,
                     )
+                }
+                val vm = if (playbackSessionHolder != null) {
+                    // 保留会话形态: VM 挂在应用级 holder 的 store 上, 退出本页不销毁; 同一集
+                    // 再进来按同一个 key 拿回同一个 VM (状态自然接上), 换集则先销毁旧会话.
+                    // prepare 必须在 viewModel(...) 之前: 先销后建, 不让两个播放器同时在场.
+                    remember(playbackSessionHolder, route) {
+                        playbackSessionHolder.prepare(route.subjectId, route.episodeId)
+                    }
+                    viewModel<EpisodeViewModel>(
+                        viewModelStoreOwner = playbackSessionHolder,
+                        key = route.toString(),
+                        initializer = initializer,
+                    ).also { vm ->
+                        SideEffect { playbackSessionHolder.attach(vm) }
+                        // 上报本页组合的存活: holder 据此决定"被替换掉的那个会话"能不能立刻销毁
+                        // (它的界面还在退场动画里时不能, 见 RetainedPlaybackSessionHolder)
+                        DisposableEffect(vm) {
+                            playbackSessionHolder.onPageComposed(vm)
+                            onDispose { playbackSessionHolder.onPageDisposed(vm) }
+                        }
+                    }
+                } else {
+                    viewModel<EpisodeViewModel>(key = route.toString(), initializer = initializer)
                 }
                 EpisodeScreen(vm, Modifier.fillMaxSize(), windowInsets)
             }

@@ -30,6 +30,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccountCircle
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.SyncAlt
@@ -39,6 +41,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -62,16 +65,21 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import me.him188.ani.app.navigation.LocalNavigator
 import me.him188.ani.app.navigation.MainScreenPage
 import me.him188.ani.app.navigation.getIcon
 import me.him188.ani.app.navigation.getText
 import me.him188.ani.app.ui.foundation.avatar.AvatarImage
+import me.him188.ani.app.ui.foundation.playback.LocalPlaybackSessionEntry
 import me.him188.ani.app.ui.foundation.theme.AniThemeDefaults
 import me.him188.ani.app.ui.foundation.watchtogether.LocalWatchTogetherEntry
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.exploration_search
 import me.him188.ani.app.ui.lang.login_sign_in
+import me.him188.ani.app.ui.lang.playback_session_close
+import me.him188.ani.app.ui.lang.playback_session_now_playing
 import me.him188.ani.app.ui.lang.settings
 import me.him188.ani.app.ui.lang.watch_together_title
 import me.him188.ani.app.ui.user.SelfInfoUiState
@@ -101,6 +109,23 @@ data class TvNavRailItem(
      * 焦点回不到本条目上.
      */
     val keepFocusOnClick: Boolean = false,
+    /**
+     * 非空时聚焦本条目会在它**下方**浮现这些按钮, 与头像那簇动作按钮同一形态与视觉:
+     * 不占布局 (不推挤其余条目), 按下键即落到第一个按钮上, 焦点离开本簇即隐藏.
+     *
+     * 给"点击是主动作、另有次要动作"的条目用 (如"正在播放": 点击回到播放页, 下方浮出"关闭").
+     * 不用长按弹菜单: 那是个独立窗口 (按键不经本页路由, 还要处理长按残余按键), 而这里
+     * 只是同一棵树里多一个可聚焦目标, 遥控器上也更好发现 —— 焦点一到就看得见.
+     */
+    val floatingActions: List<TvRailItemAction> = emptyList(),
+    val onClick: () -> Unit,
+)
+
+/** 条目的次要动作 (聚焦条目时在其下方浮现). */
+@Immutable
+data class TvRailItemAction(
+    val icon: ImageVector,
+    val label: String,
     val onClick: () -> Unit,
 )
 
@@ -159,6 +184,40 @@ fun buildTvRailItems(
             ),
         )
     }
+    // "正在播放": 退出播放页后播放会话仍留在后台 (见 AniUiBehavior.retainPlaybackSession),
+    // 这颗图标是回去的唯一入口, 长按可结束会话 —— 没有这个出口的话它会一直占着解码器与缓冲.
+    //
+    // 放在整列**最后**: 会话来去是动态的, 夹在中间会让其余条目的位置随之上下移动 (遥控器上
+    // 位置就是肌肉记忆), 而且不能放头像那一簇上方 —— 头像聚焦时本来就会在其上方浮出动作按钮.
+    val playback = LocalPlaybackSessionEntry.current
+    val playbackNavigator = LocalNavigator.current
+    playback.session?.let { retained ->
+        add(
+            TvNavRailItem(
+                icon = Icons.Rounded.PlayCircle,
+                label = stringResource(Lang.playback_session_now_playing),
+                onClick = {
+                    // force: 这不是"去开另一集", 而是回到**已经在播的这一集**, 所以跳过跟随房主时
+                    // 那道导航守卫 (WatchTogetherManager.observeFollowerMode). 那道守卫只在目标与
+                    // 房主已发布的播放位置一字不差时放行 —— 房主还没发布 (还在选源/详情页) 时是
+                    // null, 一律拒绝, 于是跟随者退出播放页后连回自己的会话都被挡住, 提示"跟随房主
+                    // 中, 无法…"却又没有别的出路. 跟随该拦的是"播别的", 不是"回去接着看".
+                    playbackNavigator.navigateEpisodeDetails(
+                        retained.subjectId,
+                        retained.episodeId,
+                        force = true,
+                    )
+                },
+                floatingActions = listOf(
+                    TvRailItemAction(
+                        icon = Icons.Rounded.Close,
+                        label = stringResource(Lang.playback_session_close),
+                        onClick = { playback.close() },
+                    ),
+                ),
+            ),
+        )
+    }
 }
 
 /**
@@ -186,8 +245,20 @@ fun TvNavigationSideRail(
 ) {
     // hasFocus (含子节点): 任一条目聚焦即展开
     var expanded by remember { mutableStateOf(false) }
-    // 垂直居中
-    Box(modifier.fillMaxHeight(), contentAlignment = Alignment.CenterStart) {
+    // 两端浮出按钮各自需要的高度: 它们不占布局 (见 TvRailAvatar / TvRailIconItem), 整列纯居中时
+    // 会被屏幕上下边界切掉 —— 条目越多 (一起看 + 正在播放都在场) 整列越高, 居中后头像越靠上,
+    // 上方那簇就露不全. 下方同理 (带浮出动作的条目排在整列最后).
+    val topReserve = if (selfInfo != null && avatarActions.isNotEmpty()) {
+        floatingActionsStackHeight(avatarActions.size)
+    } else {
+        0.dp
+    }
+    val bottomReserve = (items.maxOfOrNull { it.floatingActions.size } ?: 0)
+        .takeIf { it > 0 }
+        ?.let { floatingActionsStackHeight(it) }
+        ?: 0.dp
+    // 垂直居中 (纵向位置由下面的 layout 自己算, 因此这里对齐到顶)
+    Box(modifier.fillMaxHeight(), contentAlignment = Alignment.TopStart) {
         AnimatedVisibility(expanded, enter = fadeIn(), exit = fadeOut()) {
             // 展开底衬: 纯色面板 (取 TV 全屏背景色, 与主壳背景一致, 日夜自适应)
             // + 右缘多色标平滑羽化融入内容.
@@ -212,15 +283,41 @@ fun TvNavigationSideRail(
         // (如"探索"), 不随进入位置变化.
         val enterFocus = remember { FocusRequester() }
         val hasDefaultFocusItem = items.any { it.defaultFocus }
+        // 每个条目一个落点: 条目会来去 (正在播放 / 一起看), 带着焦点消失时要有人接手, 见 TvRailIconItem
+        val itemAnchors = remember(items.size) { List(items.size) { FocusRequester() } }
         Column(
             Modifier
+                // 居中, 但两端给浮出按钮留够高度: 居中位置放不下时整列往里让, 让到还是放不下
+                // (屏幕太矮 / 条目太多) 就优先保上方 —— 头像那簇是三颗, 下方通常只有一颗.
+                // 在测量阶段一次算完, 不读位置状态, 因此没有"改位置→再测量"的回路.
+                .layout { measurable, constraints ->
+                    val placeable = measurable.measure(constraints)
+                    val top = topReserve.roundToPx()
+                    val bottom = bottomReserve.roundToPx()
+                    val available = if (constraints.hasBoundedHeight) {
+                        constraints.maxHeight
+                    } else {
+                        placeable.height + top + bottom
+                    }
+                    val centered = ((available - placeable.height) / 2).coerceAtLeast(0)
+                    val maxY = (available - placeable.height - bottom).coerceAtLeast(0)
+                    val y = if (maxY < top) top else centered.coerceIn(top, maxY)
+                    layout(placeable.width, placeable.height) { placeable.place(0, y) }
+                }
                 .onFocusChanged { expanded = it.hasFocus }
                 .focusProperties {
                     onEnter = {
-                        if (requestedFocusDirection == FocusDirection.Left) {
-                            if (hasDefaultFocusItem) enterFocus.requestFocus()
-                        } else {
-                            cancelFocus()
+                        when (requestedFocusDirection) {
+                            // 按左进入: 落到 defaultFocus 标记的条目
+                            FocusDirection.Left -> if (hasDefaultFocusItem) enterFocus.requestFocus()
+                            // 显式请求 (FocusRequester.requestFocus / moveFocus(Enter)) 也放行:
+                            // 页面丢焦点时 AniAppContent 的全局兜底就是在 NavHost 上发一次请求, 而
+                            // Compose 把这种请求按 Enter 方向找**最左**的子树 —— 在有侧边栏的页面上
+                            // 那就是本栏. 一起挡掉的话兜底会每 100ms 撞在这里一次、次次 Cancelled,
+                            // 整页方向键永远救不回来 (2026-08-05 关掉"正在播放"后丢焦点就是这么来的).
+                            FocusDirection.Enter -> if (hasDefaultFocusItem) enterFocus.requestFocus()
+                            // 上/下/右的空间搜索一律取消, 否则详情页最上方按钮按上也会误入
+                            else -> cancelFocus()
                         }
                     }
                 }
@@ -234,7 +331,7 @@ fun TvNavigationSideRail(
                 // 不显示头像时保留等高占位, 使其余按钮位置不变
                 Box(Modifier.size(TV_RAIL_ITEM_SIZE))
             }
-            for (item in items) {
+            for ((index, item) in items.withIndex()) {
                 TvRailIconItem(
                     icon = item.icon,
                     label = item.label,
@@ -246,7 +343,13 @@ fun TvNavigationSideRail(
                         item.focusRequester
                     },
                     keepFocusOnClick = item.keepFocusOnClick,
+                    floatingActions = item.floatingActions,
                     onClick = item.onClick,
+                    anchor = itemAnchors[index],
+                    // 本条目带着焦点消失时交给上一个条目; 它是第一个就交给默认落点 (再没有就
+                    // 只能靠全局兜底了)
+                    fallbackFocus = itemAnchors.getOrNull(index - 1)
+                        ?: enterFocus.takeIf { hasDefaultFocusItem && !item.defaultFocus },
                 )
             }
         }
@@ -341,11 +444,11 @@ private fun TvRailAvatar(
                     },
             ) {
                 Column(
-                    Modifier.padding(bottom = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    Modifier.padding(bottom = TV_RAIL_FLOATING_ACTION_SPACING),
+                    verticalArrangement = Arrangement.spacedBy(TV_RAIL_FLOATING_ACTION_SPACING),
                 ) {
                     for (action in avatarActions) {
-                        TvRailAvatarActionButton(action, onExitFocus)
+                        TvRailFloatingActionButton(action.icon, action.label, action.onClick, onExitFocus)
                     }
                 }
             }
@@ -405,10 +508,16 @@ private fun TvRailAvatar(
     }
 }
 
-/** 头像上方浮现的单个动作按钮 (图标方块 + 文字), 聚焦反色, 与普通条目视觉一致. */
+/**
+ * 浮现的单个动作按钮 (图标方块 + 文字), 聚焦反色, 与普通条目视觉一致.
+ *
+ * 头像上方那簇与带动作的条目下方那簇共用: 两处只差浮现方向, 按钮本身应当一模一样.
+ */
 @Composable
-private fun TvRailAvatarActionButton(
-    action: TvRailAvatarAction,
+private fun TvRailFloatingActionButton(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
     onExitFocus: (() -> Unit)?,
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -419,14 +528,14 @@ private fun TvRailAvatarActionButton(
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
-                onClick = action.onClick,
+                onClick = onClick,
             ),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        TvRailGlyphBox(focused, action.icon)
+        TvRailGlyphBox(focused, icon)
         Text(
-            action.label,
+            label,
             color = MaterialTheme.colorScheme.onSurface,
             style = MaterialTheme.typography.labelMedium,
             softWrap = false,
@@ -442,44 +551,108 @@ private fun TvRailIconItem(
     onExitFocus: (() -> Unit)?,
     focusRequester: FocusRequester?,
     keepFocusOnClick: Boolean,
+    floatingActions: List<TvRailItemAction>,
     onClick: () -> Unit,
+    /** 本条目自己的落点, 供下一个条目在消失时把焦点交回来 (见 [fallbackFocus]). */
+    anchor: FocusRequester,
+    /** 本条目在有焦点时消失后, 焦点交给谁. */
+    fallbackFocus: FocusRequester?,
     modifier: Modifier = Modifier,
 ) {
     var focused by remember { mutableStateOf(false) }
+    // 本簇 (条目 + 下方浮现的动作按钮) 任一有焦点: 决定那些按钮在不在场
+    var clusterFocused by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
-    Row(
-        modifier
-            .then(focusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
-            .onFocusChanged { focused = it.isFocused }
-            .railExitKeys(onExitFocus)
-            // 自绘聚焦指示 (图标方块反色), 关掉默认 indication 避免整行水波.
-            // 只保留焦点高亮: 不标记"当前页", 否则聚焦项与当前页两处高亮会误导用户.
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = {
-                    onClick()
-                    // 点击后清空焦点, 让 AniAppContent 全局兜底把焦点送入(可能刚切换/弹回的)当前页面
-                    // 左上角可聚焦项; 不用 moveFocus(Right): 切页瞬间新内容还没组合出来, moveFocus 会
-                    // 落到正在退场的旧页面或失败, 导致丢焦点.
-                    // 就地开弹窗的条目不清 (见 TvNavRailItem.keepFocusOnClick).
-                    if (!keepFocusOnClick) focusManager.clearFocus()
-                },
-            ),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        TvRailGlyphBox(focused, icon)
-        if (expanded) {
-            Text(
-                label,
-                color = MaterialTheme.colorScheme.onSurface,
-                style = MaterialTheme.typography.labelMedium,
-                softWrap = false,
-            )
+    // 条目会来去 ("正在播放"被自己的关闭按钮关掉, "一起看"退出房间, 会话在后台结束…), 而焦点
+    // 正落在它身上时 Compose 不会把焦点交给任何人 —— 整页方向键就此失效. 交回上一个条目.
+    //
+    // 这类丢焦点指望不上 AniAppContent 里那个全局兜底: 它是在 NavHost 上 requestFocus, 而
+    // Compose 会把这种显式请求按 Enter 方向找**最左**的子树, 也就是本侧边栏, 又被下面 onEnter
+    // 那道"只允许按左进入"的门挡掉 (Cancelled), 于是每 100ms 重试一次、次次失败.
+    // 那道门现在放行 Enter 了, 但兜底落点是"探索", 不如就近交给上一个条目.
+    DisposableEffect(fallbackFocus) {
+        onDispose {
+            if (clusterFocused && fallbackFocus != null) {
+                runCatching { fallbackFocus.requestFocus() }
+            }
+        }
+    }
+    Box(modifier.focusRequester(anchor).onFocusChanged { clusterFocused = it.hasFocus }) {
+        Row(
+            Modifier
+                .then(focusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
+                .onFocusChanged { focused = it.isFocused }
+                .railExitKeys(onExitFocus)
+                // 自绘聚焦指示 (图标方块反色), 关掉默认 indication 避免整行水波.
+                // 只保留焦点高亮: 不标记"当前页", 否则聚焦项与当前页两处高亮会误导用户.
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = {
+                        onClick()
+                        // 点击后清空焦点, 让 AniAppContent 全局兜底把焦点送入(可能刚切换/弹回的)当前页面
+                        // 左上角可聚焦项; 不用 moveFocus(Right): 切页瞬间新内容还没组合出来, moveFocus 会
+                        // 落到正在退场的旧页面或失败, 导致丢焦点.
+                        // 就地开弹窗的条目不清 (见 TvNavRailItem.keepFocusOnClick).
+                        if (!keepFocusOnClick) focusManager.clearFocus()
+                    },
+                ),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            TvRailGlyphBox(focused, icon)
+            if (expanded) {
+                Text(
+                    label,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.labelMedium,
+                    softWrap = false,
+                )
+            }
+        }
+        // 浮现的动作按钮: 置于本条目正下方, 不占布局 (不推挤其余条目), 焦点离开本簇即隐藏.
+        // 按下键从条目即落到第一个按钮 (空间焦点搜索, 因其 bounds 在下方).
+        // 与头像那簇方向相反: 头像在整列最上只能往上长, 带动作的条目排在最下只能往下长.
+        if (floatingActions.isNotEmpty()) {
+            AnimatedVisibility(
+                visible = clusterFocused,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    // 测量后向父级上报 0 尺寸 (不占布局); 对齐到下缘的零尺寸盒子原点就在条目
+                    // 下缘, 所以内容按 y = 0 摆即自下缘往下排
+                    .layout { measurable, constraints ->
+                        val placeable = measurable.measure(constraints)
+                        layout(0, 0) { placeable.place(0, 0) }
+                    },
+            ) {
+                Column(
+                    Modifier.padding(top = TV_RAIL_FLOATING_ACTION_SPACING),
+                    verticalArrangement = Arrangement.spacedBy(TV_RAIL_FLOATING_ACTION_SPACING),
+                ) {
+                    for (action in floatingActions) {
+                        TvRailFloatingActionButton(action.icon, action.label, action.onClick, onExitFocus)
+                    }
+                }
+            }
         }
     }
 }
+
+/**
+ * 一簇浮出按钮需要的高度: [count] 颗按钮 + 按钮间距 + 与锚点之间的间距, 末尾再留一点不贴屏幕边.
+ *
+ * 与 [TvRailAvatar] / [TvRailIconItem] 里那两个 Column 的实际排布保持一致 (改那边要改这里).
+ */
+private fun floatingActionsStackHeight(count: Int): Dp =
+    TV_RAIL_ITEM_SIZE * count +
+            TV_RAIL_FLOATING_ACTION_SPACING * (count - 1) + // 按钮之间
+            TV_RAIL_FLOATING_ACTION_SPACING + // 与锚点 (头像 / 条目) 之间
+            TV_RAIL_FLOATING_ACTION_SPACING // 不贴屏幕边
+
+/** 浮出按钮之间 (以及与锚点之间) 的间距. */
+private val TV_RAIL_FLOATING_ACTION_SPACING = 8.dp
 
 /** 侧边栏展开时的渐变遮罩宽度. */
 private val TV_RAIL_SCRIM_WIDTH = 180.dp

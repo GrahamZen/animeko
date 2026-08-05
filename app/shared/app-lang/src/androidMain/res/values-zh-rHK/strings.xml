@@ -13,6 +13,15 @@
     <string name="developer_list">開發者名單</string>
     <string name="acknowledgements">鳴謝</string>
     <string name="settings">設置</string>
+    <string name="playback_session_now_playing">正在播放</string>
+    <string name="playback_session_close">關閉</string>
+    <string name="playback_session_ready_toast">數據源已就緒，可從「正在播放」繼續觀看</string>
+    <string name="playback_session_problem_toast">後台播放遇到問題：%1$s，可從「正在播放」返回處理</string>
+    <string name="playback_session_cause_player_error">播放器無法播放該數據源</string>
+    <string name="playback_session_cause_no_media">所有數據源都沒有可播放的結果</string>
+    <string name="playback_session_cause_manual_selection">需要手動選擇數據源</string>
+    <string name="settings_theme_tv_retain_playback_session">退出播放頁後保留播放狀態</string>
+    <string name="settings_theme_tv_retain_playback_session_description">退出後播放器與數據源搜尋都繼續保留，可從側邊欄「正在播放」秒回原處（焦點落在該條目時下方浮出「關閉」按鈕）；數據源在後台載入好會提示一聲。關閉則退出即結束播放，每次進播放頁都要重新搜尋數據源</string>
     <string name="playback_history_title">播放記錄</string>
     <string name="playback_history_empty">暫無播放記錄</string>
     <string name="playback_history_unknown_subject">未知番劇</string>
