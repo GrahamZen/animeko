@@ -148,14 +148,19 @@ internal val TV_PLAYER_HORIZONTAL_PAD = 48.dp
 /** 底部渐变 scrim 高度. */
 private val TV_PLAYER_BOTTOM_SCRIM_HEIGHT = 380.dp
 
-/** 底部渐变 scrim 最深处不透明度. */
-private const val TV_PLAYER_BOTTOM_SCRIM_ALPHA = 0.95f
+/**
+ * 底部渐变 scrim 最深处不透明度.
+ *
+ * 只要托住白字可读即可, 不必压到近黑: 0.95 时屏幕下半条几乎是纯黑, 画面被切掉一块
+ * (进度条一出来尤其明显). 控件都是白字/白图标, 0.72 下最亮的画面也只剩三成亮度, 对比够了.
+ */
+private const val TV_PLAYER_BOTTOM_SCRIM_ALPHA = 0.72f
 
 /** 顶部渐变 scrim 高度 (标题可读性). */
 private val TV_PLAYER_TOP_SCRIM_HEIGHT = 180.dp
 
-/** 顶部渐变 scrim 最深处不透明度. */
-private const val TV_PLAYER_TOP_SCRIM_ALPHA = 0.7f
+/** 顶部渐变 scrim 最深处不透明度 (同 [TV_PLAYER_BOTTOM_SCRIM_ALPHA] 的取舍, 顶部只有标题与时钟). */
+private const val TV_PLAYER_TOP_SCRIM_ALPHA = 0.5f
 
 /** 顶部信息里数据源图标的尺寸. */
 private val TV_PLAYER_SOURCE_ICON_SIZE = 18.dp

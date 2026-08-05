@@ -98,9 +98,10 @@ internal fun TvPlayerDetailsOverlay(
                 )
             }
 
-            // 加载中: 透明暗层 + 指示器 (不走不透明的占位页, 避免视频背景闪黑)
+            // 加载中: 透明暗层 + 指示器 (不走不透明的占位页, 避免视频背景闪黑).
+            // 压暗量与加载完成后的基础遮罩 (TV_VIDEO_SCRIM_BASE_ALPHA) 取同一档, 免得数据到位那一刻明暗跳一下
             else -> Box(
-                Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)),
+                Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.38f)),
                 contentAlignment = Alignment.Center,
             ) {
                 CircularProgressIndicator()
