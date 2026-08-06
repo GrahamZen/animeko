@@ -44,6 +44,10 @@ import kotlinx.coroutines.delay
 /** 入口更新提示卡无操作自动消失时长 (毫秒). */
 private const val UPDATE_CARD_AUTO_DISMISS_MILLIS = 20_000L
 
+/** 本次发布在 GitHub 上的页面; 详情弹窗底部那颗按钮跳这里. */
+private fun releaseNotesUrl(version: String) =
+    "https://github.com/$FORK_OWNER/$FORK_REPO/releases/tag/v$version"
+
 /**
  * 检测新版本并在右下角显示更新卡片 (上游同款带按钮样式): 详情 / 自动更新 / 关闭.
  * 点自动更新走与设置页完全相同的下载流程 (下载卡片可取消/重试), TV 上下载完自动安装.
@@ -102,13 +106,27 @@ fun BoxScope.UpdateNotifier(
         }
     }
 
+    // "查看详情": 先在应用内看完整更新内容 (气泡上只放得下前几条), 弹窗底部才是跳浏览器的按钮
+    var detailsVisible by remember(newVersion?.name) { mutableStateOf(false) }
+
     // 无操作自动消失: 提示卡出现一段时间后自行关闭, 不永久挡住右下角内容.
-    // 开始下载后 hasUpdateCard 变 false, 本效应取消 —— 下载进度卡不受影响
-    LaunchedEffect(hasUpdateCard, newVersion?.name) {
-        if (hasUpdateCard) {
+    // 开始下载后 hasUpdateCard 变 false, 本效应取消 —— 下载进度卡不受影响.
+    // 详情弹窗开着时不计时: 用户正在读那几十条更新, 背后把气泡撤掉的话关掉弹窗就没有入口了
+    // (再点"自动更新"要重新等一轮检查). 关掉弹窗后重新计满 20 秒.
+    LaunchedEffect(hasUpdateCard, detailsVisible, newVersion?.name) {
+        if (hasUpdateCard && !detailsVisible) {
             delay(UPDATE_CARD_AUTO_DISMISS_MILLIS)
             dismissed = true
         }
+    }
+
+    newVersion?.takeIf { detailsVisible }?.let { version ->
+        NewVersionDetailsDialog(
+            version = version.name,
+            changes = version.detailedChanges,
+            onOpenInBrowser = { uriHandler.openUri(releaseNotesUrl(version.name)) },
+            onDismissRequest = { detailsVisible = false },
+        )
     }
 
     // 焦点在气泡里时返回键等同点关闭按钮: 不接的话返回会穿到下层页面 (退出当前页) 而气泡还挡
@@ -147,13 +165,7 @@ fun BoxScope.UpdateNotifier(
                 NewVersionPopupCard(
                     version = newVersion?.name ?: "",
                     changes = newVersion?.majorChanges ?: emptyList(),
-                    onDetailsClick = {
-                        newVersion?.let {
-                            uriHandler.openUri(
-                                "https://github.com/$FORK_OWNER/$FORK_REPO/releases/tag/v${it.name}",
-                            )
-                        }
-                    },
+                    onDetailsClick = { detailsVisible = true },
                     onAutoUpdateClick = {
                         newVersion?.let { viewModel.startDownload(it, uriHandler) }
                     },
@@ -222,6 +234,17 @@ fun BoxScope.UpdateSettingsNotifier(
 
     val showCard = !dismissed && (state is AppUpdateState.HasUpdate || presentation.isDownloading)
 
+    // 与入口气泡一致: "查看详情"先在应用内看全文 (设置页这张卡不会自动消失, 无需暂停计时)
+    var detailsVisible by remember(newVersion?.name) { mutableStateOf(false) }
+    newVersion?.takeIf { detailsVisible }?.let { version ->
+        NewVersionDetailsDialog(
+            version = version.name,
+            changes = version.detailedChanges,
+            onOpenInBrowser = { uriHandler.openUri(releaseNotesUrl(version.name)) },
+            onDismissRequest = { detailsVisible = false },
+        )
+    }
+
     AniAnimatedVisibility(
         visible = showCard,
         modifier = Modifier
@@ -234,13 +257,7 @@ fun BoxScope.UpdateSettingsNotifier(
                 NewVersionPopupCard(
                     version = newVersion?.name ?: "",
                     changes = newVersion?.majorChanges ?: emptyList(),
-                    onDetailsClick = {
-                        newVersion?.let {
-                            uriHandler.openUri(
-                                "https://github.com/$FORK_OWNER/$FORK_REPO/releases/tag/v${it.name}",
-                            )
-                        }
-                    },
+                    onDetailsClick = { detailsVisible = true },
                     onAutoUpdateClick = {
                         newVersion?.let { viewModel.startDownload(it, uriHandler) }
                     },
