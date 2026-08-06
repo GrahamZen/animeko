@@ -306,6 +306,16 @@ class NewVersion(
             .filterNot { it.isBlank() }
             .map { it.removePrefix("- ").removePrefix("* ") }
     }.take(4).toList()
+
+    /**
+     * 完整更新内容, 给详情弹窗用 (气泡上只放得下 [majorChanges] 那前几条).
+     *
+     * 落后多个版本时逐版列出, 每段前面加上版本号 —— 不然几十条堆在一起看不出哪条属于哪版.
+     */
+    val detailedChanges: String = changelogs.joinToString("\n\n") { changelog ->
+        if (changelogs.size > 1) "### ${changelog.version}\n${changelog.detailedChanges}"
+        else changelog.detailedChanges
+    }
 }
 
 @Immutable
@@ -314,6 +324,24 @@ class Changelog(
     val publishedAt: String,
     changes: String
 ) {
+    /**
+     * 完整正文, **保留**小节标题 (`### 修复` 等) —— 详情弹窗按标题分段显示, 几十条更新才读得下去.
+     *
+     * 仍然丢掉引用块: 那一段是带 markdown 链接的说明 (`> 遥控器使用说明, 见 [README](...)`),
+     * 纯文本显示出来就是一串方括号和网址.
+     */
+    val detailedChanges: String = changes
+        .substringAfter("## 本次更新", changes)
+        .lineSequence()
+        .filterNot {
+            it.startsWith("**Full Changelog**: ", ignoreCase = true)
+                    || it.startsWith("Full Changelog:", ignoreCase = true)
+        }
+        .filterNot { it.trimStart().startsWith(">") }
+        .joinToString("\n")
+        .replace(Regex("\n{3,}"), "\n\n")
+        .trim()
+
     val changes = changes
         // 本 fork 的 release body 前半是下载链接表 (见 ci-helper/release-template.md),
         // 真正的更新内容从 "## 本次更新" 标题开始; 没有该标题 (上游格式) 则原样使用
