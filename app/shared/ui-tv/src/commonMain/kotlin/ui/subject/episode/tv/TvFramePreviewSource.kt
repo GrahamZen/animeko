@@ -29,6 +29,8 @@ import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -40,6 +42,7 @@ import me.him188.ani.utils.logging.logger
 import me.him188.ani.utils.logging.warn
 import org.openani.mediamp.ExperimentalMediampApi
 import org.openani.mediamp.MediampPlayer
+import org.openani.mediamp.PlaybackState
 import org.openani.mediamp.features.FramePreview
 import org.openani.mediamp.source.MediaData
 import org.openani.mediamp.source.UriMediaData
@@ -79,6 +82,9 @@ private val FRAME_TIMEOUT: Duration = 6.seconds
 
 /** 超过这个耗时记一行: 帮助事后判断是网络还是解码的问题. */
 private val FRAME_SLOW_THRESHOLD: Duration = 2.seconds
+
+/** 预热最多等主播放器开播这么久, 到点仍然预热 (见 [rememberTvFramePreviewState] 里的说明). */
+private val PREWARM_PLAYBACK_WAIT: Duration = 20.seconds
 
 /**
  * 请求防抖. 比手机端默认的 50ms 长: 取一帧要一秒以上, 而遥控器按住不放是 50ms 一发 ——
@@ -126,12 +132,22 @@ internal fun rememberTvFramePreviewState(
         )
     }
     LaunchedEffect(state, source, player) {
-        player.mediaData.collect { data ->
+        player.mediaData.collectLatest { data ->
             state.onMediaChanged()
             source.onMediaChanged(data)
             if (data != null) {
+                // 等主播放器真的开播再预热. 预热要另起一个 ExoPlayer 并在同一个远程文件上重新解析
+                // 容器 (实测 3.5~5.5 秒), 在首帧还没出来时做这件事就是跟主播放器抢带宽和解码器 ——
+                // 保留会话回到播放页时尤其明显: mediaData 早就有了, 组合一挂上来这里立刻开工,
+                // 而播放器此时才刚开始取 mp4 头, 于是黑屏要多等十几秒.
+                //
+                // 超时兜底是怕"一直没开播"(卡缓冲/用户进来就暂停)时预热永远不做: 那样第一次拖拽
+                // 要现场等一遍建会话, 也拿不到能力探测的结果.
+                withTimeoutOrNull(PREWARM_PLAYBACK_WAIT) {
+                    player.playbackState.first { it == PlaybackState.PLAYING }
+                }
                 // 预热: 建会话 (含 ExoPlayer 启动 + 容器/播放列表解析) 是这条链路最贵的一步,
-                // 提前在起播时做掉, 首次拖拽就不用等它. 同时也是一次能力探测 ——
+                // 提前做掉, 首次拖拽就不用等它. 同时也是一次能力探测 ——
                 // 失败会把 MediaProgressFramePreviewState.framesAvailable 置 false,
                 // 浮窗直接退化成只显示时间, 而不是先给一块黑底
                 runCatching { state.prewarm(player.getCurrentPositionMillis()) }
