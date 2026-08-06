@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowOutward
 import androidx.compose.material3.Icon
@@ -28,6 +30,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.intl.Locale
@@ -106,6 +109,10 @@ import me.him188.ani.app.ui.lang.settings_player_playback_speed_range
 import me.him188.ani.app.ui.lang.settings_player_playback_speed_range_description
 import me.him188.ani.app.ui.lang.settings_player_remember_playback_speed
 import me.him188.ani.app.ui.lang.settings_player_remember_playback_speed_description
+import me.him188.ani.app.ui.lang.settings_theme_tv_retain_playback_session
+import me.him188.ani.app.ui.lang.settings_theme_tv_retain_playback_session_description
+import me.him188.ani.app.ui.lang.settings_theme_tv_ui_scale
+import me.him188.ani.app.ui.lang.settings_theme_tv_ui_scale_description
 import me.him188.ani.app.ui.lang.settings_update_auto_check
 import me.him188.ani.app.ui.lang.settings_update_auto_check_description
 import me.him188.ani.app.ui.lang.settings_update_auto_download
@@ -159,6 +166,7 @@ import me.him188.ani.utils.platform.isDesktop
 import me.him188.ani.utils.platform.isIos
 import me.him188.ani.utils.platform.isMobile
 import org.jetbrains.compose.resources.stringResource
+import kotlin.math.roundToInt
 import kotlin.time.Duration.Companion.seconds
 
 sealed class CheckVersionResult {
@@ -186,13 +194,14 @@ fun AppSettingsTab(
 ) {
     SettingsTab(modifier) {
         SoftwareUpdateGroup(softwareUpdateGroupState)
-        AppearanceGroup(uiSettings)
+        AppearanceGroup(uiSettings, themeSettings)
         ThemeGroup(themeSettings)
         PlayerGroup(
             videoScaffoldConfig,
             danmakuFilterConfig,
             danmakuRegexFilterState,
             showDebug,
+            themeSettings,
         )
         WatchTogetherGroup(watchTogetherSettings)
         AppSettingsTabPlatform()
@@ -215,8 +224,15 @@ fun SettingsScope.WatchTogetherGroup(state: SettingsState<WatchTogetherSettings>
 @Composable
 fun SettingsScope.AppearanceGroup(
     state: SettingsState<UISettings>,
+    themeSettings: SettingsState<ThemeSettings>,
 ) {
     val uiSettings by state
+
+    // 放在整页最前: 调整缩放会让整页按新 density 重新布局, 条目越靠上位移越小 ——
+    // 排在后面的话, 上方那些条目的高度变化会叠加起来把它推出屏幕
+    if (LocalAniUiBehavior.current.immersiveShell) {
+        UiScaleSliderItem(themeSettings)
+    }
 
     LanguageSettingsPlatform(state)
 
@@ -317,6 +333,50 @@ fun SettingsScope.AppearanceGroup(
             description = { Text(stringResource(Lang.settings_app_light_up_mode_description)) },
         )
     }
+}
+
+/**
+ * 界面缩放滑块. 每格 [ThemeSettings.UI_SCALE_STEP], 实时生效 (整个应用的 `LocalDensity` 立刻跟随),
+ * 用户可以边调边看效果 —— 这也是它必须实时提交、而不是松手才写的原因.
+ *
+ * 值存在 [ThemeSettings] 里 (与深色模式同一份配置), 但它是界面尺寸而不是配色, 所以摆在"界面"这一页.
+ */
+@Composable
+private fun SettingsScope.UiScaleSliderItem(
+    state: SettingsState<ThemeSettings>,
+) {
+    val themeSettings by state
+    val range = ThemeSettings.UI_SCALE_RANGE
+    val step = ThemeSettings.UI_SCALE_STEP
+    val current = themeSettings.effectiveUiScale
+
+    // 改一格缩放, 整页就按新 density 重排, 滑块自己也跟着上下挪 —— 很容易挪出可视区.
+    // 焦点其实还在滑块上 (按左右仍在调值), 但人看不见它, 只能靠上下键把它导航回来.
+    // 所以每次值变化后主动把它拉回视野.
+    val bringIntoViewRequester = remember { BringIntoViewRequester() }
+    LaunchedEffect(current) {
+        // 必须等一帧: LaunchedEffect 在重组提交后就跑, 而此时新 density 下的布局还没落定,
+        // 立刻请求会按旧坐标滚动. withFrameNanos 挂起到下一帧开始, 那时上一帧的布局已完成.
+        withFrameNanos { }
+        bringIntoViewRequester.bringIntoView()
+    }
+
+    SliderItem(
+        modifier = Modifier.bringIntoViewRequester(bringIntoViewRequester),
+        value = current,
+        onValueChange = { raw ->
+            // Slider 的 steps 吸附后仍带浮点误差, 量化到步进网格再写, 否则会存进 0.7000001 这种值
+            val quantized = ((raw / step).roundToInt() * step).coerceIn(range)
+            if (quantized != current) {
+                state.update(themeSettings.copy(uiScale = quantized))
+            }
+        },
+        valueRange = range,
+        steps = ((range.endInclusive - range.start) / step).roundToInt() - 1,
+        title = { Text(stringResource(Lang.settings_theme_tv_ui_scale)) },
+        description = { Text(stringResource(Lang.settings_theme_tv_ui_scale_description)) },
+        valueLabel = { Text("${(current * 100).roundToInt()}%") },
+    )
 }
 
 @Stable
@@ -460,10 +520,28 @@ fun SettingsScope.PlayerGroup(
     videoScaffoldConfig: SettingsState<VideoScaffoldConfig>,
     danmakuFilterConfig: SettingsState<DanmakuFilterConfig>,
     danmakuRegexFilterState: DanmakuRegexFilterState,
-    showDebug: Boolean
+    showDebug: Boolean,
+    themeSettings: SettingsState<ThemeSettings>,
 ) {
     Group(title = { Text(stringResource(Lang.settings_player)) }) {
         val config by videoScaffoldConfig
+
+        // 「退出播放页后保留播放状态」: 只有自带"回到会话"入口的形态才给这条 (见 AniUiBehavior
+        // .retainPlaybackSession), 否则关不掉也回不去. 存在 ThemeSettings 里只是存储位置.
+        if (LocalAniUiBehavior.current.retainPlaybackSession) {
+            val themeConfig by themeSettings
+            SwitchItem(
+                checked = themeConfig.tvRetainPlaybackSession,
+                onCheckedChange = { checked ->
+                    themeSettings.update(themeConfig.copy(tvRetainPlaybackSession = checked))
+                },
+                title = { Text(stringResource(Lang.settings_theme_tv_retain_playback_session)) },
+                description = {
+                    Text(stringResource(Lang.settings_theme_tv_retain_playback_session_description))
+                },
+            )
+            HorizontalDividerItem()
+        }
         // 恒为全屏的设备没有窗口/全屏切换, 该"全屏按钮"设置无意义, 隐藏
         if (LocalAniUiBehavior.current.supportsWindowedPlayback) {
             DropdownItem(
@@ -521,7 +599,9 @@ fun SettingsScope.PlayerGroup(
             },
             title = { Text(stringResource(Lang.settings_player_hide_selector_on_select)) },
         )
-        if (LocalPlatform.current.isMobile()) {
+        // isMobile() 在 Android TV 上也是真, 但恒为全屏的设备既不会旋转也没有"非全屏"可回,
+        // 这条开关在那儿没有任何效果
+        if (LocalPlatform.current.isMobile() && LocalAniUiBehavior.current.supportsWindowedPlayback) {
             HorizontalDividerItem()
             SwitchItem(
                 checked = config.autoFullscreenOnLandscapeMode,
