@@ -131,7 +131,9 @@ jobs:
       - id: 'step-16'
         name: 'Verify minSdk is 25'
         run: |
-          set -uo pipefail
+          # GitHub 默认用 `bash -e` 起脚本, 必须显式 set +e —— 否则下面任何一条 grep 没匹配到
+          # 都会直接把脚本带走, 连诊断信息都打不出来 (上一版就栽在这).
+          set +e
           apk='legacy-apks/ani-legacy-android7.1-universal.apk'
           sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
           echo "ANDROID_HOME=${ANDROID_HOME:-<unset>}  ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-<unset>}"
@@ -150,9 +152,10 @@ jobs:
             printf '%s\n' "$badging" | head -5
             exit 0
           fi
-          min="$(printf '%s\n' "$badging" | grep -o "sdkVersion:'[0-9]*'" | head -1 | grep -o '[0-9]*')"
+          # aapt2 打的是 minSdkVersion:'25', aapt(v1) 打的是 sdkVersion:'25', 两种都认.
+          min="$(printf '%s\n' "$badging" | grep -oE "^(min)?[sS]dkVersion:'[0-9]+'" | head -1 | grep -oE '[0-9]+')"
           if [ -z "$min" ]; then
-            echo "::warning::没能从 badging 里解析出 sdkVersion, 跳过校验 (产物已上传)"
+            echo "::warning::没能从 badging 里解析出 minSdk, 跳过校验 (产物已上传)"
             printf '%s\n' "$badging" | head -5
             exit 0
           fi
