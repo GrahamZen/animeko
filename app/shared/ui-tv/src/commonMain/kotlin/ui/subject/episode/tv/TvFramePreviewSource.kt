@@ -76,8 +76,32 @@ import kotlin.time.TimeSource
 
 private val logger = logger("TvFramePreviewSource")
 
-/** 单次取帧上限: 实测偶发 9 秒 (网络抖动). 到点放弃并弃掉会话, 不让它拖累后面每一次请求. */
-private val FRAME_TIMEOUT: Duration = 6.seconds
+/**
+ * 稳定态 (会话已建好) 单次取帧上限. 实测 Shield + 在线源是 2.5~4.6 秒, 大头是重新下载数据.
+ * 到点只丢掉这一次的结果, 不动会话 (见 [MAX_CONSECUTIVE_FAILURES]).
+ */
+private val FRAME_TIMEOUT: Duration = 8.seconds
+
+/**
+ * **会话建立后第一次**取帧的上限, 明显放宽.
+ *
+ * 这一次除了取帧本身, 还包含 media3 建 ExoPlayer + prepare (拉播放列表/解容器): 实测第一次
+ * 6~7 秒, 之后稳定在 3~4.5 秒 —— 建会话本身就值 3.5 秒左右. 用稳定态的尺子量它必然误杀,
+ * 而误杀的代价是销毁会话后下一次要重付这 3.5 秒, 于是更容易再超时.
+ */
+private val FRAME_FIRST_TIMEOUT: Duration = 30.seconds
+
+/**
+ * 连续失败多少次才放弃当前会话.
+ *
+ * 超时通常只说明这一次慢, 会话本身还是好的; 而销毁会话要连带销毁 media3 那个引用计数单例里的
+ * ExoPlayer, 下次请求得重新建 + prepare (~3.5 秒), 反而更容易再超时 —— 实测一次超时就销毁时,
+ * 会连续销毁重建六次, 每次都是"第一次", 表现为"很多时候第一次特别慢".
+ *
+ * 会话真坏掉不用我们操心: media3 的 `FrameExtractorInternal.submitTask` 里 `needsNewPlayer`
+ * 包含 `player.getPlayerError() != null`, 它自己会重建.
+ */
+private const val MAX_CONSECUTIVE_FAILURES = 3
 
 /** 超过这个耗时记一行: 帮助事后判断是网络还是解码的问题. */
 private val FRAME_SLOW_THRESHOLD: Duration = 2.seconds
@@ -145,11 +169,18 @@ internal fun rememberTvFramePreviewState(
                 withTimeoutOrNull(PREWARM_PLAYBACK_WAIT) {
                     player.state.first { it.isPlaying }
                 }
-                // 预热: 建会话 (含 ExoPlayer 启动 + 容器/播放列表解析) 是这条链路最贵的一步,
-                // 提前做掉, 首次拖拽就不用等它. 同时也是一次能力探测 ——
+                // 预热: 建会话 (含 ExoPlayer 启动 + 容器/播放列表解析) 是这条链路最贵的一步
+                // (实测 ~3.5 秒), 提前做掉, 首次拖拽就不用等它. 同时也是一次能力探测 ——
                 // 失败会把 MediaProgressFramePreviewState.framesAvailable 置 false,
-                // 浮窗直接退化成只显示时间, 而不是先给一块黑底
-                runCatching { state.prewarm(player.currentPositionMillis.value) }
+                // 浮窗直接退化成只显示时间, 而不是先给一块黑底.
+                //
+                // **固定用 0 而不是当前播放位置**: media3 的 `FrameExtractorInternal.submitTask`
+                // 在 prepare 分支里强制先解 position 0 那一帧, 只有请求位置也是 0 时才直接返回它,
+                // 否则还要再 seek 一次、多解一帧. 实测预热在 0 处 6~7 秒, 在别处直接超时.
+                // 预热要的是把会话暖好, 不是暖某一帧的缓存, 所以挑最快的位置.
+                // (顺带避开一个竞态: 续播时这里等到开播后 seek 往往还没落定,
+                // currentPositionMillis 拿到的仍是 0, 位置本来就不可靠)
+                runCatching { state.prewarm(0L) }
             }
         }
     }
@@ -172,6 +203,16 @@ private class TvFramePreviewSource(
     private var sessionHeight = 0
 
     private var currentMedia: MediaData? = null
+
+    /**
+     * 本会话已成功取过几帧. 0 表示下一次调用会走 media3 的 `needsPrepare` 分支 ——
+     * 那条路要先解 position 0 的一帧再 seek 解第二帧 (见 `FrameExtractorInternal.submitTask`),
+     * 成本明显更高, 所以超时也要放宽 (见 [FRAME_FIRST_TIMEOUT]).
+     */
+    private var sessionFrameCount = 0
+
+    /** 连续失败次数, 到 [MAX_CONSECUTIVE_FAILURES] 才放弃会话. 任何一次成功清零. */
+    private var consecutiveFailures = 0
 
     /** BT 源的退路: mediamp 自带的 MediaMetadataRetriever 实现. */
     private val fallback: FramePreview? by lazy { player.features[FramePreview] }
@@ -209,21 +250,32 @@ private class TvFramePreviewSource(
             // 半路撤掉会让会话状态和我们的认知不一致, 下一次请求反而更慢. 靠防抖控制启动次数即可
             withContext(NonCancellable) {
                 val extractor = obtainLocked(data, maxWidthPx, maxHeightPx) ?: return@withContext null
+                val firstOfSession = sessionFrameCount == 0
+                val timeout = if (firstOfSession) FRAME_FIRST_TIMEOUT else FRAME_TIMEOUT
                 val mark = TimeSource.Monotonic.markNow()
                 val frame = try {
-                    withTimeoutOrNull(FRAME_TIMEOUT) {
+                    withTimeoutOrNull(timeout) {
                         extractor.getFrame(positionMillis.coerceAtLeast(0L)).await()
                     }
                 } catch (e: Throwable) {
+                    // 抛异常和超时不一样: 这是会话真出了问题, 不留
                     logger.warn(e) { "Frame extraction failed at $positionMillis ms" }
-                    releaseLocked() // 失败的会话通常不会自愈, 下次重建
-                    return@withContext null
-                }
-                if (frame == null) {
-                    logger.warn { "Frame extraction timed out at $positionMillis ms after $FRAME_TIMEOUT" }
                     releaseLocked()
                     return@withContext null
                 }
+                if (frame == null) {
+                    consecutiveFailures++
+                    val giveUp = consecutiveFailures >= MAX_CONSECUTIVE_FAILURES
+                    logger.warn {
+                        "Frame extraction timed out at $positionMillis ms after $timeout " +
+                                "(firstOfSession=$firstOfSession, consecutiveFailures=$consecutiveFailures)" +
+                                if (giveUp) ", releasing session" else ", keeping session"
+                    }
+                    if (giveUp) releaseLocked()
+                    return@withContext null
+                }
+                consecutiveFailures = 0
+                sessionFrameCount++
                 val elapsed = mark.elapsedNow()
                 if (elapsed > FRAME_SLOW_THRESHOLD) {
                     logger.info { "Slow frame extraction at $positionMillis ms: $elapsed" }
@@ -263,6 +315,7 @@ private class TvFramePreviewSource(
                 sessionMedia = data
                 sessionWidth = maxWidthPx
                 sessionHeight = maxHeightPx
+                sessionFrameCount = 0
                 logger.info { "Frame extractor session created (${maxWidthPx}x$maxHeightPx)" }
             }
         } catch (e: Throwable) {
@@ -278,6 +331,10 @@ private class TvFramePreviewSource(
         sessionMedia = null
         sessionWidth = 0
         sessionHeight = 0
+        sessionFrameCount = 0
+        consecutiveFailures = 0
+        // media3 侧是引用计数单例: 这一下会把它的 ExoPlayer 一起销毁, 下次请求要重新建 + prepare
+        // (实测 ~3.5 秒). 所以别因为一次超时就走到这里
         runCatching { existing.release() }
     }
 
