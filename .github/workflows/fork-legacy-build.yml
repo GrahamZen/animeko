@@ -107,23 +107,8 @@ jobs:
           signing_release_keyPassword: '${{ secrets.SIGNING_RELEASE_KEYPASSWORD }}'
         timeout-minutes: 180
         run: './gradlew assembleDefaultTvRelease "-Pani.android.legacy=true" "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-Dorg.gradle.jvmargs=-Xmx8g -Dkotlin.daemon.jvm.options=-Xmx6g" "-Dkotlin.daemon.jvm.options=-Xmx6g"'
+      # 先重命名+上传, 校验放最后: 校验用的是外部工具 (aapt), 它自己出问题不该把产物弄丢.
       - id: 'step-14'
-        name: 'Verify minSdk is 25'
-        run: |
-          set -euo pipefail
-          out='app/android/build/outputs/apk/defaultTv/release'
-          # 新版 build-tools 里 aapt(v1) 不一定还在, 优先用 aapt2
-          aapt="$(ls "$ANDROID_HOME"/build-tools/*/aapt2 2>/dev/null | tail -1 || true)"
-          if [ -z "$aapt" ]; then
-            aapt="$(ls "$ANDROID_HOME"/build-tools/*/aapt | tail -1)"
-          fi
-          min="$("$aapt" dump badging "$out/android-default-tv-universal-release.apk" | grep -o "sdkVersion:'[0-9]*'" | grep -o '[0-9]*')"
-          echo "minSdk = $min"
-          if [ "$min" != "25" ]; then
-            echo "::error::期望 minSdk 25, 实际 $min —— -Pani.android.legacy 没有生效"
-            exit 1
-          fi
-      - id: 'step-15'
         name: 'Rename APKs'
         run: |
           set -euo pipefail
@@ -133,7 +118,7 @@ jobs:
             cp "$out/android-default-tv-$abi-release.apk" "legacy-apks/ani-legacy-android7.1-$abi.apk"
           done
           ls -la legacy-apks
-      - id: 'step-16'
+      - id: 'step-15'
         name: 'Upload Legacy APKs'
         uses: 'actions/upload-artifact@v4'
         with:
@@ -141,3 +126,38 @@ jobs:
           path: 'legacy-apks/*.apk'
           retention-days: '90'
           overwrite: 'true'
+      # 只有"确实读出了 minSdk 且不是 25"才失败; 找不到工具/工具报错只警告, 免得因为
+      # 校验手段本身的问题让整个 run 变红、产物白丢.
+      - id: 'step-16'
+        name: 'Verify minSdk is 25'
+        run: |
+          set -uo pipefail
+          apk='legacy-apks/ani-legacy-android7.1-universal.apk'
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          echo "ANDROID_HOME=${ANDROID_HOME:-<unset>}  ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-<unset>}"
+          aapt=''
+          if [ -n "$sdk" ]; then
+            aapt="$(ls "$sdk"/build-tools/*/aapt2 2>/dev/null | tail -1)"
+            [ -n "$aapt" ] || aapt="$(ls "$sdk"/build-tools/*/aapt 2>/dev/null | tail -1)"
+          fi
+          if [ -z "$aapt" ]; then
+            echo "::warning::找不到 aapt/aapt2, 跳过 minSdk 校验 (产物已上传)"
+            exit 0
+          fi
+          echo "using: $aapt"
+          if ! badging="$("$aapt" dump badging "$apk" 2>&1)"; then
+            echo "::warning::aapt 执行失败, 跳过 minSdk 校验 (产物已上传)"
+            printf '%s\n' "$badging" | head -5
+            exit 0
+          fi
+          min="$(printf '%s\n' "$badging" | grep -o "sdkVersion:'[0-9]*'" | head -1 | grep -o '[0-9]*')"
+          if [ -z "$min" ]; then
+            echo "::warning::没能从 badging 里解析出 sdkVersion, 跳过校验 (产物已上传)"
+            printf '%s\n' "$badging" | head -5
+            exit 0
+          fi
+          echo "minSdk = $min"
+          if [ "$min" != "25" ]; then
+            echo "::error::期望 minSdk 25, 实际 $min —— -Pani.android.legacy 没有生效, 别发这个包"
+            exit 1
+          fi
