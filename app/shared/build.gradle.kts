@@ -44,7 +44,7 @@ kotlin {
     androidLibrary {
         namespace = "me.him188.ani"
         compileSdk = getIntProperty("android.compile.sdk")
-        minSdk = getIntProperty("android.min.sdk")
+        minSdk = androidMinSdk
         // TODO AGP Migration: Test package optimization
 
         optimization {

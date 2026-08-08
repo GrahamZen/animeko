@@ -59,7 +59,6 @@ import org.openani.mediamp.ffmpeg.FFmpegKit
 import java.io.File
 import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Method
-import java.nio.file.Paths
 import kotlin.uuid.ExperimentalUuidApi
 
 
@@ -131,7 +130,7 @@ class AniApplication : Application() {
 
         scope.launch(Dispatchers.IO_) {
             runCatching {
-                JvmLogHelper.deleteOldLogs(Paths.get(logsDir))
+                JvmLogHelper.deleteOldLogs(File(logsDir))
             }.onFailure {
                 Log.e("AniApplication", "Failed to delete old logs", it)
             }
@@ -179,7 +178,10 @@ class AniApplication : Application() {
 
         torrentCacheDao.value = koin.get<AniDatabase>().torrentCacheInfoDao()
         mediaCacheBaseSaveDir.value = File(koin.get<MediaSaveDirProvider>().saveDir)
-        connectionManager.launchCheckLoop()
+        // 27 以下 BT 引擎跑在应用进程内, 没有独立进程服务可连, 不启动这个循环 (否则它会去 startForegroundService).
+        if (supportsTorrentServiceProcess) {
+            connectionManager.launchCheckLoop()
+        }
 
         runBlocking { analyticsInitializer.join() }
         ExternalContentProviderFactoryImpl.initializeApp(this)
@@ -218,6 +220,8 @@ class AniApplication : Application() {
     }
 
     private fun startAniTorrentService(): ComponentName? {
+        // 只在 supportsTorrentServiceProcess 为 true 时才会被调用 (见 launchCheckLoop 处), 这里只是兜底.
+        if (!supportsTorrentServiceProcess) return null
         return startForegroundService(
             Intent(this, AniTorrentService.actualServiceClass).apply {
                 putExtra("app_name", me.him188.ani.R.string.app_name)
@@ -232,6 +236,8 @@ class AniApplication : Application() {
     }
 
     private fun stopService() {
+        // 27 以下压根没启动过这个服务
+        if (!supportsTorrentServiceProcess) return
         startService(
             Intent(this, AniTorrentService.actualServiceClass)
                 .apply { putExtra(AniTorrentService.INTENT_STOP_EXTRA, true) },
