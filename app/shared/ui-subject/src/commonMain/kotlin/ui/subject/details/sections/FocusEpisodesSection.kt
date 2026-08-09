@@ -304,8 +304,16 @@ fun FocusEpisodeCarousel(
     // 吸附偏移: 负值让目标卡片停在行首偏右, 左侧露出上一张卡的切边; 首张卡不偏 (左边没有卡)
     val peekPx = with(LocalDensity.current) { focusedCardPeek.roundToPx() }
     val snapOffsetFor: (Int) -> Int = { index -> if (index > 0) -peekPx else 0 }
+    // 数据异步到达后补一次"滚到当前集" (进页首帧 episodes 常为空, currentIndex = -1).
+    //
+    // 用户已在轮播里定位过 (聚焦过卡片 / 在简介或弹窗上左右切过) 之后就不再跟随: 停留期间
+    // "当前集"变化几乎只由用户自己长按标记看过引起 —— 标记当前集看过会让当前集顺延到下一集,
+    // 跟过去就是"瞬移一格, 再被聚焦卡吸附动画滑回来"的抖动 (焦点此刻正被还给刚标记的那张卡).
+    // [focusedEpisodeId] 只在效应体内读, 不作 key, 不会让本函数 body 订阅热状态
     LaunchedEffect(currentIndex) {
-        if (currentIndex >= 0) listState.scrollToItem(currentIndex, snapOffsetFor(currentIndex))
+        if (currentIndex >= 0 && focusedEpisodeId == null) {
+            listState.scrollToItem(currentIndex, snapOffsetFor(currentIndex))
+        }
     }
 
     // 焦点停在简介块上时左右键切换聚焦集: 展示的集号/标题/简介随之更新, 卡片行同步
