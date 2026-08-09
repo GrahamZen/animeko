@@ -1895,11 +1895,15 @@ private fun TvHeroBackdrop(
                 .drawWithContent {
                     drawContent()
                     // 底部渐隐: 擦除图片自身的透明度, 露出下层的动态渐变背景,
-                    // 而不是画一层纯背景色盖住它 (否则浅色主题下是一片突兀的纯白)
+                    // 而不是画一层纯背景色盖住它 (否则浅色主题下是一片突兀的纯白).
+                    //
+                    // 起点压后 + 底缘留一成不擦: 原来从 0.62 起擦、0.98 擦光, 屏幕下四成完全没有图,
+                    // 露出的页面底色在深色主题里近乎纯黑 —— 选集卡片那一带整片发黑, 与上方还有图的
+                    // 部分界线分明 (常被当成"多压了一层黑遮罩", 其实是图被擦没了)
                     drawRect(
                         brush = Brush.verticalGradient(
-                            0.62f to Color.Transparent,
-                            0.98f to Color.Black,
+                            0.72f to Color.Transparent,
+                            1f to Color.Black.copy(alpha = 0.88f),
                         ),
                         blendMode = BlendMode.DstOut,
                     )
@@ -1988,8 +1992,13 @@ private const val TV_VIDEO_SCRIM_LEFT_ALPHA = 0.45f
 /** 滚动多远后背景图淡到 [HERO_BACKDROP_MIN_ALPHA]. */
 private val HERO_BACKDROP_FADE_DISTANCE = 300.dp
 
-/** 向下滚动后背景图保留的透明度 (不完全消失). */
-private const val HERO_BACKDROP_MIN_ALPHA = 0.3f
+/**
+ * 向下滚动后背景图保留的透明度 (不完全消失).
+ *
+ * 与底缘擦除叠乘: 滚下去之后底部那一带看到的图 ≈ 本值 × 未被擦掉的比例, 0.3 那档在深色主题里
+ * 基本等于没有 (选集卡片以下整片近黑). 调大更亮但内容区背后更花.
+ */
+private const val HERO_BACKDROP_MIN_ALPHA = 0.42f
 
 /** 区块内导航时焦点边缘距屏幕上/下缘的最小可见余量: 焦点越出才滚动, 滚动后留出该余量. */
 private val SECTION_ITEM_REVEAL_MARGIN = 24.dp
