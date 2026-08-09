@@ -1159,6 +1159,11 @@
     <string name="settings_log_share_file">分享日誌檔案</string>
     <string name="settings_log_copy_today_log_content">複製當日日誌內容（很大）</string>
     <string name="settings_log_file_not_found">未找到日誌檔案</string>
+    <string name="settings_log_share_failed">分享日誌檔案失敗，目前裝置可能不支援分享，可改用複製日誌內容</string>
+    <string name="settings_log_export_file">匯出當日日誌檔案</string>
+    <string name="settings_log_export_succeed">日誌已匯出到 %1$s</string>
+    <string name="settings_log_exported">日誌已匯出</string>
+    <string name="settings_log_export_failed">匯出日誌檔案失敗</string>
     <string name="rating_requires_collection">請先收藏再評分</string>
     <string name="rating_discard_edit_title">捨棄編輯</string>
     <string name="rating_discard_edit_message">評價尚未保存，確定要捨棄嗎？</string>

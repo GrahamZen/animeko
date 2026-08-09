@@ -1188,6 +1188,11 @@
     <string name="settings_log_share_file">Share log file</string>
     <string name="settings_log_copy_today_log_content">Copy today\'s log content (large)</string>
     <string name="settings_log_file_not_found">Log file not found</string>
+    <string name="settings_log_share_failed">Failed to share the log file. This device may not support sharing; try copying the log content instead</string>
+    <string name="settings_log_export_file">Export today\'s log file</string>
+    <string name="settings_log_export_succeed">Log exported to %1$s</string>
+    <string name="settings_log_exported">Log exported</string>
+    <string name="settings_log_export_failed">Failed to export the log file</string>
     <string name="rating_requires_collection">Follow this anime before rating</string>
     <string name="rating_discard_edit_title">Discard changes</string>
     <string name="rating_discard_edit_message">Your rating has not been saved. Discard it?</string>

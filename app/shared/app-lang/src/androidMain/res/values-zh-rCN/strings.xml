@@ -1228,6 +1228,11 @@
     <string name="settings_log_share_file">分享日志文件</string>
     <string name="settings_log_copy_today_log_content">复制当日日志内容（很大）</string>
     <string name="settings_log_file_not_found">未找到日志文件</string>
+    <string name="settings_log_share_failed">分享日志文件失败，当前设备可能不支持分享，可改用复制日志内容</string>
+    <string name="settings_log_export_file">导出当日日志文件</string>
+    <string name="settings_log_export_succeed">日志已导出到 %1$s</string>
+    <string name="settings_log_exported">日志已导出</string>
+    <string name="settings_log_export_failed">导出日志文件失败</string>
     <string name="rating_requires_collection">请先收藏再评分</string>
     <string name="rating_discard_edit_title">舍弃编辑</string>
     <string name="rating_discard_edit_message">评价尚未保存，确定要舍弃吗？</string>
