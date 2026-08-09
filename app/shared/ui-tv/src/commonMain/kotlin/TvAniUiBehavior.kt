@@ -31,4 +31,5 @@ val TvAniUiBehavior = AniUiBehavior(
     autoInstallUpdates = true,
     forceDarkInPlayer = true,
     retainPlaybackSession = true,
+    supportsFileSharing = false,
 )

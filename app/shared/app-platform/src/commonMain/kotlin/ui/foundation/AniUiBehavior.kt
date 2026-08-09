@@ -130,6 +130,16 @@ data class AniUiBehavior(
      * - 会话随应用界面销毁 (holder 是应用级 ViewModel), 不跨进程存活.
      */
     val retainPlaybackSession: Boolean = false,
+    /**
+     * 系统里是否存在能接收**文件**的分享目标 (邮件 / 网盘 / 即时通讯).
+     *
+     * 遥控器设备上为 `false`: Android TV 不预装这类应用, 系统分享面板要么是空的, 要么只剩一些
+     * 把 `text/plain` 过滤器注册得过宽、实际只认 `EXTRA_TEXT` 的应用 —— 后者会把我们的
+     * `EXTRA_STREAM` 当成一段文本去解析然后报错, 而错误发生在对方进程里, 我们既拦不住也收不到.
+     *
+     * 为 `false` 的形态下, "分享文件"的入口应改为把文件**导出到外部存储**并告知落地路径.
+     */
+    val supportsFileSharing: Boolean = true,
 ) {
     companion object {
         /**
