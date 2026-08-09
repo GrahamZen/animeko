@@ -32,8 +32,10 @@ import androidx.compose.material.icons.automirrored.rounded.Comment
 import androidx.compose.material.icons.automirrored.rounded.FormatListBulleted
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.outlined.Analytics
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DisplaySettings
 import androidx.compose.material.icons.rounded.Face
+import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Groups
@@ -50,6 +52,8 @@ import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -85,6 +89,9 @@ import me.him188.ani.app.ui.danmaku.DanmakuEditorState
 import me.him188.ani.app.ui.episode.share.MediaShareData
 import me.him188.ani.app.ui.external.placeholder.placeholder
 import me.him188.ani.app.ui.foundation.animation.AniAnimatedVisibility
+import me.him188.ani.app.ui.foundation.animation.StandardAccelerateEasing
+import me.him188.ani.app.ui.foundation.animation.StandardDecelerateEasing
+import me.him188.ani.app.ui.foundation.theme.EasingDurations
 import me.him188.ani.app.ui.foundation.focus.restoreFocusAfter
 import me.him188.ani.app.ui.foundation.icons.AniIcons
 import me.him188.ani.app.ui.foundation.PlayerFrameHolder
@@ -109,8 +116,10 @@ import me.him188.ani.app.ui.lang.video_player_enable_danmaku
 import me.him188.ani.app.ui.lang.video_player_next_episode
 import me.him188.ani.app.ui.lang.video_player_stats_title_hide
 import me.him188.ani.app.ui.lang.video_player_stats_title_show
+import me.him188.ani.app.ui.lang.video_player_tv_cancel_skip_segment
 import me.him188.ani.app.ui.lang.video_player_tv_collection
 import me.him188.ani.app.ui.lang.video_player_tv_restart
+import me.him188.ani.app.ui.lang.video_player_tv_skip_segment
 import me.him188.ani.app.ui.lang.watch_together_title
 import me.him188.ani.app.ui.mediaselect.common.SourceIcon
 import me.him188.ani.app.ui.mediaselect.summary.MediaSelectorSummary
@@ -121,6 +130,8 @@ import me.him188.ani.app.ui.subject.episode.EpisodePageState
 import me.him188.ani.app.ui.subject.episode.EpisodeViewModel
 import me.him188.ani.datasources.api.topic.UnifiedCollectionType
 import me.him188.ani.app.ui.subject.episode.details.components.ShareEpisodeDropdown
+import me.him188.ani.app.ui.subject.episode.video.SkipOpEdKind
+import me.him188.ani.app.ui.subject.episode.video.SkipOpEdTip
 import me.him188.ani.app.ui.subject.episode.video.components.EpisodeVideoSideSheetPage
 import me.him188.ani.app.videoplayer.ui.PlaybackSpeedControllerState
 import me.him188.ani.app.videoplayer.ui.VideoAspectRatioControllerState
@@ -167,6 +178,16 @@ private const val TV_PLAYER_TOP_SCRIM_ALPHA = 0.5f
 private val TV_PLAYER_SOURCE_ICON_SIZE = 18.dp
 
 /**
+ * 进度条行与其上下两行 (胶囊行 / 图标行) 的间距, 上下必须用同一个值 —— 原本是上 18dp 下 6dp,
+ * 进度条明显偏下, 观感是三行没对齐.
+ *
+ * **屏幕上看到的空白比这个值大**: 进度条控件本体高 24dp 而可见轨道只有居中的 6dp, 上下各还有
+ * 9dp 是控件内部的留白 (对称, 所以本常量一致 = 看到的空白一致). 也就是说实际观感 ≈ 本值 + 9dp,
+ * 这一档已经贴得相当紧了; 进度条行本身那点 `padding(vertical)` 已经去掉, 别再加回来.
+ */
+private val TV_PLAYER_PROGRESS_ROW_GAP = 4.dp
+
+/**
  * 控制层 (L1) + 浮出面板 (L2).
  *
  * 布局 (自下而上): 图标行 / 进度条行 / 胶囊按钮行 / (聚焦胶囊时) 浮出面板.
@@ -185,14 +206,43 @@ internal fun TvPlayerControlsOverlay(
     bottomRowFocusRequester: FocusRequester,
     episodeStripFocusRequester: FocusRequester,
     sheetsController: VideoSideSheetsController<EpisodeVideoSideSheetPage>,
+    /**
+     * 控制层本体可见吗. false = 本层只是**为了托住 [pillsRowTrailing] 那颗按钮而留在场上**:
+     * 除那颗按钮外一切淡出到透明, 但**布局照旧**, 于是按钮稳稳停在胶囊行原来的位置上.
+     *
+     * 为什么不让按钮自己浮在屏幕上按实测坐标跟随: 试过, 位置得等下一帧才到, 图标行收起那段
+     * 逐帧动画里按钮总慢一拍. 当成行内一员由布局直接给出位置, 就没有"跟随"这回事了.
+     */
+    chromeVisible: Boolean,
+    /** 胶囊行最右的插槽 (OP/ED 提示按钮): 与胶囊同排靠右, 位置由布局给出. */
+    pillsRowTrailing: @Composable () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // 控制层本体的淡入淡出. 整层的显隐原本由外面的 AniAnimatedVisibility 做, 现在本层要为提示
+    // 按钮多活一会儿, 淡出就得挪到里面来 —— 只作用于"除那颗按钮之外"的部分, 时长与那边的
+    // fadeIn/fadeOut 取同一档 (EasingDurations), 观感不变.
+    //
+    // **不能用 `by` 解构**: 那是在组合里读, 淡入淡出的每一帧都会重组整个控制层.
+    // 留着 State 本体, 在 graphicsLayer 的 lambda 里读 —— 每帧只失效图层 (见本文件的重组纪律)
+    val chromeAlpha = animateFloatAsState(
+        targetValue = if (chromeVisible) 1f else 0f,
+        animationSpec = tween(
+            durationMillis = if (chromeVisible) {
+                EasingDurations.standardDecelerate
+            } else {
+                EasingDurations.standardAccelerate
+            },
+            easing = if (chromeVisible) StandardDecelerateEasing else StandardAccelerateEasing,
+        ),
+        label = "TvPlayerControlsChrome",
+    )
+    val chrome = Modifier.graphicsLayer { alpha = chromeAlpha.value }
     Box(modifier) {
         // 选集条展开态不整屏压暗: 内容全部贴底, 上下两条渐变 scrim 已足够托住可读性,
         // 画面中部保持通透
         // 底部渐变 scrim (托住控制行与面板)
         Box(
-            Modifier
+            chrome
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .height(TV_PLAYER_BOTTOM_SCRIM_HEIGHT)
@@ -205,7 +255,7 @@ internal fun TvPlayerControlsOverlay(
         )
         // 顶部渐变 scrim (标题/时钟可读性)
         Box(
-            Modifier
+            chrome
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
                 .height(TV_PLAYER_TOP_SCRIM_HEIGHT)
@@ -226,7 +276,7 @@ internal fun TvPlayerControlsOverlay(
         // 顶部信息: 左上标题 + 右上时钟
         TvPlayerTopInfo(
             page,
-            Modifier
+            chrome
                 .align(Alignment.TopStart)
                 .fillMaxWidth()
                 .padding(horizontal = TV_PLAYER_HORIZONTAL_PAD, vertical = 28.dp)
@@ -261,7 +311,9 @@ internal fun TvPlayerControlsOverlay(
                 .padding(vertical = 20.dp),
         ) {
             AniAnimatedVisibility(
-                visible = !overlay.episodeStripExpanded,
+                // 控制层不可见时无条件留着这一列: 它此刻的唯一职责是托住那颗提示按钮,
+                // 而选集条的展开态在 hideAll 里并不复位
+                visible = !overlay.episodeStripExpanded || !chromeVisible,
                 modifier = Modifier.align(Alignment.BottomStart),
             ) {
                 Column(Modifier.padding(horizontal = TV_PLAYER_HORIZONTAL_PAD)) {
@@ -277,6 +329,7 @@ internal fun TvPlayerControlsOverlay(
                         },
                     ) {
                         TvPlayerPanelHost(
+                            modifier = chrome,
                             overlay = overlay,
                             vm = vm,
                             page = page,
@@ -297,15 +350,22 @@ internal fun TvPlayerControlsOverlay(
                         danmakuEditorState = danmakuEditorState,
                         vm = vm,
                         pillFocusRequesters = pillFocusRequesters,
+                        trailing = pillsRowTrailing,
+                        // 胶囊本体跟着控制层淡出, 末尾那颗提示按钮不跟 (它有自己的显示时长)
+                        pillsModifier = chrome,
                         modifier = Modifier
-                            // 上缘位置 = 面板的下锚点 (面板在同一 Column 里紧贴本行之上)
+                            .padding(bottom = TV_PLAYER_PROGRESS_ROW_GAP)
+                            // 放在 padding 之后: 量的是胶囊本体的上缘 (可见元素边界), 不含那段间距.
+                            // 这是面板的下锚点 (面板在同一 Column 里紧贴本行之上)
                             .onGloballyPositioned { pillsRowTopPx.floatValue = it.boundsInWindow().top }
-                            .padding(bottom = 18.dp)
                             .graphicsLayer { alpha = if (progressSliderState.isPreviewing) 0f else 1f },
                     )
 
-                    // 进度条行
+                    // 进度条行.
+                    // 控制层不可见时**不能从组合里摘掉**, 只淡到透明: 它撑着胶囊行到屏幕底缘的距离,
+                    // 摘掉的话那颗提示按钮会当场往下掉一截 (下面的图标行同理)
                     TvPlayerProgressRow(
+                        modifier = chrome,
                         vm = vm,
                         progressSliderState = progressSliderState,
                         framePreview = framePreview,
@@ -320,11 +380,11 @@ internal fun TvPlayerControlsOverlay(
                     // 拖拽预览中同样按成隐形 (同上: 那会儿唯一该看的是圆点和缩略图)
                     AniAnimatedVisibility(visible = !hideBelowProgress) {
                         Column(
-                            Modifier.graphicsLayer {
+                            chrome.graphicsLayer {
                                 alpha = if (progressSliderState.isPreviewing) 0f else 1f
                             },
                         ) {
-                            Spacer(Modifier.height(6.dp))
+                            Spacer(Modifier.height(TV_PLAYER_PROGRESS_ROW_GAP))
                             TvPlayerBottomRow(
                                 overlay = overlay,
                                 vm = vm,
@@ -344,7 +404,7 @@ internal fun TvPlayerControlsOverlay(
                 vm = vm,
                 overlay = overlay,
                 stripFocusRequester = episodeStripFocusRequester,
-                modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth(),
+                modifier = chrome.align(Alignment.BottomStart).fillMaxWidth(),
             )
         }
     }
@@ -422,13 +482,17 @@ internal val TV_PILL_VISUAL_ORDER = listOf(
     TvPlayerPanel.DANMAKU_LIST,
 )
 
-/** 胶囊按钮行: 相关推荐 / 制作人员 / 角色 / 评论 / 弹幕列表 (+ 弹幕发送展开框). */
+/** 胶囊按钮行: 相关推荐 / 制作人员 / 角色 / 评论 / 弹幕列表 (+ 弹幕发送展开框) + 靠右的 [trailing]. */
 @Composable
 private fun TvPlayerPillsRow(
     overlay: TvPlayerOverlayState,
     danmakuEditorState: DanmakuEditorState,
     vm: EpisodeViewModel,
     pillFocusRequesters: Map<TvPlayerPanel, FocusRequester>,
+    /** 行末靠右对齐的插槽 (OP/ED 提示按钮): 不受 [pillsModifier] 影响, 有自己的显示时长. */
+    trailing: @Composable () -> Unit,
+    /** 只作用于胶囊本体那一组 (控制层淡出), 不含 [trailing]. */
+    pillsModifier: Modifier = Modifier,
     modifier: Modifier = Modifier,
 ) {
     // "一起看"胶囊的显隐在本行 (而不是胶囊自己) 判断: 用户可以在弹窗的 ⋮ 里关掉整个功能,
@@ -447,52 +511,60 @@ private fun TvPlayerPillsRow(
         overlay.focusProgress()
     }
 
-    Row(
-        modifier.onFocusChanged { if (it.hasFocus) overlay.focusRegion = TvPlayerFocusRegion.PILLS },
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        TvPlayerPill(
-            icon = { Icon(Icons.Rounded.VideoLibrary, null, Modifier.size(TV_PILL_ICON_SIZE)) },
-            label = stringResource(Lang.subject_episode_related_recommendations),
-            panel = TvPlayerPanel.RECOMMENDATIONS,
-            overlay = overlay,
-            focusRequester = pillFocusRequesters.getValue(TvPlayerPanel.RECOMMENDATIONS),
-        )
-        TvPlayerPill(
-            icon = { Icon(Icons.Rounded.Groups, null, Modifier.size(TV_PILL_ICON_SIZE)) },
-            label = stringResource(Lang.subject_details_staff),
-            panel = TvPlayerPanel.STAFF,
-            overlay = overlay,
-            focusRequester = pillFocusRequesters.getValue(TvPlayerPanel.STAFF),
-        )
-        TvPlayerPill(
-            icon = { Icon(Icons.Rounded.Face, null, Modifier.size(TV_PILL_ICON_SIZE)) },
-            label = stringResource(Lang.subject_details_characters),
-            panel = TvPlayerPanel.CHARACTERS,
-            overlay = overlay,
-            focusRequester = pillFocusRequesters.getValue(TvPlayerPanel.CHARACTERS),
-        )
-        TvPlayerPill(
-            icon = { Icon(Icons.AutoMirrored.Rounded.Comment, null, Modifier.size(TV_PILL_ICON_SIZE)) },
-            label = stringResource(Lang.episode_comments),
-            panel = TvPlayerPanel.COMMENTS,
-            overlay = overlay,
-            focusRequester = pillFocusRequesters.getValue(TvPlayerPanel.COMMENTS),
-        )
-        TvPlayerPill(
-            icon = { Icon(Icons.AutoMirrored.Rounded.FormatListBulleted, null, Modifier.size(TV_PILL_ICON_SIZE)) },
-            label = stringResource(Lang.subject_episode_danmaku_list_title),
-            panel = TvPlayerPanel.DANMAKU_LIST,
-            overlay = overlay,
-            focusRequester = pillFocusRequesters.getValue(TvPlayerPanel.DANMAKU_LIST),
-        )
-        TvDanmakuSendEntry(
-            overlay = overlay,
-            danmakuEditorState = danmakuEditorState,
-            vm = vm,
-        )
-        if (watchTogetherEnabled) TvWatchTogetherPill(overlay)
+    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        // 胶囊本体单独成组占满剩余宽度, 把 trailing 顶到最右.
+        // 焦点区域上报只挂这一组, 不含 trailing: 那颗按钮聚焦时不该把图标行收起
+        // (hideBelowProgress 判的就是 PILLS) —— 提示一出现焦点就落过去, 控制层会当场塌一档
+        Row(
+            pillsModifier
+                .weight(1f)
+                .onFocusChanged { if (it.hasFocus) overlay.focusRegion = TvPlayerFocusRegion.PILLS },
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TvPlayerPill(
+                icon = { Icon(Icons.Rounded.VideoLibrary, null, Modifier.size(TV_PILL_ICON_SIZE)) },
+                label = stringResource(Lang.subject_episode_related_recommendations),
+                panel = TvPlayerPanel.RECOMMENDATIONS,
+                overlay = overlay,
+                focusRequester = pillFocusRequesters.getValue(TvPlayerPanel.RECOMMENDATIONS),
+            )
+            TvPlayerPill(
+                icon = { Icon(Icons.Rounded.Groups, null, Modifier.size(TV_PILL_ICON_SIZE)) },
+                label = stringResource(Lang.subject_details_staff),
+                panel = TvPlayerPanel.STAFF,
+                overlay = overlay,
+                focusRequester = pillFocusRequesters.getValue(TvPlayerPanel.STAFF),
+            )
+            TvPlayerPill(
+                icon = { Icon(Icons.Rounded.Face, null, Modifier.size(TV_PILL_ICON_SIZE)) },
+                label = stringResource(Lang.subject_details_characters),
+                panel = TvPlayerPanel.CHARACTERS,
+                overlay = overlay,
+                focusRequester = pillFocusRequesters.getValue(TvPlayerPanel.CHARACTERS),
+            )
+            TvPlayerPill(
+                icon = { Icon(Icons.AutoMirrored.Rounded.Comment, null, Modifier.size(TV_PILL_ICON_SIZE)) },
+                label = stringResource(Lang.episode_comments),
+                panel = TvPlayerPanel.COMMENTS,
+                overlay = overlay,
+                focusRequester = pillFocusRequesters.getValue(TvPlayerPanel.COMMENTS),
+            )
+            TvPlayerPill(
+                icon = { Icon(Icons.AutoMirrored.Rounded.FormatListBulleted, null, Modifier.size(TV_PILL_ICON_SIZE)) },
+                label = stringResource(Lang.subject_episode_danmaku_list_title),
+                panel = TvPlayerPanel.DANMAKU_LIST,
+                overlay = overlay,
+                focusRequester = pillFocusRequesters.getValue(TvPlayerPanel.DANMAKU_LIST),
+            )
+            TvDanmakuSendEntry(
+                overlay = overlay,
+                danmakuEditorState = danmakuEditorState,
+                vm = vm,
+            )
+            if (watchTogetherEnabled) TvWatchTogetherPill(overlay)
+        }
+        trailing()
     }
 }
 
@@ -588,6 +660,79 @@ private fun TvPlayerPill(
 }
 
 /**
+ * OP/ED 提示按钮 (Infuse / Prime Video 的 Skip Intro 同一位置与形态). 两副面孔:
+ *
+ * - `tip.canCancel` = true: 自动跳过正在倒计时, 按钮是"取消跳过 OP/ED";
+ * - false: 人已经在 OP/ED 里 (刚按过取消, 或从别处 seek 进来), 按钮是"跳过 OP/ED", 按下直接
+ *   跳到本段结尾. 于是整段 OP/ED 期间屏幕上始终有一颗可按的按钮.
+ *
+ * 文案里的 OP/ED 是**分开写**的 (`tip.kind`), 不含糊成"OP/ED": 哪一段由它在时间轴上的位置定
+ * (见 PlayerSkipOpEdState), 既然判得出来就说清楚.
+ *
+ * 取代原来左下角那张 M3 浅色卡片 toast: 它按 `bottom = 140dp` 摆在左下, 正好压在胶囊按钮行上,
+ * 且浅底深字与整个播放器的黑白控件完全不是一套.
+ *
+ * 它**就是胶囊行的最后一颗**, 与"相关推荐"那些按钮同排, 位置由布局直接给出 —— 那一行会上下动
+ * (焦点落胶囊时图标行收起, 进度条连胶囊行一起下移, 还是逐帧动画), 作为行内一员天然跟得上.
+ * 那条线的右半边永远是空的, 挡不到内容.
+ *
+ * 特殊之处只有两条: **显示时长自成一套** (由 PlayerSkipOpEdState 决定, 与改版前的 toast 一致),
+ * 以及**出现时主动要焦点**. 控制层该 5 秒自动隐藏还是自动隐藏 —— 那时整行连同进度条淡到透明,
+ * 但**布局照旧留在场上** (见 [TvPlayerControlsOverlay] 的 `chromeVisible`), 于是屏幕上只剩这颗
+ * 按钮, 位置纹丝不动.
+ *
+ * 配色与胶囊完全一致 (未聚焦白 0.14, 聚焦白底黑字): 它就该看着像那一行的一员. 试过用面板条目
+ * 那套黑玻璃让它更抓眼, 但控制层淡出后屏上只剩它一颗, 已经足够显眼, 反倒是两套底色摆在同一行
+ * 上更扎眼.
+ */
+@Composable
+internal fun TvSkipOpEdTipButton(
+    tip: SkipOpEdTip,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val focused by interactionSource.collectIsFocusedAsState()
+    Surface(
+        onClick = onClick,
+        modifier = modifier,
+        shape = CircleShape,
+        color = if (focused) Color.White else Color.White.copy(alpha = 0.14f),
+        contentColor = if (focused) Color.Black else Color.White,
+        interactionSource = interactionSource,
+    ) {
+        Row(
+            Modifier.padding(horizontal = TV_PILL_PADDING_H, vertical = TV_PILL_PADDING_V),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                if (tip.canCancel) Icons.Rounded.Close else Icons.Rounded.FastForward,
+                null,
+                Modifier.size(TV_PILL_ICON_SIZE),
+            )
+            Text(
+                // 说清楚是 OP 还是 ED (按章节在时间轴上的位置判, 见 PlayerSkipOpEdState).
+                // "OP"/"ED" 是原文照抄的行话, 各语言一样, 不进资源
+                stringResource(
+                    if (tip.canCancel) {
+                        Lang.video_player_tv_cancel_skip_segment
+                    } else {
+                        Lang.video_player_tv_skip_segment
+                    },
+                    when (tip.kind) {
+                        SkipOpEdKind.OP -> "OP"
+                        SkipOpEdKind.ED -> "ED"
+                    },
+                ),
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+/**
  * 遥控器形态下可调的倍速范围: 固定用播放器支持的全范围 (0.25x–4x), 见 [PlaybackSpeedControllerState] 处的注释.
  *
  * 直接开到硬上限而不是默认的 0.5x–2.5x: 既然"倍速范围"这条设置在遥控器上已经去掉了, 就别再替用户
@@ -639,8 +784,7 @@ private fun TvPlayerProgressRow(
                 up = upFocus
             }
             .onFocusChanged { if (it.isFocused) overlay.focusRegion = TvPlayerFocusRegion.PROGRESS }
-            .focusable(interactionSource = interactionSource)
-            .padding(vertical = 6.dp),
+            .focusable(interactionSource = interactionSource),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(

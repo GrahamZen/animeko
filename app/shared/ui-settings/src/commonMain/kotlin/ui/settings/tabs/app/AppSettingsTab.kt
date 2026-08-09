@@ -42,6 +42,7 @@ import me.him188.ani.app.data.models.preference.DesktopCloseBehavior
 import me.him188.ani.app.data.models.preference.EpisodeListProgressTheme
 import me.him188.ani.app.data.models.preference.FullscreenSwitchMode
 import me.him188.ani.app.data.models.preference.NsfwMode
+import me.him188.ani.app.data.models.preference.SkipOpEdMode
 import me.him188.ani.app.data.models.preference.ThemeSettings
 import me.him188.ani.app.data.models.preference.UISettings
 import me.him188.ani.app.data.models.preference.UpdateSettings
@@ -103,6 +104,9 @@ import me.him188.ani.app.ui.lang.settings_player_hide_selector_on_select
 import me.him188.ani.app.ui.lang.settings_player_long_press_fast_forward_speed
 import me.him188.ani.app.ui.lang.settings_player_long_press_fast_forward_speed_description
 import me.him188.ani.app.ui.lang.settings_player_op_ed_skip_duration
+import me.him188.ani.app.ui.lang.settings_player_skip_op_ed_auto
+import me.him188.ani.app.ui.lang.settings_player_skip_op_ed_manual
+import me.him188.ani.app.ui.lang.settings_player_skip_op_ed_off
 import me.him188.ani.app.ui.lang.settings_player_op_ed_skip_duration_seconds
 import me.him188.ani.app.ui.lang.settings_player_pause_on_edit_danmaku
 import me.him188.ani.app.ui.lang.settings_player_playback_speed_range
@@ -620,10 +624,22 @@ fun SettingsScope.PlayerGroup(
             title = { Text(stringResource(Lang.settings_player_auto_play_next)) },
         )
         HorizontalDividerItem()
-        SwitchItem(
-            checked = config.autoSkipOpEd,
-            onCheckedChange = {
-                videoScaffoldConfig.update(config.copy(autoSkipOpEd = it))
+        DropdownItem(
+            selected = { config.effectiveSkipOpEdMode },
+            values = { SkipOpEdMode.entries },
+            itemText = {
+                Text(
+                    stringResource(
+                        when (it) {
+                            SkipOpEdMode.AUTO -> Lang.settings_player_skip_op_ed_auto
+                            SkipOpEdMode.MANUAL -> Lang.settings_player_skip_op_ed_manual
+                            SkipOpEdMode.OFF -> Lang.settings_player_skip_op_ed_off
+                        },
+                    ),
+                )
+            },
+            onSelect = {
+                videoScaffoldConfig.update(config.copy(skipOpEdMode = it))
             },
             title = { Text(stringResource(Lang.settings_player_auto_skip_op_ed)) },
             description = { Text(stringResource(Lang.settings_player_auto_skip_op_ed_description)) },
