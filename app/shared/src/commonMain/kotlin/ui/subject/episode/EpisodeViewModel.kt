@@ -54,6 +54,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.him188.ani.app.data.models.episode.displayName
 import me.him188.ani.app.data.models.episode.renderEpisodeEp
+import me.him188.ani.app.data.models.preference.SkipOpEdMode
 import me.him188.ani.app.data.models.preference.VideoScaffoldConfig
 import me.him188.ani.app.data.models.subject.SubjectInfo
 import me.him188.ani.app.data.models.subject.SubjectProgressInfo
@@ -816,6 +817,10 @@ class EpisodeViewModel(
         },
         videoLength = player.mediaProperties.mapNotNull { it?.durationMillis?.milliseconds }
             .produceState(0.milliseconds),
+        autoSkip = settingsRepository.videoScaffoldConfig.flow
+            .map { it.effectiveSkipOpEdMode == SkipOpEdMode.AUTO }
+            .distinctUntilChanged()
+            .produceState(true),
     )
 
     private val matchingDanmakuProviderId = MutableStateFlow<DanmakuProviderId?>(null)
@@ -1076,11 +1081,11 @@ class EpisodeViewModel(
         // 跳过 OP 和 ED
         launchInBackground {
             settingsRepository.videoScaffoldConfig.flow
-                .map { it.autoSkipOpEd }
+                .map { it.effectiveSkipOpEdMode }
                 .distinctUntilChanged()
                 .debounce(1000)
-                .collectLatest { enabled ->
-                    if (!enabled) return@collectLatest
+                .collectLatest { mode ->
+                    if (mode == SkipOpEdMode.OFF) return@collectLatest
 
                     // 设置启用
                     @OptIn(UnsafeEpisodeSessionApi::class)
@@ -1089,8 +1094,13 @@ class EpisodeViewModel(
                         episodeIdFlow,
                         episodeCollectionsFlow,
                     ) { pos, id, collections ->
-                        // 不止一集并且当前是第一集时不跳过
-                        if (collections.size > 1 && collections.getOrNull(0)?.episodeId == id) return@combine
+                        // 不止一集并且当前是第一集时不跳过.
+                        // 只挡自动档: 手动档不会自己动, 头一集把"跳过"按钮亮出来没有坏处
+                        if (mode == SkipOpEdMode.AUTO &&
+                            collections.size > 1 && collections.getOrNull(0)?.episodeId == id
+                        ) {
+                            return@combine
+                        }
                         if (!playbackAutomationGate.suppressed.value) playerSkipOpEdState.update(pos)
                     }.collect()
                 }
