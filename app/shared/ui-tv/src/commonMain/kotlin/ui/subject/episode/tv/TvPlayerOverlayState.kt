@@ -245,11 +245,14 @@ class TvPlayerOverlayState {
         markInteraction()
     }
 
-    /** 关闭回复弹窗, 焦点还给刚点开的那条评论. */
+    /** 关闭评论弹窗, 焦点还给刚点开的那条评论. */
     fun dismissReply() {
-        if (replyingComment == null) return
+        val target = replyingComment ?: return
         replyingComment = null
-        requestPanelItemFocus()
+        // 面板里点开的那条: 焦点还给它. 胶囊点开的"发表评论"没有对应的面板条目 (面板里那些
+        // 条目此刻一个都没被点过), 焦点由那颗胶囊自己的 restoreFocusAfter 收回 —— 这里再抢
+        // 一次就是把焦点硬塞进面板, 与用户离开时的位置对不上
+        if (target.quoted != null) requestPanelItemFocus()
     }
 
     /** 唤出控制层; [focusProgress] = 进入后把焦点放到进度条行 (默认). */

@@ -585,12 +585,20 @@ fun TvEpisodeScreenContent(
             overlay.markInteraction()
             return@router false
         }
-        // 评论回复弹窗: 返回关闭并把焦点还给刚点开的那条评论 (见 overlay.dismissReply),
+        // 评论弹窗 (回复 / 发表): 返回关闭并把焦点还给刚点开的那条评论 (见 overlay.dismissReply),
         // 其余按键全部交给弹窗内部 (引用区翻页 / 输入框 / IME)
         if (overlay.replyingComment != null) {
             overlay.markInteraction()
             if (isBack) {
-                if (isKeyUp) overlay.dismissReply()
+                if (isKeyUp) {
+                    // 表情选择器盖在弹窗之上: 返回先关它, 再按一下才关整个评论弹窗.
+                    // 它不是独立窗口, 按键还是走这条唯一路由, 得在这儿分一档
+                    if (vm.commentEditorState.showStickerPanel) {
+                        vm.commentEditorState.toggleStickerPanelState(false)
+                    } else {
+                        overlay.dismissReply()
+                    }
+                }
                 return@router true
             }
             return@router false

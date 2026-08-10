@@ -752,6 +752,27 @@ private val TV_COMMENT_META_ICON_SIZE = 12.dp
  * 点击任一条目 = 回复其**所属主楼** (与改动前一致): 服务端写接口只接受主楼 id,
  * 见 [me.him188.ani.app.domain.comment.PostCommentUseCase]; 弹窗里回显的是被点的那一条.
  */
+/**
+ * 发表本集评论 (主楼): 评论胶囊按下确定的去处, 见 `TvPlayerPillsRow`.
+ *
+ * 胶囊原来的点击是"把焦点送进面板", 与直接按上键完全重复; 而 TV 上此前根本没有发新评论的
+ * 入口 —— 只能回复已有的评论 (手机端那颗「发送评论」FAB 在遥控器形态下没有对应物).
+ *
+ * 走的是与手机端同一条链路: [CommentEditorState.startEdit] 开编辑态 (草稿归属由它管),
+ * 发送时 `PostCommentUseCase` 按上下文分派到 `createEpisodeComment`.
+ */
+internal fun openNewEpisodeComment(
+    vm: EpisodeViewModel,
+    page: EpisodePageState,
+    overlay: TvPlayerOverlayState,
+) {
+    val context = CommentContext.Episode(vm.subjectId, page.episodePresentation.episodeId.toLong())
+    vm.commentEditorState.startEdit(context)
+    // startEdit 不管表情面板 (它是手机端那个贴在输入框下面的面板): 上次留着开就带进新弹窗了
+    vm.commentEditorState.toggleStickerPanelState(false)
+    overlay.startReply(TvCommentReplyTarget(context = context))
+}
+
 @Composable
 private fun TvCommentsPanel(
     vm: EpisodeViewModel,
@@ -798,11 +819,13 @@ private fun TvCommentsPanel(
         overlay.startReply(
             TvCommentReplyTarget(
                 context = context,
-                authorName = row.comment.displayAuthorName(),
-                timeText = timeFormatter.formatCommentTime(row.comment.createdAt),
-                // 弹窗按"文本段 + 图片"逐块渲染 (卡片上的 [图片] 占位在这里变成真图)
-                blocks = row.comment.content.toCommentBlocks(),
-                reactions = row.comment.reactions.toTvReactions(),
+                quoted = TvQuotedComment(
+                    authorName = row.comment.displayAuthorName(),
+                    timeText = timeFormatter.formatCommentTime(row.comment.createdAt),
+                    // 弹窗按"文本段 + 图片"逐块渲染 (卡片上的 [图片] 占位在这里变成真图)
+                    blocks = row.comment.content.toCommentBlocks(),
+                    reactions = row.comment.reactions.toTvReactions(),
+                ),
                 canReply = canReply,
             ),
         )
@@ -1103,7 +1126,7 @@ private fun UIRichText.toInlineText(): TvInlineText {
  * 引用块与 [toInlineText] 一样跳过 —— 拍平进正文会把别人被引用的话混成本人说的,
  * 而在这个"整块单焦点"的引用区里没有地方摆引用的边框和出处.
  */
-private fun UIRichText.toCommentBlocks(): List<TvCommentBlock> {
+internal fun UIRichText.toCommentBlocks(): List<TvCommentBlock> {
     val blocks = mutableListOf<TvCommentBlock>()
     val pending = TvInlineTextBuilder()
 

@@ -350,6 +350,7 @@ internal fun TvPlayerControlsOverlay(
                         danmakuEditorState = danmakuEditorState,
                         vm = vm,
                         pillFocusRequesters = pillFocusRequesters,
+                        onNewComment = { openNewEpisodeComment(vm, page, overlay) },
                         trailing = pillsRowTrailing,
                         // 胶囊本体跟着控制层淡出, 末尾那颗提示按钮不跟 (它有自己的显示时长)
                         pillsModifier = chrome,
@@ -489,12 +490,17 @@ private fun TvPlayerPillsRow(
     danmakuEditorState: DanmakuEditorState,
     vm: EpisodeViewModel,
     pillFocusRequesters: Map<TvPlayerPanel, FocusRequester>,
+    /** 评论胶囊按下确定: 发表本集评论 (见 [openNewEpisodeComment]). */
+    onNewComment: () -> Unit,
     /** 行末靠右对齐的插槽 (OP/ED 提示按钮): 不受 [pillsModifier] 影响, 有自己的显示时长. */
     trailing: @Composable () -> Unit,
     /** 只作用于胶囊本体那一组 (控制层淡出), 不含 [trailing]. */
     pillsModifier: Modifier = Modifier,
     modifier: Modifier = Modifier,
 ) {
+    // 正开着的是不是"发表评论"那个弹窗 (评论胶囊点出来的那个, 没有引用区): 关掉后焦点要还给
+    // 那颗胶囊. 只在弹窗开合时变一次, 不是每帧都动的热状态
+    val composingNewComment = overlay.replyingComment.let { it != null && it.quoted == null }
     Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         // 胶囊本体单独成组占满剩余宽度, 把 trailing 顶到最右.
         // 焦点区域上报只挂这一组, 不含 trailing: 那颗按钮聚焦时不该把图标行收起
@@ -533,6 +539,18 @@ private fun TvPlayerPillsRow(
                 panel = TvPlayerPanel.COMMENTS,
                 overlay = overlay,
                 focusRequester = pillFocusRequesters.getValue(TvPlayerPanel.COMMENTS),
+                // 本颗胶囊的点击另有其用: 发表本集评论.
+                //
+                // 默认的"把焦点送进面板"与直接按上键完全重复 (面板早在聚焦本胶囊时就浮出来了),
+                // 这一下等于白按; 而发新评论此前在 TV 上没有任何入口 —— 只能回复已有评论,
+                // 手机端那颗「发送评论」FAB 在遥控器形态下没有对应物
+                onClick = onNewComment,
+                // 弹窗关掉后焦点还给本胶囊: 弹窗抢焦点时本节点还在场 (控制层与面板都留在下面),
+                // 但 Compose 不会自己还回来. 控制层已经收起时放弃 —— 那时焦点归属归根路由管
+                modifier = Modifier.restoreFocusAfter(
+                    composingNewComment,
+                    abandon = { overlay.layer != TvPlayerLayer.CONTROLS },
+                ),
             )
             TvPlayerPill(
                 icon = { Icon(Icons.AutoMirrored.Rounded.FormatListBulleted, null, Modifier.size(TV_PILL_ICON_SIZE)) },
@@ -596,12 +614,13 @@ private fun TvPlayerPill(
     /** 面板最底项按下键经此回到本按钮 (空间搜索会落错按钮导致面板跳变). */
     focusRequester: FocusRequester,
     modifier: Modifier = Modifier,
+    /** 默认是把焦点送进面板 (与上键一致); 另有动作的胶囊自己传 (见评论胶囊). */
+    onClick: () -> Unit = { overlay.requestPanelFocus() },
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val focused by interactionSource.collectIsFocusedAsState()
     Surface(
-        // 点击 = 把焦点送进面板 (与上键一致); 由面板挂载后的入口请求器解析
-        onClick = { overlay.requestPanelFocus() },
+        onClick = onClick,
         modifier = modifier
             .focusRequester(focusRequester)
             .onFocusChanged { if (it.isFocused) overlay.activePanel = panel },

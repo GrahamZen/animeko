@@ -1266,6 +1266,7 @@
     <string name="comment_rendering">渲染中...</string>
     <string name="comment_reply">回复评论</string>
     <string name="comment_reply_to">回复 %1$s</string>
+    <string name="comment_new_comment">发表评论</string>
     <string name="comment_view_comment">查看评论</string>
     <string name="comment_reply_unsupported">该评论不支持回复，仅可查看</string>
     <string name="comment_image_unavailable">图片已失效或无法访问</string>
