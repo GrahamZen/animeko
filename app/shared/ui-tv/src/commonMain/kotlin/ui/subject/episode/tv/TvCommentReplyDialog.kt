@@ -39,7 +39,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Send
+import androidx.compose.material.icons.outlined.SentimentSatisfied
 import androidx.compose.material.icons.rounded.BrokenImage
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -62,6 +65,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -84,12 +88,18 @@ import me.him188.ani.app.ui.comment.CommentEditorState
 import me.him188.ani.app.ui.external.placeholder.placeholder
 import me.him188.ani.app.ui.foundation.AsyncImage
 import me.him188.ani.app.ui.foundation.focus.resolveFocusRepeatedly
+import me.him188.ani.app.ui.foundation.focus.restoreFocusAfter
 import me.him188.ani.app.ui.foundation.ifThen
 import me.him188.ani.app.ui.foundation.widgets.AniFocusActionButton
 import me.him188.ani.app.ui.foundation.widgets.centeredPanelColor
 import me.him188.ani.app.ui.lang.Lang
+import me.him188.ani.app.ui.lang.comment_add_emoji
 import me.him188.ani.app.ui.lang.comment_ani_only_notice
+import me.him188.ani.app.ui.lang.comment_edit
 import me.him188.ani.app.ui.lang.comment_image_unavailable
+import me.him188.ani.app.ui.lang.comment_new_comment
+import me.him188.ani.app.ui.lang.comment_preview
+import me.him188.ani.app.ui.lang.comment_rendering
 import me.him188.ani.app.ui.lang.comment_reply
 import me.him188.ani.app.ui.lang.comment_reply_unsupported
 import me.him188.ani.app.ui.lang.comment_send
@@ -115,11 +125,28 @@ sealed class TvCommentBlock {
 }
 
 /**
- * 回复目标: 被回复的那条评论的展示内容 + 发送上下文.
+ * 弹窗的目标: 发送上下文 + 被回复的那条评论 (发表新评论时没有).
  */
 @Immutable
 class TvCommentReplyTarget(
     val context: CommentContext,
+    /**
+     * 被回复的那条评论; `null` = 发表本集评论 (主楼), 弹窗里不出引用区, 焦点直接落输入框.
+     */
+    val quoted: TvQuotedComment? = null,
+    /**
+     * 这条评论到底能不能回复. `false` 时弹窗退化成只读 (不出输入框和发送按钮, 顶部给出提示).
+     *
+     * 能回复的只有 Ani 源且服务端给了 `canReply` 的**主楼**: Bangumi 评论在 Ani 内只读,
+     * 楼中回复也没有对应的写接口 (`createEpisodeReply` 只接受主楼 id).
+     * 发表新评论走的是 `createEpisodeComment`, 恒可写.
+     */
+    val canReply: Boolean = true,
+)
+
+/** 引用区里展示的那条评论. */
+@Immutable
+class TvQuotedComment(
     val authorName: String,
     val timeText: String,
     val blocks: List<TvCommentBlock>,
@@ -128,13 +155,6 @@ class TvCommentReplyTarget(
      * 得先做一套选表情的导航, 而看别人贴了什么本身就是评论的一部分信息.
      */
     val reactions: List<TvCommentReaction> = emptyList(),
-    /**
-     * 这条评论到底能不能回复. `false` 时弹窗退化成只读 (不出输入框和发送按钮, 顶部给出提示).
-     *
-     * 能回复的只有 Ani 源且服务端给了 `canReply` 的**主楼**: Bangumi 评论在 Ani 内只读,
-     * 楼中回复也没有对应的写接口 (`createEpisodeReply` 只接受主楼 id).
-     */
-    val canReply: Boolean,
 )
 
 /** 一枚回应: 一个表情 + 贴的人数. */
@@ -200,7 +220,10 @@ private val reactionChipColor: Color
     @Composable get() = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.14f)
 
 /**
- * TV 评论回复弹窗.
+ * TV 评论弹窗: 回复某条评论, 或发表本集评论 (`target.quoted == null`, 见 [TvCommentReplyTarget]).
+ *
+ * 发表新评论没有引用区, 弹窗高度按内容收 (撑满 78% 屏高的话输入框会吊在一大片空白上面),
+ * 初始焦点也直接落输入框 —— 那时没有"先看完被回复的那条"这一步.
  *
  * 与手机端的底部 sheet ([me.him188.ani.app.ui.comment.EditComment]) 相比:
  * - 大弹窗居中, 被回复的评论正文在**输入框上方**, 放不下时可用上下键翻 (翻到底再按下键
@@ -235,9 +258,16 @@ internal fun TvCommentReplyDialog(
     var fieldFocused by remember { mutableStateOf(false) }
     val sending by editorState.sending.collectAsStateWithLifecycle()
 
+    val quoted = target.quoted
     // 初始焦点落引用区 (阅读态), 不直接进输入框: 一进来就弹系统键盘会把弹窗下半遮掉,
-    // 而用户多半要先看完被回复的那条
+    // 而用户多半要先看完被回复的那条. 发表新评论没有引用区, 直接进输入框
     LaunchedEffect(Unit) {
+        if (quoted == null) {
+            resolveFocusRepeatedly(attempts = 20, arrived = { fieldFocused }) {
+                runCatching { fieldFocusRequester.requestFocus() }
+            }
+            return@LaunchedEffect
+        }
         resolveFocusRepeatedly(attempts = 20, arrived = { quoteFocused }) {
             runCatching { quoteFocusRequester.requestFocus() }
         }
@@ -259,6 +289,17 @@ internal fun TvCommentReplyDialog(
         }
     }
 
+    // 预览: 与手机端同一套 (renderPreview 把 BBCode 渲染成 UIRichText), 只是渲染结果改用
+    // 引用区那套逐块渲染 —— RichText 会在里面塞进一堆可点链接, 与"整块单焦点"的导航模型冲突
+    val previewing = editorState.previewing
+    LaunchedEffect(previewing) {
+        if (previewing) editorState.renderPreview()
+    }
+    val previewBlocks = editorState.previewContent?.toCommentBlocks()
+    val stickerPickerOpen = editorState.showStickerPanel
+    // 选中的表情包: 记在弹窗这一层, 关掉选择器再开还在原来那一包
+    var stickerPackIndex by remember { mutableIntStateOf(0) }
+
     Box(
         modifier
             .fillMaxSize()
@@ -272,16 +313,28 @@ internal fun TvCommentReplyDialog(
         Surface(
             Modifier
                 .fillMaxWidth(TV_REPLY_DIALOG_WIDTH_FRACTION)
-                .fillMaxHeight(TV_REPLY_DIALOG_HEIGHT_FRACTION),
+                // 没有引用区就按内容收高: 撑满屏高的话输入框和发送按钮会吊在一大片空白下面
+                .then(if (quoted != null) Modifier.fillMaxHeight(TV_REPLY_DIALOG_HEIGHT_FRACTION) else Modifier),
             shape = RoundedCornerShape(20.dp),
             // 与其他弹窗同一个底色与内容色 (见 centeredPanelColor / AniCenteredPanelDialog)
             color = centeredPanelColor,
             contentColor = MaterialTheme.colorScheme.onSurface,
         ) {
-            Column(Modifier.fillMaxSize().padding(28.dp)) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .then(if (quoted != null) Modifier.fillMaxHeight() else Modifier)
+                    .padding(28.dp),
+            ) {
                 Text(
-                    // 只读态标题不能还写"回复评论": 下面没有输入框, 两者对不上
-                    stringResource(if (target.canReply) Lang.comment_reply else Lang.comment_view_comment),
+                    stringResource(
+                        when {
+                            quoted == null -> Lang.comment_new_comment
+                            // 只读态标题不能还写"回复评论": 下面没有输入框, 两者对不上
+                            target.canReply -> Lang.comment_reply
+                            else -> Lang.comment_view_comment
+                        },
+                    ),
                     // 标题字号与其他居中大弹窗一致 (AniCenteredPanelDialog 的 title 用 titleLarge)
                     style = MaterialTheme.typography.titleLarge,
                 )
@@ -298,8 +351,8 @@ internal fun TvCommentReplyDialog(
                 )
                 Spacer(Modifier.height(12.dp))
 
-                // ---- 被回复的评论 (可上下键翻) ----
-                Box(
+                // ---- 被回复的评论 (可上下键翻); 发表新评论时整块不出 ----
+                if (quoted != null) Box(
                     Modifier
                         .weight(1f)
                         .fillMaxWidth()
@@ -364,19 +417,19 @@ internal fun TvCommentReplyDialog(
                         Column(Modifier.weight(1f, fill = false).verticalScroll(scrollState)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    target.authorName,
+                                    quoted.authorName,
                                     Modifier.weight(1f),
                                     style = MaterialTheme.typography.labelLarge,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
                                 Text(
-                                    target.timeText,
+                                    quoted.timeText,
                                     style = MaterialTheme.typography.labelSmall,
                                     color = hintColor,
                                 )
                             }
-                            target.blocks.forEach { block ->
+                            quoted.blocks.forEach { block ->
                                 Spacer(Modifier.height(8.dp))
                                 when (block) {
                                     is TvCommentBlock.Text -> Text(
@@ -389,9 +442,9 @@ internal fun TvCommentReplyDialog(
                                 }
                             }
                         }
-                        if (target.reactions.isNotEmpty()) {
+                        if (quoted.reactions.isNotEmpty()) {
                             Spacer(Modifier.height(TV_REPLY_REACTION_GAP))
-                            TvCommentReactionRow(target.reactions)
+                            TvCommentReactionRow(quoted.reactions)
                         }
                     }
                 }
@@ -403,8 +456,40 @@ internal fun TvCommentReplyDialog(
 
                 Spacer(Modifier.height(16.dp))
 
-                // ---- 输入框 ----
-                Surface(
+                // ---- 预览 (与输入框换位, 不是并排): 弹窗里没有第二块地方摆得下 ----
+                if (previewing) {
+                    Surface(
+                        Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        color = fieldContainerColor,
+                        contentColor = MaterialTheme.colorScheme.onSurface,
+                        border = BorderStroke(1.dp, idleBorderColor),
+                    ) {
+                        Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+                            if (previewBlocks == null) {
+                                // 渲染是挂起的 (BBCode -> UIRichText), 慢一拍时给个说法
+                                Text(
+                                    stringResource(Lang.comment_rendering),
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = hintColor,
+                                )
+                            } else {
+                                previewBlocks.forEachIndexed { index, block ->
+                                    if (index > 0) Spacer(Modifier.height(8.dp))
+                                    when (block) {
+                                        is TvCommentBlock.Text -> Text(
+                                            block.text.text,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            inlineContent = tvStickerInlineContent(block.text.stickers),
+                                        )
+
+                                        is TvCommentBlock.Image -> TvCommentQuoteImage(block.url)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else Surface(
                     Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
                     color = fieldContainerColor,
@@ -427,8 +512,10 @@ internal fun TvCommentReplyDialog(
                             .onPreviewKeyEvent { event ->
                                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                                 when (event.key) {
+                                    // 没有引用区时上键就地吞掉: 焦点留在输入框 (往上没有第二个目标,
+                                    // 放行的话会飘出弹窗去撞焦点组的边界)
                                     Key.DirectionUp -> {
-                                        runCatching { quoteFocusRequester.requestFocus() }
+                                        if (quoted != null) runCatching { quoteFocusRequester.requestFocus() }
                                         true
                                     }
 
@@ -483,15 +570,56 @@ internal fun TvCommentReplyDialog(
                 }
 
                 Spacer(Modifier.height(16.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                // 预览态下输入框不在场, 上键就没有落点可指 (指一个未附着的请求器会当场抛):
+                // 不给 up, 焦点组会把这一下拦在弹窗内
+                val actionUpFocus = fieldFocusRequester.takeIf { !previewing }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TvReplyActionButton(
+                        text = stringResource(Lang.comment_add_emoji),
+                        icon = Icons.Outlined.SentimentSatisfied,
+                        onClick = {
+                            // 预览态下没法插字, 先退回编辑态 (手机端是把这些动作禁用掉, 但
+                            // 禁用的按钮在遥控器上不可聚焦, 焦点会当场丢在弹窗里)
+                            if (previewing) editorState.togglePreview()
+                            editorState.toggleStickerPanelState(true)
+                        },
+                        upFocusRequester = actionUpFocus,
+                        // 选择器关掉后焦点还给本按钮: 它抢焦点时本按钮还在场, 但 Compose 不会自己还
+                        modifier = Modifier.restoreFocusAfter(stickerPickerOpen),
+                    )
+                    TvReplyActionButton(
+                        text = stringResource(if (previewing) Lang.comment_edit else Lang.comment_preview),
+                        icon = if (previewing) Icons.Rounded.Edit else Icons.Rounded.Visibility,
+                        onClick = { editorState.togglePreview() },
+                        upFocusRequester = actionUpFocus,
+                    )
                     TvReplySendButton(
                         onClick = send,
                         sending = sending,
                         focusRequester = sendFocusRequester,
-                        upFocusRequester = fieldFocusRequester,
+                        upFocusRequester = actionUpFocus,
                     )
                 }
             }
+        }
+
+        // 表情选择器: 盖在本弹窗之上 (同一个全屏 Box 里的第二个孩子). 返回键先关它再关本弹窗,
+        // 由根路由处理 (见 TvEpisodeScreen) —— 它在弹窗之上, 但按键仍走那唯一一条路由
+        if (stickerPickerOpen) {
+            TvStickerPicker(
+                selectedPackIndex = stickerPackIndex,
+                onSelectPack = { stickerPackIndex = it },
+                onPick = { token ->
+                    editorState.insertTextAt(token)
+                    // 挑中即关: 见 TvStickerPicker 的注释
+                    editorState.toggleStickerPanelState(false)
+                },
+                modifier = Modifier.matchParentSize(),
+            )
         }
     }
 }
@@ -589,19 +717,41 @@ private fun TvCommentQuoteImage(url: String) {
     )
 }
 
+/** 上键落点; 传 null = 不指定 (预览态下输入框不在场, 指一个未附着的请求器会当场抛). */
+private fun Modifier.upFocus(requester: FocusRequester?): Modifier =
+    if (requester == null) this else focusProperties { up = requester }
+
+/** 弹窗底部那一排里除发送之外的动作 (表情 / 预览): 与发送同一款示焦, 图标在文字左边. */
+@Composable
+private fun TvReplyActionButton(
+    text: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+    upFocusRequester: FocusRequester?,
+    modifier: Modifier = Modifier,
+) {
+    AniFocusActionButton(
+        onClick = onClick,
+        modifier = modifier.upFocus(upFocusRequester),
+    ) {
+        Icon(icon, contentDescription = null, Modifier.size(18.dp))
+        Text(text, style = MaterialTheme.typography.labelLarge)
+    }
+}
+
 /** 发送按钮 (示焦规则见 [AniFocusActionButton]). */
 @Composable
 private fun TvReplySendButton(
     onClick: () -> Unit,
     sending: Boolean,
     focusRequester: FocusRequester,
-    upFocusRequester: FocusRequester,
+    upFocusRequester: FocusRequester?,
 ) {
     AniFocusActionButton(
         onClick = onClick,
         modifier = Modifier
             .focusRequester(focusRequester)
-            .focusProperties { up = upFocusRequester },
+            .upFocus(upFocusRequester),
         loading = sending,
     ) {
         // 文字 + 纸飞机 (与手机端发送按钮同一枚图标, 在文字右侧)

@@ -1197,6 +1197,7 @@
     <string name="comment_rendering">渲染中...</string>
     <string name="comment_reply">回覆評論</string>
     <string name="comment_reply_to">回覆 %1$s</string>
+    <string name="comment_new_comment">發表評論</string>
     <string name="comment_view_comment">查看評論</string>
     <string name="comment_reply_unsupported">此評論不支援回覆，僅可查看</string>
     <string name="comment_image_unavailable">圖片已失效或無法存取</string>
