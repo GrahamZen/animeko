@@ -295,7 +295,6 @@ private fun KoinApplication.otherModules(getContext: () -> Context, coroutineSco
 //            subjectCharacterRelationDao = database.subjectCharacterRelation(),
 //            subjectPersonRelationDao = database.subjectPersonRelation(),
             subjectRelationsDao = database.subjectRelations(),
-            episodeCollectionRepository = get(),
             animeScheduleRepository = get(),
             episodeService = get(),
             episodeCollectionDao = database.episodeCollection(),
@@ -308,7 +307,6 @@ private fun KoinApplication.otherModules(getContext: () -> Context, coroutineSco
         FollowedSubjectsRepository(
             subjectCollectionRepository = get(),
             animeScheduleRepository = get(),
-            episodeCollectionRepository = get(),
             settingsRepository = get(),
             sessionManager = get(),
         )
