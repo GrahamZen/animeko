@@ -495,22 +495,6 @@ private fun TvPlayerPillsRow(
     pillsModifier: Modifier = Modifier,
     modifier: Modifier = Modifier,
 ) {
-    // "一起看"胶囊的显隐在本行 (而不是胶囊自己) 判断: 用户可以在弹窗的 ⋮ 里关掉整个功能,
-    // 那一下按钮连同它自己的焦点善后逻辑一起被移除, 只有留在场上的父级能接手 —— 把焦点送回
-    // 进度条 (与从面板按返回同一个落点). 没有这一手就是按钮消失 + 焦点消失, 方向键全失效.
-    val watchTogetherEnabled = LocalWatchTogetherEntry.current.enabled
-    var watchTogetherWasEnabled by remember { mutableStateOf(false) }
-    LaunchedEffect(watchTogetherEnabled) {
-        if (watchTogetherEnabled) {
-            watchTogetherWasEnabled = true
-            return@LaunchedEffect
-        }
-        // 一开始就没开 (或控制层刚组合出来) 不算"刚被关掉", 不能抢焦点
-        if (!watchTogetherWasEnabled) return@LaunchedEffect
-        watchTogetherWasEnabled = false
-        overlay.focusProgress()
-    }
-
     Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         // 胶囊本体单独成组占满剩余宽度, 把 trailing 顶到最右.
         // 焦点区域上报只挂这一组, 不含 trailing: 那颗按钮聚焦时不该把图标行收起
@@ -562,20 +546,20 @@ private fun TvPlayerPillsRow(
                 danmakuEditorState = danmakuEditorState,
                 vm = vm,
             )
-            if (watchTogetherEnabled) TvWatchTogetherPill(overlay)
         }
         trailing()
     }
 }
 
 /**
- * 胶囊行末尾的"一起看"入口 (承担遥控器上没有的悬浮气泡的作用). 弹窗本体挂在应用根部,
- * 这里只负责开与善后.
+ * "一起看"入口 (承担遥控器上没有的悬浮气泡的作用). 弹窗本体挂在应用根部, 这里只负责开与善后.
  *
- * 显隐由 [TvPlayerPillsRow] 判断 —— 功能被关掉时本组合整个消失, 焦点善后只能由父级做.
+ * 原先是胶囊行末尾那颗带文字的胶囊, 现已并入进度条下面的图标行, 与其余功能按钮同为圆钮.
+ *
+ * 显隐由 [TvPlayerBottomRow] 判断 —— 功能被关掉时本组合整个消失, 焦点善后只能由父级做.
  */
 @Composable
-private fun TvWatchTogetherPill(
+private fun TvWatchTogetherButton(
     overlay: TvPlayerOverlayState,
     modifier: Modifier = Modifier,
 ) {
@@ -588,40 +572,18 @@ private fun TvWatchTogetherPill(
         onDispose { if (dialogVisible) overlay.onPopupExpandedChanged(false) }
     }
 
-    val interactionSource = remember { MutableInteractionSource() }
-    val focused by interactionSource.collectIsFocusedAsState()
-    Surface(
+    TvBottomRowIcon(
+        icon = Icons.Rounded.SyncAlt,
+        contentDescription = stringResource(Lang.watch_together_title),
         onClick = { entry.open(overDarkBackground = true) },
-        modifier = modifier
-            // 关掉后焦点还给本按钮: 弹窗是独立窗口, 关闭时主窗口未必把焦点还到原处,
-            // 不还的话控制层还在但方向键全失效.
-            // 控制层已经收起时放弃: 那时焦点归属由根路由的解析器负责, 再抢就是打架
-            .restoreFocusAfter(
-                dialogVisible,
-                abandon = { overlay.layer != TvPlayerLayer.CONTROLS },
-            )
-            .onFocusChanged {
-                // 与弹幕发送圆钮同理: 本按钮不是面板触发器, 聚焦到它时收起浮出的面板
-                if (it.hasFocus) overlay.activePanel = null
-            },
-        shape = CircleShape,
-        color = if (focused) Color.White else Color.White.copy(alpha = 0.14f),
-        contentColor = if (focused) Color.Black else Color.White,
-        interactionSource = interactionSource,
-    ) {
-        Row(
-            Modifier.padding(horizontal = TV_PILL_PADDING_H, vertical = TV_PILL_PADDING_V),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Rounded.SyncAlt, null, Modifier.size(TV_PILL_ICON_SIZE))
-            Text(
-                stringResource(Lang.watch_together_title),
-                style = MaterialTheme.typography.labelMedium,
-                maxLines = 1,
-            )
-        }
-    }
+        // 关掉后焦点还给本按钮: 弹窗是独立窗口, 关闭时主窗口未必把焦点还到原处,
+        // 不还的话控制层还在但方向键全失效.
+        // 控制层已经收起时放弃: 那时焦点归属由根路由的解析器负责, 再抢就是打架
+        modifier = modifier.restoreFocusAfter(
+            dialogVisible,
+            abandon = { overlay.layer != TvPlayerLayer.CONTROLS },
+        ),
+    )
 }
 
 /** 单个胶囊按钮: 聚焦白底黑字 (Prime 样式), 同时浮出对应面板. */
@@ -857,6 +819,21 @@ private fun TvPlayerBottomRow(
 ) {
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
+    // "一起看"按钮的显隐在本行 (而不是按钮自己) 判断: 用户可以在弹窗的 ⋮ 里关掉整个功能,
+    // 那一下按钮连同它自己的焦点善后逻辑一起被移除, 只有留在场上的父级能接手 —— 把焦点送回
+    // 进度条 (与从面板按返回同一个落点). 没有这一手就是按钮消失 + 焦点消失, 方向键全失效.
+    val watchTogetherEnabled = LocalWatchTogetherEntry.current.enabled
+    var watchTogetherWasEnabled by remember { mutableStateOf(false) }
+    LaunchedEffect(watchTogetherEnabled) {
+        if (watchTogetherEnabled) {
+            watchTogetherWasEnabled = true
+            return@LaunchedEffect
+        }
+        // 一开始就没开 (或本行刚组合出来) 不算"刚被关掉", 不能抢焦点
+        if (!watchTogetherWasEnabled) return@LaunchedEffect
+        watchTogetherWasEnabled = false
+        overlay.focusProgress()
+    }
     CompositionLocalProvider(
         LocalContentColor provides Color.White,
         LocalTextStyle provides MaterialTheme.typography.labelMedium,
@@ -918,6 +895,10 @@ private fun TvPlayerBottomRow(
                 contentDescription = stringResource(Lang.subject_episode_danmaku_settings_title),
                 onClick = { sheetsController.navigateTo(EpisodeVideoSideSheetPage.PLAYER_SETTINGS) },
             )
+            // 一起看: 与弹幕同属"和别人一起看"那一类, 所以并进本组末尾. 位置的取舍是 ——
+            // 一次观看里最多开一次, 排不到从头开始/下一集/换源前面; 但再往右就是收藏/统计
+            // 那些低频项与右半边的设置类按钮, 一个招牌功能埋在那儿要多按七八下才够得着
+            if (watchTogetherEnabled) TvWatchTogetherButton(overlay)
 
             // 左右两块之间的弹性留白 (常用组靠左, 其余靠右)
             Spacer(Modifier.weight(1f))
