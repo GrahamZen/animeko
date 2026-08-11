@@ -89,6 +89,7 @@ import me.him188.ani.app.ui.foundation.animation.ProvideAniMotionCompositionLoca
 import androidx.compose.ui.graphics.Color
 import me.him188.ani.app.ui.foundation.LocalAniUiBehavior
 import me.him188.ani.app.ui.foundation.effects.OnLifecycleEvent
+import me.him188.ani.app.ui.foundation.effects.rememberNoticeSoundPlayer
 import me.him188.ani.app.ui.foundation.playback.LocalPlaybackSessionEntry
 import me.him188.ani.app.ui.foundation.playback.PlaybackSessionEntry
 import me.him188.ani.app.ui.foundation.watchtogether.LocalWatchTogetherEntry
@@ -200,8 +201,15 @@ fun AniAppContent(aniNavigator: AniNavigator) {
         // 回来, 而卡住了 (换源也救不回来/没搜到/等他手选) 更要说, 否则他会一直等一个不会来的就绪提示
         val toaster = LocalToaster.current
         val noticeTexts = rememberRetainedPlaybackNoticeTexts()
-        LaunchedEffect(playbackSessionHolder, toaster, noticeTexts) {
-            playbackSessionHolder.notices.collect { toaster.toast(noticeTexts.textOf(it)) }
+        // 还要响一声: 这些提示的前提就是用户没在看着屏幕 (退出播放页去翻别的, 或者干脆没看电视),
+        // 只给一条会自己消失的 toast 等于没提示. 只有这一组提示配声音, 普通 toast 不配 ——
+        // 错误提示全应用到处都有, 每条都响会很吵
+        val playNoticeSound = rememberNoticeSoundPlayer()
+        LaunchedEffect(playbackSessionHolder, toaster, noticeTexts, playNoticeSound) {
+            playbackSessionHolder.notices.collect {
+                toaster.toast(noticeTexts.textOf(it))
+                playNoticeSound()
+            }
         }
         // 会话在后台也要有个组合挂载点 (WEB 源解析的 WebView 宿主), 详见该函数的注释
         playbackSessionHolder.ComposeRetainedContent()
