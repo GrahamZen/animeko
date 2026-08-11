@@ -18,6 +18,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.layout.Arrangement
@@ -26,17 +27,16 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -66,30 +66,37 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.intl.Locale
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.compose.collectAsLazyPagingItemsWithLifecycle
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import me.him188.ani.app.data.models.player.EpisodeHistory
 import me.him188.ani.app.data.models.recommend.RecommendedSubjectInfo
 import me.him188.ani.app.data.models.subject.ContinueWatchingStatus
 import me.him188.ani.app.data.models.subject.SubjectCollectionInfo
@@ -108,20 +115,27 @@ import me.him188.ani.app.domain.foundation.LoadError
 import me.him188.ani.app.domain.usecase.GlobalKoin
 import me.him188.ani.app.navigation.LocalNavigator
 import me.him188.ani.app.navigation.SubjectDetailPlaceholder
-import me.him188.ani.app.ui.foundation.navigation.BackHandler
+import me.him188.ani.app.tools.WeekFormatter
 import me.him188.ani.app.ui.foundation.AsyncImage
 import me.him188.ani.app.ui.foundation.consumeHeldConfirmKey
+import me.him188.ani.app.ui.foundation.focus.TvScrollAnimator
+import me.him188.ani.app.ui.foundation.focus.tvAnchorBringIntoViewSpec
+import me.him188.ani.app.ui.foundation.focus.resolveFocusRepeatedly
+import me.him188.ani.app.ui.foundation.focus.tvFocusMoveRateLimit
 import me.him188.ani.app.ui.foundation.ifThen
+import me.him188.ani.app.ui.foundation.navigation.BackHandler
+import me.him188.ani.app.ui.foundation.session.TvNavigationRailDefaults
 import me.him188.ani.app.ui.foundation.stateOf
 import me.him188.ani.app.ui.foundation.theme.AniThemeDefaults
 import me.him188.ani.app.ui.foundation.theme.LocalThemeSettings
-import me.him188.ani.app.ui.foundation.tv.TvHeroButton
-import me.him188.ani.app.ui.foundation.tv.TvPortraitCard
-import me.him188.ani.app.ui.foundation.tv.TV_BACKDROP_LEFT_FADE_END
 import me.him188.ani.app.ui.foundation.tv.TV_BACKDROP_ASPECT_RATIO
+import me.him188.ani.app.ui.foundation.tv.TV_CARD_FOCUS_GAP
 import me.him188.ani.app.ui.foundation.tv.TV_BACKDROP_BOTTOM_FADE_START
 import me.him188.ani.app.ui.foundation.tv.TV_BACKDROP_CROSSFADE_MILLIS
+import me.him188.ani.app.ui.foundation.tv.TV_BACKDROP_LEFT_FADE_END
+import me.him188.ani.app.ui.foundation.tv.TV_BACKDROP_LEFT_FADE_START
 import me.him188.ani.app.ui.foundation.tv.TV_HERO_MEDIA_DEBOUNCE_MILLIS
+import me.him188.ani.app.ui.foundation.tv.TV_HERO_SUMMARY_WIDTH_FRACTION
 import me.him188.ani.app.ui.foundation.tv.TV_HERO_TEXT_FADE_MILLIS
 import me.him188.ani.app.ui.foundation.tv.TV_HERO_TITLE_WIDTH_FRACTION
 import me.him188.ani.app.ui.foundation.tv.TV_PAGE_BOTTOM_SCRIM_HEIGHT
@@ -131,16 +145,16 @@ import me.him188.ani.app.ui.foundation.tv.TV_PAGE_CARD_WIDTH
 import me.him188.ani.app.ui.foundation.tv.TV_PAGE_END_PAD
 import me.him188.ani.app.ui.foundation.tv.TV_PAGE_HINT_BOTTOM_PAD
 import me.him188.ani.app.ui.foundation.tv.TV_PAGE_HINT_ICON_SIZE
-import me.him188.ani.app.ui.foundation.tv.TV_BACKDROP_LEFT_FADE_START
-import me.him188.ani.app.ui.foundation.tv.TV_HERO_SUMMARY_WIDTH_FRACTION
+import me.him188.ani.app.ui.foundation.tv.TV_PORTRAIT_CARD_COVER_RATIO
+import me.him188.ani.app.ui.foundation.tv.TvHeroButton
+import me.him188.ani.app.ui.foundation.tv.TvPortraitCard
+import me.him188.ani.app.ui.foundation.tv.TvPortraitCardFocusRing
 import me.him188.ani.app.ui.foundation.tv.tvBackdropFadeFromBlackStops
 import me.him188.ani.app.ui.foundation.tv.tvBackdropFadeToBlackStops
 import me.him188.ani.app.ui.foundation.tv.tvHeroContentColor
 import me.him188.ani.app.ui.foundation.tv.tvHeroMarqueeIterations
-import me.him188.ani.app.ui.foundation.tv.tvPlayKeyForceRefresh
-import me.him188.ani.app.ui.foundation.focus.TvScrollAnimator
-import me.him188.ani.app.ui.foundation.focus.resolveFocusRepeatedly
 import me.him188.ani.app.ui.foundation.tv.tvHeroSecondaryContentColor
+import me.him188.ani.app.ui.foundation.tv.tvPlayKeyForceRefresh
 import me.him188.ani.app.ui.foundation.widgets.LocalToaster
 import me.him188.ani.app.ui.foundation.widgets.showLoadError
 import me.him188.ani.app.ui.lang.Lang
@@ -150,17 +164,16 @@ import me.him188.ani.app.ui.lang.exploration_schedule
 import me.him188.ani.app.ui.lang.exploration_tv_air_date
 import me.him188.ani.app.ui.lang.exploration_tv_all_caught_up
 import me.him188.ani.app.ui.lang.exploration_tv_minutes_left
-import me.him188.ani.app.ui.lang.exploration_tv_watched_latest
-import me.him188.ani.app.ui.lang.subject_progress_updates_on
-import me.him188.ani.app.ui.lang.tv_card_remote_hint
-import me.him188.ani.app.tools.WeekFormatter
-import me.him188.ani.datasources.api.toLocalDateOrNull
 import me.him188.ani.app.ui.lang.exploration_tv_next_episode
 import me.him188.ani.app.ui.lang.exploration_tv_watch_now
+import me.him188.ani.app.ui.lang.exploration_tv_watched_latest
 import me.him188.ani.app.ui.lang.playback_history_episode_label
+import me.him188.ani.app.ui.lang.subject_progress_updates_on
+import me.him188.ani.app.ui.lang.tv_card_remote_hint
 import me.him188.ani.app.ui.subject.AiringLabel
 import me.him188.ani.app.ui.subject.AiringLabelState
 import me.him188.ani.app.ui.subject.collection.components.EditCollectionTypeDropDown
+import me.him188.ani.datasources.api.toLocalDateOrNull
 import me.him188.ani.datasources.api.topic.UnifiedCollectionType
 import me.him188.ani.utils.analytics.Analytics
 import me.him188.ani.utils.analytics.AnalyticsEvent.Companion.SubjectEnter
@@ -170,10 +183,36 @@ import org.jetbrains.compose.resources.stringResource
 /**
  * TV 沉浸式探索页: 全屏背景为聚焦条目的 TMDB backdrop (左/下渐隐入背景色),
  * 上半区展示聚焦条目的标题 / Bangumi 评分数字 + 连载信息 / 简介; 下半区为可滚动的卡片区 ——
- * 最高热点与继续观看横向延伸, 推荐纵向无限行. 卡片全部为竖版封面, 聚焦时主题色外圈.
+ * 继续观看一行 + 推荐纵向无限行, 全部为固定锚点轮播 (聚焦框钉死, 卡片在框下滑动).
  *
- * 数据加载全异步不阻塞 UI: 聚焦换卡先立即换标题, Bangumi 文字信息 (一次请求, 本地有缓存) 先到先显,
- * TMDB backdrop 慢到慢显 (crossfade). 每个条目的结果都缓存, 回焦即时显示.
+ * ## 布局架构: 三层叠放, 卡片区几何恒定
+ *
+ * 页面根是一个 Box, 三层互不挤压:
+ *  1. hero 覆盖层 (信息块 + 展开态按钮), 顶在 [TV_EXPLORATION_HERO_TOP];
+ *  2. 锚位区块标签覆盖层, 钉在 [TV_EXPLORATION_LABEL_TOP] —— 区块标题本身仍是列表 item
+ *     (非聚焦区块的标题跟卡片行一起在下方可见, hero 态整段露在 hero 下方, 与 main 观感一致),
+ *     覆盖层只在行内那个**越过标签线**之后接手 (两者 alpha 互补, 见 [tvSectionHeaderAlpha]);
+ *  3. 卡片区, 顶边钉在 [TV_EXPLORATION_CARD_TOP], **不随 hero/标签的任何显隐变化**.
+ *
+ * 这是从一串真机 bug 里换来的架构结论: 旧实现把三者放同一个 Column 里 (卡片区 weight(1f)),
+ * hero 收展/标签出没都会挪卡片区顶边, 于是需要"hero 两态等高""标签段等高""几何变化与滚动
+ * 同帧"等一堆不变量与补丁, 错一个卡片就"自己动一下". 叠放层各管各的, 这类位移在结构上不存在.
+ *
+ * ## 滚动: 官方 pivot 式 BringIntoViewSpec (androidx.tv 迁移指南的推荐做法)
+ *
+ * 不手动驱动滚动. 纵向列与每条横向行各提供一个 [tvAnchorBringIntoViewSpec]: 卡片一聚焦,
+ * 框架自动把它滚到锚位 (返回"到锚位的距离"而非默认的"最小滚动到可见"), 动画即调参过的
+ * 低刚度 spring; 连续按键时框架的 UpdatableAnimationState 自动改目标、速度连续 (leanback 手感).
+ *
+ * ## 焦点: 三级"进组落点"链 (按键/下标记, 不记节点) + 两个显式落点请求
+ *
+ * 页面根 → 纵向列 → 行, 每级一个 focusProperties.onEnter 把无方向的进入改道到"上次那个":
+ * 列记上次聚焦的**行键**, 行记上次聚焦的**下标** —— 侧边栏回来、全局兜底 enter 都自动落回
+ * 原卡. 不用官方 [focusRestorer]: 它记节点引用, 行/卡滚出视口销毁后引用失效会退化成
+ * "第一个可聚焦项" (= 出血区里上一行的隐形卡), 真机表现为跳行/整行横向被拽走.
+ * 只有两处需要显式定位 (合并为两个请求状态, 解析都带到位确认+重试):
+ *  - [TvCardFocusRequest]: 聚焦指定行的指定卡 (进页恢复用保存的行键 + 返回键分层规则);
+ *  - hero 按钮请求: 聚焦 hero 的某颗按钮 (按钮只在 hero 态组合, 请求会先把它组合出来).
  */
 @Composable
 fun TvExplorationPage(
@@ -209,76 +248,76 @@ fun TvExplorationPage(
     LaunchedEffect(Unit) {
         snapshotFlow { heroTarget }.filterNotNull().collectLatest { target ->
             coroutineScope {
-            var info = infoCache[target.subjectId]
-            if (info == null) {
-                // 防抖: 快速划过卡片时不发请求
-                delay(TV_HERO_MEDIA_DEBOUNCE_MILLIS)
-                // 慢网络就等 (焦点换卡时 collectLatest 会取消, 等待无害): 之前这里包了
-                // 10s 超时, 超时静默放弃整条流水线且无重试 —— 表现为卡片只剩标题,
-                // backdrop/简介永远不出来, 换卡再回来 (结果已进缓存) 才瞬间出现.
-                // 取消异常必须重抛 (runCatching 会吞掉, 让已取消的协程继续跑到 return)
-                info = try {
-                    collectionRepo.subjectCollectionFlow(target.subjectId).first()
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    null
-                } ?: return@coroutineScope // 真实异常才放弃, 下次聚焦重试
-                infoCache[target.subjectId] = info
-            }
-            // 过期缓存自刷新: repository 的 flow 先 emit 本地缓存 (可能过期, 如收藏时"未开播"、
-            // 现已完结), 过期时会拉服务器并再次 emit. 上面 .first() 拿到旧值就取消会把刷新请求
-            // 一并取消, 过期状态永远留在页面 —— 这里持续收集, 后续 emission 覆盖 infoCache
-            // (聚焦换卡时 collectLatest 取消; 延迟一拍避免快速划卡时空转)
-            launch {
-                delay(TV_HERO_MEDIA_DEBOUNCE_MILLIS)
-                runCatching {
-                    collectionRepo.subjectCollectionFlow(target.subjectId).collect { fresh ->
-                        infoCache[target.subjectId] = fresh
+                var info = infoCache[target.subjectId]
+                if (info == null) {
+                    // 防抖: 快速划过卡片时不发请求
+                    delay(TV_HERO_MEDIA_DEBOUNCE_MILLIS)
+                    // 慢网络就等 (焦点换卡时 collectLatest 会取消, 等待无害): 之前这里包了
+                    // 10s 超时, 超时静默放弃整条流水线且无重试 —— 表现为卡片只剩标题,
+                    // backdrop/简介永远不出来, 换卡再回来 (结果已进缓存) 才瞬间出现.
+                    // 取消异常必须重抛 (runCatching 会吞掉, 让已取消的协程继续跑到 return)
+                    info = try {
+                        collectionRepo.subjectCollectionFlow(target.subjectId).first()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        null
+                    } ?: return@coroutineScope // 真实异常才放弃, 下次聚焦重试
+                    infoCache[target.subjectId] = info
+                }
+                // 过期缓存自刷新: repository 的 flow 先 emit 本地缓存 (可能过期, 如收藏时"未开播"、
+                // 现已完结), 过期时会拉服务器并再次 emit. 上面 .first() 拿到旧值就取消会把刷新请求
+                // 一并取消, 过期状态永远留在页面 —— 这里持续收集, 后续 emission 覆盖 infoCache
+                // (聚焦换卡时 collectLatest 取消; 延迟一拍避免快速划卡时空转)
+                launch {
+                    delay(TV_HERO_MEDIA_DEBOUNCE_MILLIS)
+                    runCatching {
+                        collectionRepo.subjectCollectionFlow(target.subjectId).collect { fresh ->
+                            infoCache[target.subjectId] = fresh
+                        }
                     }
                 }
-            }
-            // 继续观看: hero 背景优先用"下一集"的单集剧照, 直观提示播放进度节点.
-            // 连载番的永久缓存可能不含新播集, 传已播出最新集日期触发陈旧重取 (服务层闸门限频).
-            val nextEpisodeId = if (target.fromFollowed) info.progressInfo.nextEpisodeIdToPlay else null
-            if (nextEpisodeId != null && episodeStillCache[target.subjectId]?.episodeId != nextEpisodeId) {
-                runCatching {
-                    val language = (settingsRepository.uiSettings.flow.first().appLanguage ?: Locale.current)
-                        .toTmdbLanguage()
-                    val stills = tmdb.getEpisodeStills(
-                        target.subjectId, info.subjectInfo.name, language,
-                        newestWantedAirDate = info.episodes.newestAiredDateStringOrNull(),
-                    )
-                    stills.matchToEpisodes(info.episodes)[nextEpisodeId]
-                }.onSuccess { media ->
-                    // 存原图档 URL, 显示时才按设置降档 (见下方 backdropUrl) —— 存降档结果的话
-                    // 用户开完整视觉效果得清缓存才生效
-                    episodeStillCache[target.subjectId] =
-                        TvNextEpisodeMedia(nextEpisodeId, media?.stillUrl, media?.overview)
+                // 继续观看: hero 背景优先用"下一集"的单集剧照, 直观提示播放进度节点.
+                // 连载番的永久缓存可能不含新播集, 传已播出最新集日期触发陈旧重取 (服务层闸门限频).
+                val nextEpisodeId = if (target.fromFollowed) info.progressInfo.nextEpisodeIdToPlay else null
+                if (nextEpisodeId != null && episodeStillCache[target.subjectId]?.episodeId != nextEpisodeId) {
+                    runCatching {
+                        val language = (settingsRepository.uiSettings.flow.first().appLanguage ?: Locale.current)
+                            .toTmdbLanguage()
+                        val stills = tmdb.getEpisodeStills(
+                            target.subjectId, info.subjectInfo.name, language,
+                            newestWantedAirDate = info.episodes.newestAiredDateStringOrNull(),
+                        )
+                        stills.matchToEpisodes(info.episodes)[nextEpisodeId]
+                    }.onSuccess { media ->
+                        // 存原图档 URL, 显示时才按设置降档 (见下方 backdropUrl) —— 存降档结果的话
+                        // 用户开完整视觉效果得清缓存才生效
+                        episodeStillCache[target.subjectId] =
+                            TvNextEpisodeMedia(nextEpisodeId, media?.stillUrl, media?.overview)
+                    }
                 }
-            }
-            // 整部 backdrop: 单集剧照缺失时的兜底 (以及非继续观看行的主图), 拿到剧照就不再拉
-            val hasEpisodeStill = target.fromFollowed && episodeStillCache[target.subjectId]?.stillUrl != null
-            if (!hasEpisodeStill && target.subjectId !in backdropCache) {
-                runCatching {
-                    // 官方主背景图 (与详情页 hero 同源, 进详情零跳变); 屏保轮播才用全量列表.
-                    // 传最新已播集日期: 新番刚播时 TMDB 往往还没有 backdrop, 负缓存据此限期失效
-                    tmdb.getBackdropUrl(
-                        target.subjectId,
-                        info.subjectInfo.name,
-                        activeAsOfDate = info.episodes.newestAiredDateStringOrNull(),
-                    )
-                }.onSuccess { url ->
-                    backdropCache[target.subjectId] = url
+                // 整部 backdrop: 单集剧照缺失时的兜底 (以及非继续观看行的主图), 拿到剧照就不再拉
+                val hasEpisodeStill = target.fromFollowed && episodeStillCache[target.subjectId]?.stillUrl != null
+                if (!hasEpisodeStill && target.subjectId !in backdropCache) {
+                    runCatching {
+                        // 官方主背景图 (与详情页 hero 同源, 进详情零跳变); 屏保轮播才用全量列表.
+                        // 传最新已播集日期: 新番刚播时 TMDB 往往还没有 backdrop, 负缓存据此限期失效
+                        tmdb.getBackdropUrl(
+                            target.subjectId,
+                            info.subjectInfo.name,
+                            activeAsOfDate = info.episodes.newestAiredDateStringOrNull(),
+                        )
+                    }.onSuccess { url ->
+                        backdropCache[target.subjectId] = url
+                    }
                 }
-            }
-            // Ani 服务器简介为空时直连 bgm.tv 补 (服务端部分条目 summary 缺失, 仅替代不合并).
-            // 放在 backdrop 请求之后: 兜底请求不拖慢背景图显示.
-            // 网络错误不写缓存 (getSummary 抛出): 下次聚焦该条目重试, 不把瞬时断网当"确认没有".
-            if (info.subjectInfo.summary.isBlank() && target.subjectId !in summaryFallbackCache) {
-                runCatching { bangumiSummaryService.getSummary(target.subjectId) }
-                    .onSuccess { summaryFallbackCache[target.subjectId] = it.orEmpty() }
-            }
+                // Ani 服务器简介为空时直连 bgm.tv 补 (服务端部分条目 summary 缺失, 仅替代不合并).
+                // 放在 backdrop 请求之后: 兜底请求不拖慢背景图显示.
+                // 网络错误不写缓存 (getSummary 抛出): 下次聚焦该条目重试, 不把瞬时断网当"确认没有".
+                if (info.subjectInfo.summary.isBlank() && target.subjectId !in summaryFallbackCache) {
+                    runCatching { bangumiSummaryService.getSummary(target.subjectId) }
+                        .onSuccess { summaryFallbackCache[target.subjectId] = it.orEmpty() }
+                }
             }
         }
     }
@@ -351,94 +390,195 @@ fun TvExplorationPage(
             }
         }
 
-    // 最高热度改为 Hero 轮播 (无卡片行): 两枚操作按钮 (立即观看 / 更多详细内容) + 右侧不可聚焦
-    // 的轮播指示器. 焦点在按钮上 = TRENDING, hero 由 carouselIndex 驱动. 焦点在按钮上时左右键手动切换轮播
-    // (在第一个条目按左键则不消费, 交给焦点系统去聚焦侧边栏探索按钮); 用户静止一段时间后自动轮播下一个.
+    // ------------------------------------------------------------------
+    // 轮播 (hero) 状态
+    // ------------------------------------------------------------------
+    // 最高热度是 Hero 轮播 (无卡片行): 两枚操作按钮 (立即观看 / 时间表) + 右侧不可聚焦的轮播
+    // 指示器. 焦点在按钮上时左右键手动切换轮播 (第一个条目按左不消费, 交给焦点系统聚焦侧边栏);
+    // 用户静止一段时间后自动轮播下一个.
     val trending = state.trendingSubjectInfoPager
     val carouselSize = minOf(trending.itemCount, TV_CAROUSEL_MAX_DOTS)
-    // 这几个 UI 状态用 rememberSaveable 跨导航保存 (进详情页返回后区块/滚动/轮播位置不变)
     var carouselIndex by rememberSaveable { mutableIntStateOf(0) }
-    // 每次用户手动切换 +1, 用作自动轮播 LaunchedEffect 的 key: 手动操作即重置计时 ("否则就不动")
+    // 每次用户手动切换 +1, 用作自动轮播 LaunchedEffect 的 key: 手动操作即重置计时
     var carouselInteraction by remember { mutableIntStateOf(0) }
-    var focusedSection by rememberSaveable { mutableStateOf(TvExplorationSection.TRENDING) }
-    var recFocusedRow by rememberSaveable { mutableIntStateOf(0) }
-    // 返回键分层规则用: 卡片区是否持有焦点 / 当前聚焦卡在行内的真实下标
-    var cardAreaHasFocus by remember { mutableStateOf(false) }
-    var focusedCardIndexInRow by remember { mutableIntStateOf(0) }
-    // 统一焦点落点请求 (回 hero / 返回回行首卡 / 回推荐首行 / 进页恢复焦点共用, 见
-    // [TvExplorationFocusTarget]): 解析分两段 —— 页面段把纵向列表滚到目标行让它组合
-    // (hero 目标则轮询聚焦立即观看按钮), 行内段由 TvAnchoredCardRow 滚动/聚焦/到位
-    // 确认后清空本请求.
-    var focusTarget by remember { mutableStateOf<TvExplorationFocusTarget?>(null) }
-    // 进页那一刻的恢复目标快照 (focusedSection/recFocusedRow 已跨导航保存)
-    val restoreSection = remember { focusedSection }
-    val restoreRow = remember { recFocusedRow }
     val carouselItem = if (carouselSize > 0) trending[carouselIndex.coerceIn(0, carouselSize - 1)] else null
-
-    // 手动切换轮播 (delta = ±1, 循环); 同时重置自动轮播计时
     val switchCarousel: (Int) -> Unit = { delta ->
         if (carouselSize > 0) {
             carouselIndex = ((carouselIndex + delta) % carouselSize + carouselSize) % carouselSize
             carouselInteraction++
         }
     }
-    // 从卡片区顶行按上键 / 行首卡按返回: 回到 hero (统一落点解析聚焦立即观看按钮)
-    val navigateUpToHero: () -> Boolean = {
-        focusTarget = TvExplorationFocusTarget(
-            TvExplorationSection.TRENDING,
-            seq = (focusTarget?.seq ?: 0) + 1,
-        )
-        true
+
+    // ------------------------------------------------------------------
+    // 行结构 (数据驱动): 继续观看一行 (若有) + 推荐 N 行. 行号 == LazyColumn item 下标.
+    // ------------------------------------------------------------------
+    val followedItems = state.followedSubjectsPager.collectAsLazyPagingItemsWithLifecycle()
+    val recommendations = state.recommendationPager.collectAsLazyPagingItemsWithLifecycle()
+    val hasFollowed = followedItems.itemCount > 0
+    val followedRowCount = if (hasFollowed) 1 else 0
+    val recRowCount =
+        (recommendations.itemCount + TV_EXPLORATION_REC_ROW_SIZE - 1) / TV_EXPLORATION_REC_ROW_SIZE
+    val rowCount = followedRowCount + recRowCount
+    // 行键稳定跨 hasFollowed 翻转 ("继续观看"分页迟到时推荐行的键不变, 状态不串行);
+    // 页面级焦点簿记一律记**键**, 不记绝对行号 —— 绝对行号会在 followed 行迟到时整体 +1.
+    val rowKeyAt: (Int) -> String = { index ->
+        if (index < followedRowCount) TV_FOLLOWED_ROW_KEY else tvRecRowKey(index - followedRowCount)
     }
-    // 返回键分层规则 (统一在页面级决策, 页面已有完整的焦点簿记):
-    //   不在行首卡 -> 回本行首卡; 推荐区非首行的行首卡 -> 回推荐首行的首卡; 行首卡 -> 立即观看.
-    BackHandler(
-        enabled = cardAreaHasFocus && focusedSection != TvExplorationSection.TRENDING,
-    ) {
+    val rowIndexOfKey: (String) -> Int? = { key ->
         when {
-            focusedCardIndexInRow > 0 -> focusTarget = TvExplorationFocusTarget(
-                focusedSection,
-                row = recFocusedRow,
-                cardIndex = 0,
-                seq = (focusTarget?.seq ?: 0) + 1,
-            )
+            rowCount == 0 -> null
+            key == TV_FOLLOWED_ROW_KEY -> 0 // followed 行没了就退到首行 (此时首行是 rec-0)
+            else -> key.removePrefix(TV_REC_ROW_KEY_PREFIX).toIntOrNull()
+                ?.let { (followedRowCount + it).coerceAtMost(rowCount - 1) }
+        }
+    }
+    // 行键 → LazyColumn 的 item 下标. item 布局 (与下面的 items 块一一对应):
+    //   [继续观看标题, 继续观看行] (仅 hasFollowed) + [推荐标题, 推荐行 × N]
+    // 只有一个用处: 目标行没组合出来时 scrollToItem 把它滚进来 (其余定位全靠焦点驱动).
+    val itemIndexOfRowKey: (String) -> Int? = { key ->
+        val row = rowIndexOfKey(key)
+        when {
+            row == null -> null
+            row < followedRowCount -> 1 // 0 是继续观看标题
+            // 推荐区: 前面是 (继续观看标题+行)? + 推荐标题
+            else -> followedRowCount * 2 + 1 + (row - followedRowCount)
+        }
+    }
 
-            focusedSection == TvExplorationSection.RECOMMENDATIONS && recFocusedRow > 0 ->
-                focusTarget = TvExplorationFocusTarget(
-                    TvExplorationSection.RECOMMENDATIONS,
-                    row = 0,
-                    cardIndex = 0,
-                    seq = (focusTarget?.seq ?: 0) + 1,
-                )
+    // ------------------------------------------------------------------
+    // 焦点簿记 + 两个显式落点请求
+    // ------------------------------------------------------------------
+    // null = 焦点在 hero (或从未进过卡片区). 跨导航保存: 进详情页返回后恢复到同一行.
+    var focusedRowKey by rememberSaveable { mutableStateOf<String?>(null) }
+    // 聚焦卡在行内的下标 (返回键分层规则 / 继续观看播放键用); 行内恢复用各行自己保存的下标
+    var focusedCardIndex by remember { mutableIntStateOf(0) }
+    var cardAreaHasFocus by remember { mutableStateOf(false) }
+    val heroExpanded = focusedRowKey == null
+    val focusedRowIndex = focusedRowKey?.let(rowIndexOfKey)
+    // 进卡片区的落点行: 上次聚焦的行, 没有则首行 (键而非行号, 分页迟到不错位)
+    val anchorRowKey = focusedRowKey?.takeIf { rowIndexOfKey(it) != null }
+        ?: rowCount.takeIf { it > 0 }?.let { rowKeyAt(0) }
 
-            else -> navigateUpToHero()
+    // 显式落点请求 (仅两处来源: 进页恢复 / 返回键分层; 其余焦点移动全走空间搜索 + 进组落点链).
+    // 实例身份比较: 连发同参请求也能重新触发解析.
+    var cardFocusRequest by remember { mutableStateOf<TvCardFocusRequest?>(null) }
+    var heroFocusRequest by remember { mutableStateOf<TvHeroFocusButton?>(null) }
+
+    // hero 按钮的请求器 ("立即观看"那套在 state 里, 兼作进页初始焦点; 时间表钮本页私有)
+    val scheduleFocusRequester = remember { FocusRequester() }
+    val scheduleFocused = remember { mutableStateOf(false) }
+    // 卡片区纵向列表 + 两级"进组落点"请求器: columnFocusRequester = 页面外进来时先进卡片区,
+    // anchorRowRequester = 进卡片区后落到上次聚焦的那一行 (挂在该行上, 见 LazyColumn 的 onEnter)
+    val listState = rememberLazyListState()
+    val columnFocusRequester = remember { FocusRequester() }
+    val anchorRowRequester = remember { FocusRequester() }
+
+    // hero 按钮请求解析: 按钮只在 hero 态组合, 请求先把它组合出来 (heroButtonsComposed),
+    // 再轮询 requestFocus 直到聚焦标志翻真 (requestFocus 对未附着节点静默失败).
+    LaunchedEffect(heroFocusRequest) {
+        val req = heroFocusRequest ?: return@LaunchedEffect
+        resolveFocusRepeatedly(
+            arrived = {
+                if (req == TvHeroFocusButton.SCHEDULE) scheduleFocused.value
+                else state.trendingFirstItemFocused.value
+            },
+        ) {
+            runCatching {
+                if (req == TvHeroFocusButton.SCHEDULE) {
+                    scheduleFocusRequester.requestFocus()
+                } else {
+                    state.trendingFirstItemFocusRequester.requestFocus()
+                }
+            }
+        }
+        if (heroFocusRequest === req) heroFocusRequest = null
+    }
+    // 卡片落点请求的页面段: 只负责把目标行滚进组合 (行内段由 TvAnchoredCardRow 接手并在
+    // 到位后清空请求). 目标行已组合就什么都不做 —— scrollToItem 是瞬移, 平时的滚动全由
+    // 聚焦触发的 bring-into-view spring 做.
+    LaunchedEffect(cardFocusRequest) {
+        val req = cardFocusRequest ?: return@LaunchedEffect
+        resolveFocusRepeatedly(
+            attempts = 80, // 进页恢复要等分页数据到达, 比纯组合时序慢
+            arrived = { cardFocusRequest !== req }, // 行内段确认到位后清空
+        ) {
+            val item = itemIndexOfRowKey(req.rowKey)
+            if (item != null && listState.layoutInfo.visibleItemsInfo.none { it.key == req.rowKey }) {
+                runCatching { listState.scrollToItem(item) }
+            }
+        }
+        if (cardFocusRequest === req) cardFocusRequest = null
+    }
+
+    // 进页/返回的初始焦点: 曾在某行 -> 恢复该行 (cardIndex=-1: 行自己跨导航保存的聚焦卡);
+    // 首次进入或曾在 hero -> hero 主按钮. 此后页面外进来的焦点走页面根 onEnter (见下).
+    LaunchedEffect(Unit) {
+        val saved = focusedRowKey
+        if (saved != null) {
+            cardFocusRequest = TvCardFocusRequest(saved, cardIndex = -1)
+        } else {
+            heroFocusRequest = TvHeroFocusButton.PRIMARY
+        }
+    }
+
+    // hero 重新拿到焦点时列表滚回顶部 (row0 预览露在 hero 下方). bring-into-view 只在卡片
+    // 聚焦时工作, 这一条是它管不到的唯一滚动, 用同款 spring 动画器.
+    val toTopAnimator = remember { TvScrollAnimator() }
+    LaunchedEffect(heroExpanded) {
+        if (!heroExpanded) return@LaunchedEffect
+        if (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0) {
+            toTopAnimator.animateScrollToItem(listState, 0)
+        }
+        // 动画按启动那一刻算好的固定位移跑: 中途分页到达往列表头部插 item 会让它落在别处
+        // (下面那条结构 effect 此时正在滚动中, 不插手), 跑完补一次瞬时归零兜底.
+        if (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0) {
+            listState.requestScrollToItem(0)
+        }
+    }
+    // 列表头部插入 item 后重新钉回 0. hero 态的行位置全靠"列表停在 0", 而"继续观看"分页比
+    // 推荐晚到, 到达时往列表头部插入两个 item (标题 + 行) —— LazyColumn 默认保持**首个可见
+    // item 不动** (按键锚点校正滚动位置), 于是内容整体下移一个区块: 行内标题被顶进 hero 文字
+    // 里, 首行滑进出血区淡光, hero 按钮又因 firstVisibleItemIndex != 0 判为"未到顶"而隐身
+    // (冷启动必现, 往下导航一次才恢复). requestScrollToItem 顺带清掉那个键锚点, 正是这里要的.
+    // 不做动画: 数据到达不是用户动作. 滚动中 (hero 回顶动画) 不插手, 那条动画本身就停在 0.
+    LaunchedEffect(hasFollowed, rowCount) {
+        if (heroExpanded && !listState.isScrollInProgress &&
+            (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0)
+        ) {
+            listState.requestScrollToItem(0)
         }
     }
 
     // TRENDING 时轮播条目驱动 hero (标题即时, 评分/连载/简介/backdrop 异步跟上)
-    LaunchedEffect(carouselIndex, focusedSection, carouselSize) {
-        if (focusedSection == TvExplorationSection.TRENDING && carouselSize > 0) {
+    LaunchedEffect(carouselIndex, heroExpanded, carouselSize) {
+        if (heroExpanded && carouselSize > 0) {
             trending[carouselIndex.coerceIn(0, carouselSize - 1)]?.let {
                 onFocusItem(it.bangumiId, it.nameCn, null, false)
             }
         }
     }
-    // 自动轮播: 仅在 TRENDING 时推进; carouselInteraction 变化 (手动切换) 会重启本效果, 重置计时
-    LaunchedEffect(carouselSize, focusedSection, carouselInteraction) {
-        if (focusedSection != TvExplorationSection.TRENDING || carouselSize <= 1) {
-            return@LaunchedEffect
-        }
+    // 自动轮播: 仅在 hero 态推进; carouselInteraction 变化 (手动切换) 会重启本效果, 重置计时
+    LaunchedEffect(carouselSize, heroExpanded, carouselInteraction) {
+        if (!heroExpanded || carouselSize <= 1) return@LaunchedEffect
         while (true) {
             delay(TV_CAROUSEL_AUTO_ADVANCE_MILLIS)
             carouselIndex = (carouselIndex + 1) % carouselSize
         }
     }
-    // 初始/返回焦点 (统一在此处, ExplorationScreen 不再对沉浸式布局单独抢焦点; 统一走落点
-    // 解析): 首次进入或曾在 hero -> hero 主按钮; 曾在某卡片行 -> 恢复到该行此前聚焦的卡片
-    // (cardIndex = -1: 行自己跨导航保存的聚焦下标).
-    LaunchedEffect(Unit) {
-        focusTarget = TvExplorationFocusTarget(restoreSection, row = restoreRow, seq = 1)
+
+    // 返回键分层规则: 不在行首卡 -> 回本行首卡; 区块内非首行的行首卡 -> 回区块首行首卡;
+    // 区块首行的行首卡 -> hero 主按钮.
+    BackHandler(enabled = cardAreaHasFocus) {
+        val key = focusedRowKey
+        val sectionFirstKey = if (key == TV_FOLLOWED_ROW_KEY) TV_FOLLOWED_ROW_KEY else tvRecRowKey(0)
+        when {
+            key == null -> heroFocusRequest = TvHeroFocusButton.PRIMARY
+            focusedCardIndex > 0 -> cardFocusRequest = TvCardFocusRequest(key, cardIndex = 0)
+            key != sectionFirstKey -> cardFocusRequest = TvCardFocusRequest(sectionFirstKey, cardIndex = 0)
+            else -> heroFocusRequest = TvHeroFocusButton.PRIMARY
+        }
     }
+
     // hero 的播放键: 短按直接播当前轮播条目 (按钮本身走确认键进详情, 同卡片的约定),
     // 长按强制刷新在看 —— 与卡片上那套完全一致, 同一页不能两种手感
     val heroPlayKeyModifier = tvPlayKeyForceRefresh(
@@ -450,21 +590,66 @@ fun TvExplorationPage(
             } ?: false
         },
     )
+    // 继续观看行的播放键: 短按续播聚焦那部, 长按强制重拉本栏目. 一份 modifier 整行共用:
+    // 同一时刻只有一张卡有焦点, 按键只会送到那一张; 落点用页面记的"行内聚焦下标"取.
+    // 推荐行不加 —— 那里刷新没有意义 (换的是推荐结果, 不是"更没更")
+    val followedPlayKeyModifier = tvPlayKeyForceRefresh(
+        onRefresh = { state.refreshFollowedSubjects() },
+        onPlay = {
+            val subject = focusedCardIndex
+                .takeIf { focusedRowKey == TV_FOLLOWED_ROW_KEY }
+                ?.let { runCatching { followedItems.peek(it) }.getOrNull() }
+                ?.subjectInfo
+            if (subject != null) {
+                navigateToPlay(
+                    subject.subjectId, subject.displayName, subject.imageLarge,
+                    "home_followed_play",
+                )
+                true
+            } else {
+                false
+            }
+        },
+    )
 
-    Box(modifier.fillMaxSize()) {
-        // 背景 backdrop 层: 按原比例 (16:9) 缩放, 贴右上角, 高度为屏高的固定比例 (对齐 Prime 实测:
-        // 图占屏顶约 76%). 左缘/下缘渐隐入页面背景, 保证叠在渐隐区上的文字可读.
-        // 两态渐变 (Prime 两张截图实测): 焦点在 hero (轮播) 时收得晚 (下缘 58%→76% 屏高渐隐,
-        // 左缘只遮一小段); 焦点落到卡片区时下缘提前收、左缘大幅加深 (44%→72% 屏高, 清晰区只剩
-        // 右上角), 卡片行压在 <25% 可见度的长尾上. 两组停点间用动画插值平滑过渡.
+    Box(
+        modifier.fillMaxSize()
+            // 页面外进来的任何焦点 (侧边栏右键/返回、全局兜底的无方向 requestFocus) 统一在此
+            // 改道: 焦点在卡片区时送进进组落点链回上次那张卡, 否则回 hero 主按钮.
+            // 不改道的话默认 enter 落到"第一个可聚焦项" —— 卡片区向上出血后停靠线上方那一行
+            // 始终组合着且可聚焦, 焦点会落到**上一行**去 (真机: 从详情页返回 ~1s 后跳行,
+            // 1s = 导航 crossfade 时长, 详情页销毁时它身上的焦点消失触发全局兜底).
+            .focusProperties {
+                onEnter = {
+                    // 焦点在卡片区 -> 进落点链 (列记行键, 行记下标); 在 hero -> 主按钮.
+                    // requestFocus(Enter) 返回是否成功: 失败 (卡片区空 / 按钮碰巧没组合) 一律
+                    // 退回 hero 落点请求 —— 它会先把按钮组合出来再轮询聚焦, 不会让焦点悬空.
+                    val target = if (focusedRowKey != null) {
+                        columnFocusRequester
+                    } else {
+                        state.trendingFirstItemFocusRequester
+                    }
+                    val ok = runCatching { target.requestFocus(FocusDirection.Enter) }.getOrDefault(false)
+                    if (!ok) heroFocusRequest = TvHeroFocusButton.PRIMARY
+                }
+            }
+            // onEnter 只在**焦点组**节点上生效: 不加这个的话 focusProperties 会落到下面的
+            // 每个焦点目标上而不是充当进出边界, 改道根本不触发 (侧边栏回来仍落到上一行).
+            .focusGroup(),
+    ) {
+        // ------------------------------------------------------------------
+        // 背景 backdrop 层
+        // ------------------------------------------------------------------
+        // 按原比例 (16:9) 缩放, 贴右上角, 高度为屏高的固定比例 (对齐 Prime 实测: 图占屏顶约 76%).
+        // 左缘/下缘渐隐入页面背景. 两态渐变: 焦点在 hero 时收得晚, 焦点在卡片区时下缘提前收、
+        // 左缘大幅加深, 两组停点间用动画插值平滑过渡.
         val backdropCardness by animateFloatAsState(
-            if (focusedSection == TvExplorationSection.TRENDING) 0f else 1f,
+            if (heroExpanded) 0f else 1f,
             animationSpec = tween(TV_BACKDROP_STATE_ANIM_MILLIS),
             label = "backdropCardness",
         )
         // 渐隐 = 直接叠画页面底色渐变 (本页在主壳内, 图下即 shellBackgroundColor 纯色),
-        // 与旧 DstOut 擦除逐像素等价但不再需要离屏合成 —— 两态插值期间旧实现每帧把整块
-        // 3.6MP 离屏缓冲重光栅化, 是低端 GPU 的填充率大头 (2026-07-31 性能整改)
+        // 与旧 DstOut 擦除逐像素等价但不需要离屏合成 (2026-07-31 性能整改)
         val backdropFadeColor = AniThemeDefaults.shellBackgroundColor
         Crossfade(
             backdropUrl,
@@ -485,15 +670,13 @@ fun TvExplorationPage(
                             drawRect(
                                 brush = Brush.horizontalGradient(
                                     *tvBackdropFadeFromBlackStops(
-                                        // 卡片态端点用三页共享值 (轮播 hero 态维持自己的一套)
                                         start = lerp(0f, TV_BACKDROP_LEFT_FADE_START, t),
                                         end = lerp(0.46f, TV_BACKDROP_LEFT_FADE_END, t),
                                         color = backdropFadeColor,
                                     ),
                                 ),
                             )
-                            // 下缘渐隐: 零斜率极缓起步 + 指数级长尾渐近全遮, 一直渐变到图底,
-                            // 两端都看不到分界线 (图坐标; 50% 遮盖点 hero 态 ≈ 屏高 65%, 卡片态 ≈ 55%)
+                            // 下缘渐隐: 零斜率极缓起步 + 指数级长尾渐近全遮, 一直渐变到图底
                             drawRect(
                                 brush = Brush.verticalGradient(
                                     *tvBackdropFadeToBlackStops(
@@ -519,418 +702,173 @@ fun TvExplorationPage(
             }
         }
 
-        // 内容列: 左侧再留 TV_EXPLORATION_START_PAD (外层已让开侧边栏 48dp) ——
-        // 总左缘 64dp, 使侧边栏按钮中心 (32dp) 恰好在屏幕左缘与内容左缘的正中间
-        Column(
-            Modifier.fillMaxSize()
-                .padding(start = TV_EXPLORATION_START_PAD),
-        ) {
-            val heroExpanded = focusedSection == TvExplorationSection.TRENDING
-            // Hero 区: 信息块 (固定高度, 保证不同条目切换时卡片区不跳) + 展开态才有的操作按钮 (在其下方,
-            // 短间距). 右侧居中悬浮不可聚焦的轮播指示器 (仅展开态). 焦点移到下方卡片时按钮/指示器消失,
-            // 卡片区 (weight) 顺势上移贴住信息块 —— 无大片空白.
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(top = 28.dp, end = TV_PAGE_END_PAD),
-            ) {
-                Column(Modifier.fillMaxWidth()) {
-                    // 顶部固定 (对齐 backdrop 顶部); 高度即"介绍块上下边界距离": 展开态用标准高度,
-                    // 卡片区聚焦时用 COLLAPSED 高度并让文字底对齐 —— 块变高时文字下边界随之下移并
-                    // 紧贴下方卡片, 一个变量同时控制介绍下边界与卡片行位置.
-                    // 换轮播/聚焦条目时整块文字渐隐渐现 (contentKey=条目), 消除瞬时替换的闪动;
-                    // 过渡期间退场内容读退场条目自己的缓存数据. 块内始终顶对齐: 标题固定在块顶,
-                    // 有 info 时简介 weight(1f) 撑满至块底; 无 info (等 API) 时标题仍停在顶部,
-                    // info 到达不引起位置跳动 —— 加载前后文字位置一致.
-                    AnimatedContent(
-                        targetState = heroTarget,
-                        modifier = Modifier.fillMaxWidth()
-                            .height(if (heroExpanded) TV_HERO_INFO_HEIGHT else TV_HERO_INFO_HEIGHT_COLLAPSED),
-                        transitionSpec = {
-                            fadeIn(tween(TV_HERO_TEXT_FADE_MILLIS)) togetherWith
-                                    fadeOut(tween(TV_HERO_TEXT_FADE_MILLIS))
-                        },
-                        contentKey = { it?.subjectId },
-                        label = "heroInfoText",
-                    ) { target ->
-                        val info = target?.let { infoCache[it.subjectId] }
-                        Column(
-                            Modifier.fillMaxSize(),
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            if (target != null) {
-                                // 定高一行 + 超宽跑马灯 (宽度框不变): 长标题原本会换到第二行,
-                                // 把介绍挤掉一行, 且不同条目间标题一行/两行来回跳
-                                Text(
-                                    target.title,
-                                    Modifier.fillMaxWidth(TV_HERO_TITLE_WIDTH_FRACTION)
-                                        .basicMarquee(iterations = tvHeroMarqueeIterations()),
-                                    color = tvHeroContentColor(),
-                                    style = MaterialTheme.typography.headlineLarge,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    overflow = TextOverflow.Clip, // 跑马灯滚全文, 不要省略号
-                                )
-                            }
-                            if (info != null) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                                ) {
-                                    // 评分: ★ 评分数字/10
-                                    val score = info.subjectInfo.ratingInfo.score
-                                    if ((score.toFloatOrNull() ?: 0f) > 0f) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                        ) {
-                                            Icon(
-                                                Icons.Rounded.Star,
-                                                contentDescription = null,
-                                                Modifier.size(18.dp),
-                                                tint = MaterialTheme.colorScheme.primary,
-                                            )
-                                            Text(
-                                                "$score/10",
-                                                color = MaterialTheme.colorScheme.primary,
-                                                style = MaterialTheme.typography.titleMedium,
-                                            )
-                                        }
-                                    }
-                                    // 连载信息, 后面跟一个空格 + 开播年月
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        AiringLabel(
-                                            remember(info) {
-                                                AiringLabelState(
-                                                    stateOf(info.airingInfo),
-                                                    stateOf(info.progressInfo),
-                                                )
-                                            },
-                                            style = MaterialTheme.typography.labelLarge,
-                                            progressColor = tvHeroSecondaryContentColor(),
-                                        )
-                                        val airDate = info.subjectInfo.airDate
-                                        if (airDate.isValid) {
-                                            Text(
-                                                "    " + stringResource(
-                                                    Lang.exploration_tv_air_date,
-                                                    airDate.year, airDate.month,
-                                                ),
-                                                color = tvHeroSecondaryContentColor(),
-                                                style = MaterialTheme.typography.labelLarge,
-                                            )
-                                        }
-                                    }
-                                }
-                                // 继续观看: 独立一行显示下一集集号 + 集名 (Bangumi 本地数据, 即时显示)
-                                val nextEp = if (target?.fromFollowed == true) {
-                                    info.progressInfo.nextEpisodeIdToPlay?.let { nextId ->
-                                        info.episodes.firstOrNull { it.episodeId == nextId }
-                                    }
-                                } else null
-                                if (nextEp != null) {
-                                    val epLabel = stringResource(
-                                        Lang.playback_history_episode_label,
-                                        nextEp.episodeInfo.sort.toString(),
-                                    )
-                                    val epName = nextEp.episodeInfo.nameCn.ifBlank { nextEp.episodeInfo.name }
-                                    // 三态 (nextEp 语义见 SubjectProgressInfo.compute — 追平时指回已看完的最新一集):
-                                    //  - 已看完最新一集/全部 (Watched/Done): "第 8 集 · 集名 · 已看完"
-                                    //  - 看到一半 (有播放记录): "第 4 集 · 集名 · 剩余 23 分钟"
-                                    //  - 看完上一集且有新集/还没开始: "下一集: 第 4 集 · 集名".
-                                    // 集号与尾段为固定段永不截断; 集名居中段, 超长跑马灯滚动展示全文
-                                    val caughtUp = info.progressInfo.continueWatchingStatus.let {
-                                        it is ContinueWatchingStatus.Watched || it is ContinueWatchingStatus.Done
-                                    }
-                                    val remainingMinutes = if (caughtUp) null else playHistories
-                                        .firstOrNull { it.episodeId == nextEp.episodeId }
-                                        ?.let { history ->
-                                            val duration = history.durationMillis
-                                            if (duration != null && duration > 0 && history.positionMillis > 0) {
-                                                // 向上取整: 剩 30 秒也显示 1 分钟
-                                                (((duration - history.positionMillis).coerceAtLeast(0L) + 59_999) / 60_000)
-                                                    .toInt().coerceAtLeast(1)
-                                            } else null
-                                        }
-                                    Row(
-                                        Modifier.fillMaxWidth(TV_HERO_SUMMARY_WIDTH_FRACTION)
-                                            // 定高使"本行 + 10dp 列间距"恰为简介两行行距 (2×20dp):
-                                            // 有无此行时简介的换行网格对齐, 最后一行结束位置一致,
-                                            // 继续观看/推荐两态下文字到下方卡片的距离才相同
-                                            .height(TV_HERO_STATUS_ROW_HEIGHT),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        val epInfoColor = tvHeroSecondaryContentColor()
-                                        val epInfoStyle = MaterialTheme.typography.labelLarge
-                                        Text(
-                                            if (caughtUp || remainingMinutes != null) epLabel
-                                            else stringResource(Lang.exploration_tv_next_episode, epLabel),
-                                            color = epInfoColor,
-                                            style = epInfoStyle,
-                                            maxLines = 1,
-                                        )
-                                        if (epName.isNotBlank()) {
-                                            Text(
-                                                " · $epName",
-                                                Modifier.weight(1f, fill = false)
-                                                    .basicMarquee(iterations = tvHeroMarqueeIterations()),
-                                                color = epInfoColor,
-                                                style = epInfoStyle,
-                                                maxLines = 1,
-                                                softWrap = false,
-                                                overflow = TextOverflow.Clip,
-                                            )
-                                        }
-                                        if (caughtUp) {
-                                            // 连载已追平: "已看完最新一集 · 周三更新" (更新时间同详情页观看按钮,
-                                            // WeekFormatter); 完结看完: "已看完"
-                                            val watchedStatus = info.progressInfo.continueWatchingStatus
-                                                    as? ContinueWatchingStatus.Watched
-                                            val updatesOn = watchedStatus?.nextEpisodeAirDate?.toLocalDateOrNull()
-                                                ?.let { date ->
-                                                    stringResource(
-                                                        Lang.subject_progress_updates_on,
-                                                        WeekFormatter.System.format(date),
-                                                    )
-                                                }
-                                            Text(
-                                                " · " + (
-                                                    if (watchedStatus != null) {
-                                                        stringResource(Lang.exploration_tv_watched_latest)
-                                                    } else {
-                                                        stringResource(Lang.exploration_tv_all_caught_up)
-                                                    }
-                                                    ) + (updatesOn?.let { " · $it" } ?: ""),
-                                                color = epInfoColor,
-                                                style = epInfoStyle,
-                                                maxLines = 1,
-                                            )
-                                        } else if (remainingMinutes != null) {
-                                            Text(
-                                                " · " + stringResource(
-                                                    Lang.exploration_tv_minutes_left, remainingMinutes,
-                                                ),
-                                                color = epInfoColor,
-                                                style = epInfoStyle,
-                                                maxLines = 1,
-                                            )
-                                        }
-                                    }
-                                }
-                                // 简介占满信息块剩余高度: 行数由 TV_HERO_INFO_HEIGHT 决定; 宽度用单独的
-                                // HERO_SUMMARY_WIDTH_FRACTION, 调小让右边留给 backdrop 清晰区, 文字更易读.
-                                // 继续观看: 优先展示下一集的 TMDB 单集简介 (回忆剧情起点), 缺失回退整部简介
-                                val nextEpOverview = target?.takeIf { it.fromFollowed }
-                                    ?.let { episodeStillCache[it.subjectId]?.overview }
-                                    ?.takeIf { it.isNotBlank() }
-                                Text(
-                                    nextEpOverview
-                                        ?: info.subjectInfo.summary.trim()
-                                            .ifBlank { target?.let { summaryFallbackCache[it.subjectId] }.orEmpty() },
-                                    Modifier.weight(1f).fillMaxWidth(TV_HERO_SUMMARY_WIDTH_FRACTION),
-                                    color = tvHeroContentColor(),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                        }
-                    }
-
-                    // 按钮块 (仅展开态): 一颗作用于当前轮播条目的动作钮 + 一颗页面级入口.
-                    // 左右键手动切换轮播, 首个条目按左不消费, 交给焦点系统去聚焦侧边栏探索按钮.
-                    // 关闭 48dp 最小可交互尺寸约束, 否则缩小后的按钮被撑到 48dp 高、内容居中,
-                    // 两枚之间会出现空白.
-                    if (heroExpanded) {
-                        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
-                            Column(
-                                Modifier
-                                    .padding(top = TV_HERO_INFO_TO_BUTTONS_GAP)
-                                    .then(heroPlayKeyModifier)
-                                    .onPreviewKeyEvent { event ->
-                                        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                                        when (event.key) {
-                                            Key.DirectionLeft -> {
-                                                if (carouselIndex > 0) {
-                                                    switchCarousel(-1)
-                                                    true
-                                                } else {
-                                                    false // 第一个条目: 交给焦点系统 -> 侧边栏探索按钮
-                                                }
-                                            }
-
-                                            Key.DirectionRight -> {
-                                                switchCarousel(1)
-                                                true
-                                            }
-
-                                            else -> false
-                                        }
-                                    },
-                                verticalArrangement = Arrangement.spacedBy(TV_HERO_BUTTON_GAP),
-                            ) {
-                                // hero 只留一颗动作钮, 与卡片同一套约定: 确认 = 进详情,
-                                // 播放键 = 直接播 (见 heroPlayKeyModifier; 右下角提示已公示).
-                                // 图标用播放三角与遥控器播放键呼应 —— 省下的那一行给时间表入口
-                                TvHeroButton(
-                                    text = stringResource(Lang.exploration_tv_watch_now),
-                                    icon = Icons.Rounded.PlayArrow,
-                                    filled = true,
-                                    onClick = {
-                                        carouselItem?.let {
-                                            navigateToSubject(it.bangumiId, it.nameCn, it.imageLarge, "home_trending_detail")
-                                        }
-                                    },
-                                    onFocused = { focusedSection = TvExplorationSection.TRENDING },
-                                    // 进入主页 / 从卡片区按上返回时的聚焦目标
-                                    focusRequester = state.trendingFirstItemFocusRequester,
-                                    onFocusChangedExtra = { state.trendingFirstItemFocused.value = it },
-                                )
-                                // 新番时间表入口: 页面级目的地, 与上面那颗"对当前条目的动作"不是
-                                // 同一层级 —— 用描边款区分, 间距仍与原来两颗按钮时一致
-                                TvHeroButton(
-                                    text = stringResource(Lang.exploration_schedule),
-                                    icon = Icons.Rounded.CalendarMonth,
-                                    filled = false,
-                                    onClick = { navigator.navigateSchedule() },
-                                    onFocused = { focusedSection = TvExplorationSection.TRENDING },
-                                )
-                            }
-                        }
-                    }
+        // ------------------------------------------------------------------
+        // hero 覆盖层 (z 在卡片区之下: 出血上移的离场行淡出时从它上面滑过)
+        // ------------------------------------------------------------------
+        // 左侧再留 TV_EXPLORATION_START_PAD (外层已让开侧边栏 48dp) —— 总左缘 64dp,
+        // 使侧边栏按钮中心 (32dp) 恰好在屏幕左缘与内容左缘的正中间. 下同.
+        TvExplorationHeroOverlay(
+            heroTarget = heroTarget,
+            infoCache = infoCache,
+            episodeStillCache = episodeStillCache,
+            summaryFallbackCache = summaryFallbackCache,
+            playHistories = { playHistories },
+            heroExpanded = heroExpanded,
+            heroFocusRequestActive = heroFocusRequest != null,
+            listState = listState,
+            heroPlayKeyModifier = heroPlayKeyModifier,
+            carouselIndex = { carouselIndex },
+            switchCarousel = switchCarousel,
+            onWatchNowClick = {
+                carouselItem?.let {
+                    navigateToSubject(it.bangumiId, it.nameCn, it.imageLarge, "home_trending_detail")
                 }
-            }
+            },
+            onScheduleClick = { navigator.navigateSchedule() },
+            onNavigateDownToCards = {
+                // 下键进首行 (恢复该行上次聚焦卡). 不走进组落点链: 它记的是"上次聚焦的
+                // 行", 可能在深处 —— 而 hero 态列表已滚回顶部, 用户看到的是首行, 焦点跑到
+                // 看不见的深行会把列表又拉下去.
+                if (rowCount > 0) {
+                    cardFocusRequest = TvCardFocusRequest(rowKeyAt(0), cardIndex = -1)
+                    true
+                } else {
+                    false
+                }
+            },
+            onHeroButtonFocused = { focusedRowKey = null },
+            primaryFocusRequester = state.trendingFirstItemFocusRequester,
+            onPrimaryFocusChanged = { state.trendingFirstItemFocused.value = it },
+            scheduleFocusRequester = scheduleFocusRequester,
+            onScheduleFocusChanged = { scheduleFocused.value = it },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = TV_EXPLORATION_START_PAD, top = TV_EXPLORATION_HERO_TOP, end = TV_PAGE_END_PAD),
+        )
 
-            // 卡片区: 持久透明区块标题 (显示当前聚焦区块) + 其下裁剪滚动区. LazyColumn 默认裁剪到自身
-            // 边界, 聚焦行吸到其顶部, 上方行 (含前面区块 / 推荐前几行) 被裁掉不外露 —— 满足"聚焦某区块
-            // 时上方全部挡住、推荐第二行起前面卡片看不见". 标题独立在滚动区之上, 透明浮在 backdrop 上,
-            // 不随滚动、不挡背景. 每个区块一行, 均为固定锚点轮播 (焦点靠左不动, 卡片滑动).
-            val followedItems = state.followedSubjectsPager.collectAsLazyPagingItemsWithLifecycle()
-            val recommendations = state.recommendationPager.collectAsLazyPagingItemsWithLifecycle()
-            val hasFollowed = followedItems.itemCount > 0
-
-            // 继续观看行的播放键: 短按续播聚焦那部, 长按强制重拉本栏目 (它平时只跟着仓库里
-            // 一小时一跳的定时同步走, 想立刻确认某部更没更需要一个入口).
-            // 一份 modifier 给整行共用: 同一时刻只有一张卡有焦点, 按键只会送到那一张; 落点用
-            // 页面记的"行内聚焦下标"取, 不捕获某张卡自己的数据.
-            // 推荐行不加 —— 那里刷新没有意义 (换的是推荐结果, 不是"更没更")
-            val followedPlayKeyModifier = tvPlayKeyForceRefresh(
-                onRefresh = { state.refreshFollowedSubjects() },
-                onPlay = {
-                    val subject = focusedCardIndexInRow
-                        .takeIf { focusedSection == TvExplorationSection.FOLLOWED }
-                        ?.let { runCatching { followedItems.peek(it) }.getOrNull() }
-                        ?.subjectInfo
-                    if (subject != null) {
-                        navigateToPlay(
-                            subject.subjectId, subject.displayName, subject.imageLarge,
-                            "home_followed_play",
+        // ------------------------------------------------------------------
+        // 锚位区块标签覆盖层: 钉在标签线上, 显示**聚焦行所属区块**名 —— 只在标签线上没有任何
+        // 行内标题的时候才出现 (alpha = 1 − 两个行内标题里"占着标签线"的那份, 见
+        // [tvSectionHeaderAlpha]). 于是可见的标签恒为一份: 行内标题跟着卡片一起移动, 到标签线
+        // 正好停在本层位置上 (hero → 首行那一段就是它在移动, 不是"消失后在上方出现"), 再往下
+        // 换行才越线快速淡出、由本层无缝接手.
+        //
+        // 取两者的 max 而不是只看聚焦区块那一个: 上键回"继续观看"时聚焦区块瞬间切换, 而"推荐"
+        // 标题还压在标签线上要滑下去, 只看聚焦区块的话本层会在那一帧直接跳出来, 与它叠成双词.
+        // ------------------------------------------------------------------
+        val anchorLabel = when {
+            rowCount == 0 -> null
+            (focusedRowIndex ?: 0) < followedRowCount -> stringResource(Lang.exploration_continue_watching)
+            else -> stringResource(Lang.exploration_recommendations)
+        }
+        if (anchorLabel != null) {
+            TvSectionHeader(
+                anchorLabel,
+                Modifier.padding(start = TV_EXPLORATION_START_PAD, top = TV_EXPLORATION_LABEL_TOP)
+                    .graphicsLayer {
+                        alpha = 1f - maxOf(
+                            tvSectionHeaderAlpha(listState, TV_FOLLOWED_HEADER_KEY, this),
+                            tvSectionHeaderAlpha(listState, TV_REC_HEADER_KEY, this),
                         )
-                        true
-                    } else {
-                        false
+                    },
+            )
+        }
+
+        // ------------------------------------------------------------------
+        // 卡片区: 顶边钉在 TV_EXPLORATION_CARD_TOP, 几何与 hero/标签完全解耦.
+        //
+        // 整个区向左/向上出血 (布局上仍按原尺寸参与排版, 仅测量/放置扩一段): 离场内容不被
+        // 内容区边缘 90 度硬切 —— 向左滑出的卡片压暗着滑过侧边栏区域, 向上滑出的行越过锚位
+        // 继续上移、压着 hero 区域边移边淡 (Prime 实拍: "移出去边淡", 不是原地消失). 锚位线
+        // 经 LazyRow contentPadding start / LazyColumn contentPadding top 退回原位. 出血必须
+        // 做在 Lazy 容器外面的测量层: LazyRow/LazyColumn 自带主轴硬裁剪, 行内做不到.
+        // ------------------------------------------------------------------
+        val density = LocalDensity.current
+        // 锚位 = 内容 rest 位置 (LazyColumn top contentPadding / LazyRow start contentPadding)
+        // **加上 [TV_CARD_FOCUS_GAP]**: bring-into-view 拿到的是**焦点目标**矩形, 而焦点目标是
+        // 卡片内缩一圈之后的封面, 聚焦框却画在外框上 —— 不加这一点点, 框与卡片就差 3dp 对不齐
+        // (真机肉眼可见), 且 rest 位置与 pivot 目标不一致会让首行永远差这一段.
+        val verticalBringIntoViewSpec = remember(density) {
+            tvAnchorBringIntoViewSpec(with(density) { (TV_EXPLORATION_TOP_BLEED + TV_CARD_FOCUS_GAP).toPx() })
+        }
+        val horizontalBringIntoViewSpec = remember(density) {
+            tvAnchorBringIntoViewSpec(with(density) { (TV_EXPLORATION_ROW_START_BLEED + TV_CARD_FOCUS_GAP).toPx() })
+        }
+        BoxWithConstraints(
+            Modifier.fillMaxSize()
+                .padding(start = TV_EXPLORATION_START_PAD, top = TV_EXPLORATION_CARD_TOP)
+                .layout { measurable, constraints ->
+                    val bleedX = TV_EXPLORATION_ROW_START_BLEED.roundToPx()
+                    val bleedY = TV_EXPLORATION_TOP_BLEED.roundToPx()
+                    val placeable = measurable.measure(
+                        constraints.copy(
+                            minWidth = constraints.maxWidth + bleedX,
+                            maxWidth = constraints.maxWidth + bleedX,
+                            minHeight = constraints.maxHeight + bleedY,
+                            maxHeight = constraints.maxHeight + bleedY,
+                        ),
+                    )
+                    layout(placeable.width - bleedX, placeable.height - bleedY) {
+                        placeable.place(-bleedX, -bleedY)
                     }
                 },
-            )
-
-            // 持久区块标题 (透明浮层, 显示当前聚焦区块名). TRENDING 时不需要标题 (hero 自带信息), 用极小
-            // 间距代替那 40dp 空标题, 使继续观看紧贴按钮下方 (只留 TV_HERO_BUTTONS_TO_CONTENT_GAP).
-            if (focusedSection == TvExplorationSection.TRENDING) {
-                Spacer(Modifier.height(TV_HERO_BUTTONS_TO_CONTENT_GAP))
-            } else {
-                TvSectionHeader(
-                    when (focusedSection) {
-                        TvExplorationSection.TRENDING -> ""
-                        TvExplorationSection.FOLLOWED -> stringResource(Lang.exploration_continue_watching)
-                        TvExplorationSection.RECOMMENDATIONS -> stringResource(Lang.exploration_recommendations)
-                    },
-                )
-                // 聚焦某区块时行内标题被吸顶滚出, 只剩这个持久标题紧贴卡片行 (行内标题原本的列间距消失,
-                // 显得标题贴卡). 用此间距补回标题到卡片行的距离 (与未聚焦时同一参数, 保证两种情形一致).
-                Spacer(Modifier.height(TV_SECTION_HEADER_TO_ROW_GAP))
-            }
-
-            val noBringIntoView = remember {
-                object : BringIntoViewSpec {
-                    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float = 0f
-                }
-            }
-            CompositionLocalProvider(LocalBringIntoViewSpec provides noBringIntoView) {
-                val listState = rememberLazyListState()
-                // 列表 item (标题与卡片行拆开, 已无热点行): 继续观看标题=0 行=1 (若有); 之后推荐标题 + 各行.
-                // 吸顶滚动到"卡片行"(而非标题): 聚焦区块的行内标题被裁到视口上方, 由顶部持久标题代替 (避免重复).
-                // TRENDING 时滚到 0, 让继续观看标题+首行在 hero 下方露出.
-                val recRowBase = if (hasFollowed) 3 else 1
-                // 动画器提到 effect 外: 该 effect 每次换行整个重启, 器在外面速度才能跨段继承
-                // (连按下键时行间滚动连续流动而非逐行重启)
-                val rowScrollAnimator = remember { TvScrollAnimator() }
-                LaunchedEffect(focusedSection, recFocusedRow, hasFollowed) {
-                    val target = when (focusedSection) {
-                        TvExplorationSection.TRENDING -> 0
-                        TvExplorationSection.FOLLOWED -> if (hasFollowed) 1 else 0
-                        TvExplorationSection.RECOMMENDATIONS -> recRowBase + recFocusedRow
-                    }
-                    rowScrollAnimator.animateScrollToItem(listState, target)
-                }
-                // 统一落点解析的页面段: hero 目标 -> 置 TRENDING 组合出按钮后轮询聚焦
-                // (requestFocus 未附着时静默失败, 用聚焦标志判成功); 行目标 -> 先对齐吸顶
-                // 簿记 (吸顶滚动与本目标一致, 不互相拉扯), 再滚动纵向列表让目标行组合
-                // (行内段由 TvAnchoredCardRow 接手, 到位即清空 focusTarget), 超时放弃.
-                // 行号→列表项换算每轮重算: 恢复期间"继续观看"分页到达会使推荐行整体下移.
-                LaunchedEffect(focusTarget) {
-                    val target = focusTarget ?: return@LaunchedEffect
-                    if (target.section == TvExplorationSection.TRENDING) {
-                        focusedSection = TvExplorationSection.TRENDING
-                        resolveFocusRepeatedly(arrived = { state.trendingFirstItemFocused.value }) {
-                            runCatching { state.trendingFirstItemFocusRequester.requestFocus() }
-                        }
-                        focusTarget = null
-                    } else {
-                        if (target.section == TvExplorationSection.RECOMMENDATIONS) {
-                            recFocusedRow = target.row
-                        }
-                        // attempts 80: 等"继续观看"分页数据到达比纯组合时序慢
-                        resolveFocusRepeatedly(
-                            attempts = 80,
-                            arrived = { focusTarget != target }, // 行内段已确认到位
-                        ) {
-                            val followedNow = followedItems.itemCount > 0
-                            val columnItem = when {
-                                target.section == TvExplorationSection.FOLLOWED ->
-                                    if (followedNow) 1 else null // 分页未到: 等数据
-
-                                else -> (if (followedNow) 3 else 1) + target.row
-                            }
-                            if (columnItem != null) runCatching { listState.scrollToItem(columnItem) }
-                        }
-                        if (focusTarget == target) focusTarget = null
-                    }
-                }
-
+        ) {
+            // 末行也要能停到锚位: 行尾留出"可见高度 − 一行卡高"的空白, 否则列表滚到内容底
+            // 就停住, 末行只能停在锚位下方 (固定聚焦框下错位很显眼). maxHeight 是出血后的
+            // 高度, 减掉出血才是可见高度.
+            val lastRowBottomPad = (
+                    maxHeight - TV_EXPLORATION_TOP_BLEED -
+                            TV_PAGE_CARD_WIDTH / TV_PORTRAIT_CARD_COVER_RATIO
+                    ).coerceAtLeast(TV_EXPLORATION_MIN_BOTTOM_PAD)
+            CompositionLocalProvider(LocalBringIntoViewSpec provides verticalBringIntoViewSpec) {
                 LazyColumn(
-                    Modifier.weight(1f).fillMaxWidth().clipToBounds()
+                    Modifier.fillMaxSize().clipToBounds()
+                        .focusRequester(columnFocusRequester)
+                        // 进入卡片区落回上次聚焦的行 (行内再由行自己落回上次聚焦的卡).
+                        // 同样按**键**记而不用 focusRestorer: 行滚出视口后节点销毁, 引用失效
+                        // 会退化成"第一个可聚焦项"= 出血区里上一行的隐形首卡.
+                        .focusProperties { onEnter = { runCatching { anchorRowRequester.requestFocus() } } }
+                        .focusGroup()
+                        // 长按方向键的移动频率上限: 系统连发 ~20 次/秒, 每发都换卡的话滑动
+                        // 动画不断被打断. 挂在整个卡片区上, 上下左右一起限.
+                        .tvFocusMoveRateLimit()
                         .onFocusChanged { cardAreaHasFocus = it.hasFocus },
                     state = listState,
-                    contentPadding = PaddingValues(end = TV_PAGE_END_PAD, bottom = 24.dp),
-                    verticalArrangement = Arrangement.spacedBy(TV_SECTION_HEADER_TO_ROW_GAP),
+                    contentPadding = PaddingValues(
+                        top = TV_EXPLORATION_TOP_BLEED,
+                        end = TV_PAGE_END_PAD,
+                        bottom = lastRowBottomPad,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(TV_EXPLORATION_ROW_GAP),
                 ) {
-                    // 行都带稳定 key: "继续观看"分页迟到使 hasFollowed 翻转时, 无 key 的行按
-                    // 位置错位继承状态 (rememberSaveable 的行内聚焦下标串行), 且全部行重建
+                    // 区块标题是列表 item (与 main 一致): 非聚焦区块的标题跟着卡片行一起在
+                    // 下方可见 ("继续观看"聚焦时下面看得到"推荐"), hero 态则整段露在 hero 下方
+                    // —— 于是 hero 态的行比卡片态低一个标题块, hero↔卡片切换就是这一段的
+                    // spring 滚动 (自然, 且卡片区几何恒定所以不会抖).
+                    // 标题的可见性**位置驱动**(同卡片行的 rowTopFade): 一路跟着卡片上移, 停在
+                    // 标签线上仍是它在显示, 越线才快速淡出并由固定标签覆盖层接手 —— 不做
+                    // "聚焦即透明"的瞬时切换 (那样表现为"先消失再在上方出现").
                     if (hasFollowed) {
-                        item(key = "followed-header") {
+                        item(key = TV_FOLLOWED_HEADER_KEY) {
                             TvSectionHeader(
                                 stringResource(Lang.exploration_continue_watching),
-                                transparent = focusedSection == TvExplorationSection.FOLLOWED,
+                                Modifier.padding(start = TV_EXPLORATION_ROW_START_BLEED)
+                                    .sectionHeaderTopFade(listState, TV_FOLLOWED_HEADER_KEY),
                             )
                         }
-                        item(key = "followed-row") {
-                            // 继续观看是最顶行: 按上键回到 hero
+                        item(key = TV_FOLLOWED_ROW_KEY) {
                             TvAnchoredCardRow(
                                 itemCount = followedItems.itemCount,
-                                onNavigateUp = navigateUpToHero,
-                                focusTarget = focusTarget?.takeIf {
-                                    it.section == TvExplorationSection.FOLLOWED
-                                },
-                                onFocusTargetArrived = { focusTarget = null },
+                                isFirstRow = true,
+                                onNavigateUpToHero = { heroFocusRequest = TvHeroFocusButton.SCHEDULE },
+                                focusRequest = cardFocusRequest?.takeIf { it.rowKey == TV_FOLLOWED_ROW_KEY },
+                                onFocusRequestDone = { cardFocusRequest = null },
+                                bringIntoViewSpec = horizontalBringIntoViewSpec,
+                                modifier = Modifier.rowTopFade(listState, TV_FOLLOWED_ROW_KEY)
+                                    // 进卡片区的落点行 (见 LazyColumn 的 onEnter)
+                                    .ifThen(anchorRowKey == TV_FOLLOWED_ROW_KEY) {
+                                        focusRequester(anchorRowRequester)
+                                    },
                             ) { index, reportFocus ->
                                 val item = followedItems[index]
                                 val subject = item?.subjectInfo
@@ -952,14 +890,15 @@ fun TvExplorationPage(
                                                 true,
                                             )
                                         }
-                                        focusedSection = TvExplorationSection.FOLLOWED
-                                        focusedCardIndexInRow = index
+                                        focusedRowKey = TV_FOLLOWED_ROW_KEY
+                                        focusedCardIndex = index
                                         reportFocus()
                                     },
                                     modifier = Modifier.width(TV_PAGE_CARD_WIDTH)
-                                        // 播放键: 短按直接进播放器续播 (分集信息未加载时退化为进详情),
-                                        // 长按强制重拉本栏目 —— 它平时只跟着一小时一跳的定时同步走
+                                        // 播放键: 短按直接进播放器续播, 长按强制重拉本栏目
                                         .then(followedPlayKeyModifier),
+                                    // 聚焦框由卡片区固定锚位的 TvPortraitCardFocusRing 统一画
+                                    showFocusRing = false,
                                     menu = subject?.let { collectionMenuFor(it.subjectId) },
                                     // 下一集的播放进度 (语义同详情页选集卡): 看到一半按播放位置;
                                     // 已看完最新一集在等更新 (Watched) / 看完全部 (Done) 显示满条;
@@ -983,28 +922,48 @@ fun TvExplorationPage(
                         }
                     }
 
-                    item(key = "rec-header") {
-                        TvSectionHeader(
-                            stringResource(Lang.exploration_recommendations),
-                            transparent = focusedSection == TvExplorationSection.RECOMMENDATIONS,
-                        )
+                    if (recRowCount > 0) {
+                        item(key = TV_REC_HEADER_KEY) {
+                            TvSectionHeader(
+                                stringResource(Lang.exploration_recommendations),
+                                Modifier.padding(start = TV_EXPLORATION_ROW_START_BLEED)
+                                    .sectionHeaderTopFade(listState, TV_REC_HEADER_KEY),
+                            )
+                        }
                     }
-                    // 推荐: 每行也是固定锚点轮播, 按固定行容量分块, 行数随分页无限增长 (纵向无限行)
-                    val recRowCount =
-                        (recommendations.itemCount + TV_EXPLORATION_REC_ROW_SIZE - 1) / TV_EXPLORATION_REC_ROW_SIZE
-                    items(recRowCount, key = { rowIndex -> "rec-$rowIndex" }) { rowIndex ->
-                        val rowStart = rowIndex * TV_EXPLORATION_REC_ROW_SIZE
+                    // 推荐: 每行固定行容量, 行数随分页无限增长 (纵向无限行)
+                    items(recRowCount, key = { tvRecRowKey(it) }) { recRow ->
+                        val rowKey = tvRecRowKey(recRow)
+                        val rowStart = recRow * TV_EXPLORATION_REC_ROW_SIZE
                         val rowItemCount = minOf(TV_EXPLORATION_REC_ROW_SIZE, recommendations.itemCount - rowStart)
+                        val absoluteRow = followedRowCount + recRow
+                        // 压暗档 (Prime 式主次): 全亮只留给聚焦行及其上方 (上方的淡出交给位置
+                        // 驱动), 聚焦行之下的预览行压暗; hero 态不压暗 —— 那时整个卡片区都是
+                        // 预览, 主次由 backdrop 层级表达.
+                        val rowDimTarget by remember(absoluteRow) {
+                            derivedStateOf {
+                                val focused = focusedRowKey?.let(rowIndexOfKey)
+                                if (focused == null || absoluteRow <= focused) 1f else TV_ROW_UNFOCUSED_DIM_ALPHA
+                            }
+                        }
+                        val rowDimAlpha = animateFloatAsState(
+                            rowDimTarget,
+                            tween(TV_ROW_DIM_FADE_MILLIS),
+                            label = "rowDim",
+                        )
                         TvAnchoredCardRow(
                             itemCount = rowItemCount,
-                            // 无继续观看时推荐首行是最顶行, 按上键回到 hero
-                            onNavigateUp = if (!hasFollowed && rowIndex == 0) navigateUpToHero else null,
+                            // 无继续观看时推荐首行就是最顶行, 按上键回 hero
+                            isFirstRow = absoluteRow == 0,
+                            onNavigateUpToHero = { heroFocusRequest = TvHeroFocusButton.SCHEDULE },
+                            focusRequest = cardFocusRequest?.takeIf { it.rowKey == rowKey },
+                            onFocusRequestDone = { cardFocusRequest = null },
+                            bringIntoViewSpec = horizontalBringIntoViewSpec,
+                            modifier = Modifier.rowTopFade(listState, rowKey) { rowDimAlpha.value }
+                                // 进卡片区的落点行 (见 LazyColumn 的 onEnter)
+                                .ifThen(anchorRowKey == rowKey) { focusRequester(anchorRowRequester) },
                             // 推荐行横向循环: 末卡右侧即首卡
                             loop = true,
-                            focusTarget = focusTarget?.takeIf {
-                                it.section == TvExplorationSection.RECOMMENDATIONS && it.row == rowIndex
-                            },
-                            onFocusTargetArrived = { focusTarget = null },
                         ) { localIndex, reportFocus ->
                             val item = recommendations[rowStart + localIndex] as? RecommendedSubjectInfo
                             TvPortraitCard(
@@ -1017,9 +976,8 @@ fun TvExplorationPage(
                                 },
                                 onFocused = {
                                     item?.let { onFocusItem(it.bangumiId, it.nameCn, null, false) }
-                                    focusedSection = TvExplorationSection.RECOMMENDATIONS
-                                    recFocusedRow = rowIndex
-                                    focusedCardIndexInRow = localIndex
+                                    focusedRowKey = rowKey
+                                    focusedCardIndex = localIndex
                                     reportFocus()
                                 },
                                 modifier = Modifier.width(TV_PAGE_CARD_WIDTH)
@@ -1039,17 +997,29 @@ fun TvExplorationPage(
                                             false
                                         }
                                     },
+                                // 聚焦框由卡片区固定锚位的 TvPortraitCardFocusRing 统一画
+                                showFocusRing = false,
                                 menu = item?.let { collectionMenuFor(it.bangumiId) },
                             )
                         }
                     }
                 }
             }
+            // 固定锚位聚焦框 (Prime Video 式): 焦点在卡片区内才显示. 行间/行内导航期间卡片
+            // 仍在赶路, 框先亮在锚位等卡片滑进来. 卡片区已向左/向上出血, 框用同量 padding
+            // 退回锚位线; 画在 LazyColumn 裁剪边界外, 不会被滑出的行裁掉.
+            if (cardAreaHasFocus) {
+                TvPortraitCardFocusRing(
+                    Modifier.padding(
+                        start = TV_EXPLORATION_ROW_START_BLEED,
+                        top = TV_EXPLORATION_TOP_BLEED,
+                    ),
+                )
+            }
         }
 
-        // 轮播指示器 (不可聚焦): 垂直位置钉在 hero backdrop 下边界 (底边压线, 可用
-        // TV_CAROUSEL_INDICATOR_EDGE_RAISE 上抬微调), 内容区水平居中; 仅展开态显示.
-        if (focusedSection == TvExplorationSection.TRENDING && carouselSize > 1) {
+        // 轮播指示器 (不可聚焦): 垂直位置钉在 hero backdrop 下边界, 水平居中; 仅 hero 态显示.
+        if (heroExpanded && carouselSize > 1) {
             Box(
                 Modifier.fillMaxWidth()
                     .fillMaxHeight(TV_EXPLORATION_BACKDROP_HEIGHT_FRACTION),
@@ -1105,138 +1075,315 @@ fun TvExplorationPage(
     }
 }
 
-/** 探索页卡片区的三个区块 (纵向吸顶滚动按此定位). */
-private enum class TvExplorationSection {
-    TRENDING,
-    FOLLOWED,
-    RECOMMENDATIONS,
-}
-
 /**
- * 固定锚点横向卡片行 (同选集轮播): 聚焦卡片始终吸附在行首, 按左右键时
- * 焦点视觉位置不动, 卡片列表整体滑过. 需在禁用 BringIntoView 的环境内使用 (滚动由本组件
- * 按聚焦下标显式驱动); 行尾留出整行空白让末卡也能吸附到行首.
+ * hero 覆盖层: 定高信息块 (标题 / 评分连载 / [继续观看的下一集行] / 简介) + 按钮块.
+ * 纯覆盖层 —— 它的任何显隐/高度变化都不影响卡片区 (卡片区顶边是常量).
+ *
+ * 按钮块只在 hero 态组合 (加上 [heroFocusRequestActive]: 落点请求要先把按钮组合出来才能聚焦);
+ * 显示上等卡片区滚回顶部才淡入 —— 从深处的行回 hero 时列表还在滚, 出血让归位途中的行画在
+ * 按钮区域上, 先显示会叠字.
  */
 @Composable
-private fun TvAnchoredCardRow(
-    itemCount: Int,
+private fun TvExplorationHeroOverlay(
+    heroTarget: TvHeroTarget?,
+    infoCache: Map<Int, SubjectCollectionInfo>,
+    episodeStillCache: Map<Int, TvNextEpisodeMedia>,
+    summaryFallbackCache: Map<Int, String>,
+    playHistories: () -> List<EpisodeHistory>,
+    heroExpanded: Boolean,
+    heroFocusRequestActive: Boolean,
+    listState: LazyListState,
+    heroPlayKeyModifier: Modifier,
+    carouselIndex: () -> Int,
+    switchCarousel: (Int) -> Unit,
+    onWatchNowClick: () -> Unit,
+    onScheduleClick: () -> Unit,
+    onNavigateDownToCards: () -> Boolean,
+    onHeroButtonFocused: () -> Unit,
+    primaryFocusRequester: FocusRequester,
+    onPrimaryFocusChanged: (Boolean) -> Unit,
+    scheduleFocusRequester: FocusRequester,
+    onScheduleFocusChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
-    onNavigateUp: (() -> Boolean)? = null,
-    loop: Boolean = false,
-    /**
-     * 页面级统一落点 (本行是目标行时非 null, 见 [TvExplorationFocusTarget]): 行内段解析 ——
-     * 滚动让目标卡组合并聚焦, 卡片 reportFocus 确认到位后调 [onFocusTargetArrived]
-     * (页面据此清空落点). cardIndex < 0 表示"本行自己跨导航保存的上次聚焦卡" (进页恢复用).
-     */
-    focusTarget: TvExplorationFocusTarget? = null,
-    onFocusTargetArrived: () -> Unit = {},
-    card: @Composable (index: Int, reportFocus: () -> Unit) -> Unit,
 ) {
-    // focusedIndex 用 rememberSaveable 跨导航保存: 返回时据此恢复本行横向滚动与恢复焦点目标卡
-    var focusedIndex by rememberSaveable { mutableIntStateOf(-1) }
-    val listState = rememberLazyListState()
-    // 行内落点解析 (统一落点的第二段, 第一段是页面滚动纵向列表让本行组合出来): 解析出目标卡
-    // 下标 (该卡挂请求器) → 请求聚焦 → reportFocus 确认到位, 不到位滚动让目标组合出来再试.
-    // 行滚出视口再滚回重组时, 落点仍挂着 (页面级单一状态) 则本效应自然重跑继续解析, 无需水位线.
-    var resolvedTarget by remember { mutableIntStateOf(-1) }
-    var targetArrived by remember { mutableStateOf(false) }
-    // 实时聚焦的虚拟下标 (卡片包装 Box 的 onFocusChanged 双向维护). 到位判据不能只靠
-    // targetArrived 事件闩: 目标卡在解析启动前已聚焦时, requestFocus 不产生任何焦点
-    // 事件, 闩永远不置位 —— 轮询烧满 60 次, 期间用户移开的焦点每帧被抢回
-    var liveFocusedIndex by remember { mutableIntStateOf(-1) }
-    val targetRequester = remember { FocusRequester() }
-    // 效应内经这两个引用读最新值: 分页数据 (itemCount) 在解析期间可能继续到达
-    val currentItemCount by rememberUpdatedState(itemCount)
-    val currentOnArrived by rememberUpdatedState(onFocusTargetArrived)
-    LaunchedEffect(focusTarget) {
-        if (focusTarget == null) {
-            resolvedTarget = -1
-            return@LaunchedEffect
-        }
-        targetArrived = false
-        // 起点快照: 解析开始时焦点通常正停在"要离开的那张卡"上, 不能算用户介入
-        val startFocusedIndex = liveFocusedIndex
-        // attempts 60: 目标卡可能要等分页数据到达 + 滚动组合
-        resolveFocusRepeatedly(
-            attempts = 60,
-            arrived = { targetArrived || (resolvedTarget >= 0 && liveFocusedIndex == resolvedTarget) },
-            // 焦点跑到既非起点也非目标的卡上 = 用户自己按键移开了, 立即让路 (理由见 resolveFocusRepeatedly)
-            abandon = {
-                liveFocusedIndex >= 0 &&
-                    liveFocusedIndex != startFocusedIndex &&
-                    liveFocusedIndex != resolvedTarget
+    // 覆盖层高度按"按钮块在不在"两档 (同 main 的几何): 有按钮时块底钉在锚位线上方一个行距,
+    // 即按钮下缘到"继续观看"标题恰好 TV_EXPLORATION_ROW_GAP —— 按钮块自己多高都不会挤掉这段
+    // 间距, 也不会在下面留一片空白; 没按钮 (焦点在卡片区) 时块底钉在固定标签的上边线.
+    // 落点请求期间 (上键回 hero, 按钮先组合出来才能聚焦) 就按有按钮算, 否则简介会先缩一下再弹回.
+    val buttonsPresent = heroExpanded || heroFocusRequestActive
+    Column(modifier.height(if (buttonsPresent) TV_HERO_BLOCK_HEIGHT_EXPANDED else TV_HERO_BLOCK_HEIGHT)) {
+        // 信息块吃掉按钮块之外的全部高度: hero 态简介少两行给按钮, 卡片态满高 —— 覆盖层内部
+        // 怎么分配都与卡片区无关. 换聚焦条目时整块文字渐隐渐现 (contentKey=条目); 块内顶对齐:
+        // 标题固定在块顶, 有 info 时简介 weight(1f) 撑满至块底, info 到达不引起位置跳动.
+        AnimatedContent(
+            targetState = heroTarget,
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            transitionSpec = {
+                fadeIn(tween(TV_HERO_TEXT_FADE_MILLIS)) togetherWith
+                        fadeOut(tween(TV_HERO_TEXT_FADE_MILLIS))
             },
-        ) {
-            val count = currentItemCount
-            if (count > 0) {
-                // 循环行的下标在虚拟空间 (可超出条目数); 非循环行夹到末卡
-                val idx = when {
-                    focusTarget.cardIndex >= 0 -> focusTarget.cardIndex
-                    focusedIndex >= 0 -> focusedIndex
-                    else -> 0
-                }.let { if (loop && count > 1) it else it.coerceAtMost(count - 1) }
-                resolvedTarget = idx
-                runCatching { targetRequester.requestFocus() }
-                if (!targetArrived) {
-                    // 目标卡未组合 (聚焦失败): 滚过去让它组合出来再试
-                    runCatching { listState.scrollToItem(idx) }
+            contentKey = { it?.subjectId },
+            label = "heroInfoText",
+        ) { target ->
+            val info = target?.let { infoCache[it.subjectId] }
+            Column(
+                Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                if (target != null) {
+                    // 定高一行 + 超宽跑马灯 (宽度框不变): 长标题原本会换到第二行,
+                    // 把介绍挤掉一行, 且不同条目间标题一行/两行来回跳
+                    Text(
+                        target.title,
+                        Modifier.fillMaxWidth(TV_HERO_TITLE_WIDTH_FRACTION)
+                            .basicMarquee(iterations = tvHeroMarqueeIterations()),
+                        color = tvHeroContentColor(),
+                        style = MaterialTheme.typography.headlineLarge,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Clip, // 跑马灯滚全文, 不要省略号
+                    )
+                }
+                if (info != null) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        // 评分: ★ 评分数字/10
+                        val score = info.subjectInfo.ratingInfo.score
+                        if ((score.toFloatOrNull() ?: 0f) > 0f) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Star,
+                                    contentDescription = null,
+                                    Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                                Text(
+                                    "$score/10",
+                                    color = MaterialTheme.colorScheme.primary,
+                                    style = MaterialTheme.typography.titleMedium,
+                                )
+                            }
+                        }
+                        // 连载信息, 后面跟一个空格 + 开播年月
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            AiringLabel(
+                                remember(info) {
+                                    AiringLabelState(
+                                        stateOf(info.airingInfo),
+                                        stateOf(info.progressInfo),
+                                    )
+                                },
+                                style = MaterialTheme.typography.labelLarge,
+                                progressColor = tvHeroSecondaryContentColor(),
+                            )
+                            val airDate = info.subjectInfo.airDate
+                            if (airDate.isValid) {
+                                Text(
+                                    "    " + stringResource(
+                                        Lang.exploration_tv_air_date,
+                                        airDate.year, airDate.month,
+                                    ),
+                                    color = tvHeroSecondaryContentColor(),
+                                    style = MaterialTheme.typography.labelLarge,
+                                )
+                            }
+                        }
+                    }
+                    // 继续观看: 独立一行显示下一集集号 + 集名 (Bangumi 本地数据, 即时显示)
+                    val nextEp = if (target?.fromFollowed == true) {
+                        info.progressInfo.nextEpisodeIdToPlay?.let { nextId ->
+                            info.episodes.firstOrNull { it.episodeId == nextId }
+                        }
+                    } else null
+                    if (nextEp != null) {
+                        val epLabel = stringResource(
+                            Lang.playback_history_episode_label,
+                            nextEp.episodeInfo.sort.toString(),
+                        )
+                        val epName = nextEp.episodeInfo.nameCn.ifBlank { nextEp.episodeInfo.name }
+                        // 三态 (nextEp 语义见 SubjectProgressInfo.compute — 追平时指回已看完的最新一集):
+                        //  - 已看完最新一集/全部 (Watched/Done): "第 8 集 · 集名 · 已看完"
+                        //  - 看到一半 (有播放记录): "第 4 集 · 集名 · 剩余 23 分钟"
+                        //  - 看完上一集且有新集/还没开始: "下一集: 第 4 集 · 集名".
+                        // 集号与尾段为固定段永不截断; 集名居中段, 超长跑马灯滚动展示全文
+                        val caughtUp = info.progressInfo.continueWatchingStatus.let {
+                            it is ContinueWatchingStatus.Watched || it is ContinueWatchingStatus.Done
+                        }
+                        val remainingMinutes = if (caughtUp) null else playHistories()
+                            .firstOrNull { it.episodeId == nextEp.episodeId }
+                            ?.let { history ->
+                                val duration = history.durationMillis
+                                if (duration != null && duration > 0 && history.positionMillis > 0) {
+                                    // 向上取整: 剩 30 秒也显示 1 分钟
+                                    (((duration - history.positionMillis).coerceAtLeast(0L) + 59_999) / 60_000)
+                                        .toInt().coerceAtLeast(1)
+                                } else null
+                            }
+                        Row(
+                            Modifier.fillMaxWidth(TV_HERO_SUMMARY_WIDTH_FRACTION)
+                                // 定高使"本行 + 10dp 列间距"恰为简介两行行距 (2×20dp):
+                                // 有无此行时简介的换行网格对齐, 最后一行结束位置一致
+                                .height(TV_HERO_STATUS_ROW_HEIGHT),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            val epInfoColor = tvHeroSecondaryContentColor()
+                            val epInfoStyle = MaterialTheme.typography.labelLarge
+                            Text(
+                                if (caughtUp || remainingMinutes != null) epLabel
+                                else stringResource(Lang.exploration_tv_next_episode, epLabel),
+                                color = epInfoColor,
+                                style = epInfoStyle,
+                                maxLines = 1,
+                            )
+                            if (epName.isNotBlank()) {
+                                Text(
+                                    " · $epName",
+                                    Modifier.weight(1f, fill = false)
+                                        .basicMarquee(iterations = tvHeroMarqueeIterations()),
+                                    color = epInfoColor,
+                                    style = epInfoStyle,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Clip,
+                                )
+                            }
+                            if (caughtUp) {
+                                // 连载已追平: "已看完最新一集 · 周三更新" (更新时间同详情页观看按钮,
+                                // WeekFormatter); 完结看完: "已看完"
+                                val watchedStatus = info.progressInfo.continueWatchingStatus
+                                        as? ContinueWatchingStatus.Watched
+                                val updatesOn = watchedStatus?.nextEpisodeAirDate?.toLocalDateOrNull()
+                                    ?.let { date ->
+                                        stringResource(
+                                            Lang.subject_progress_updates_on,
+                                            WeekFormatter.System.format(date),
+                                        )
+                                    }
+                                Text(
+                                    " · " + (
+                                            if (watchedStatus != null) {
+                                                stringResource(Lang.exploration_tv_watched_latest)
+                                            } else {
+                                                stringResource(Lang.exploration_tv_all_caught_up)
+                                            }
+                                            ) + (updatesOn?.let { " · $it" } ?: ""),
+                                    color = epInfoColor,
+                                    style = epInfoStyle,
+                                    maxLines = 1,
+                                )
+                            } else if (remainingMinutes != null) {
+                                Text(
+                                    " · " + stringResource(
+                                        Lang.exploration_tv_minutes_left, remainingMinutes,
+                                    ),
+                                    color = epInfoColor,
+                                    style = epInfoStyle,
+                                    maxLines = 1,
+                                )
+                            }
+                        }
+                    }
+                    // 简介占满信息块剩余高度: 行数由 TV_HERO_BLOCK_HEIGHT 决定; 宽度用单独的
+                    // HERO_SUMMARY_WIDTH_FRACTION, 调小让右边留给 backdrop 清晰区.
+                    // 继续观看: 优先展示下一集的 TMDB 单集简介, 缺失回退整部简介
+                    val nextEpOverview = target?.takeIf { it.fromFollowed }
+                        ?.let { episodeStillCache[it.subjectId]?.overview }
+                        ?.takeIf { it.isNotBlank() }
+                    Text(
+                        nextEpOverview
+                            ?: info.subjectInfo.summary.trim()
+                                .ifBlank { target?.let { summaryFallbackCache[it.subjectId] }.orEmpty() },
+                        Modifier.weight(1f).fillMaxWidth(TV_HERO_SUMMARY_WIDTH_FRACTION),
+                        color = tvHeroContentColor(),
+                        style = MaterialTheme.typography.bodyMedium,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
         }
-        resolvedTarget = -1
-        currentOnArrived() // 到位或放弃都通知页面清落点, 不留悬挂请求
-    }
-    // 动画器提到 effect 外: 速度跨段继承, 连按左右键行内滚动连续流动 (同页面级行滚动)
-    val cardScrollAnimator = remember { TvScrollAnimator() }
-    LaunchedEffect(focusedIndex) {
-        if (focusedIndex >= 0) cardScrollAnimator.animateScrollToItem(listState, focusedIndex)
-    }
-    // 横向循环: 用虚拟"无限"列表, 卡片按 index % itemCount 取 —— 右移到末卡再右即回到首卡.
-    // 起点在 index 0 (首卡在最左), 左移到首卡再左则离开本行 (交给焦点系统 -> 侧边栏).
-    val loopEnabled = loop && itemCount > 1
-    val virtualCount = if (loopEnabled) Int.MAX_VALUE else itemCount
-    BoxWithConstraints(
-        modifier.then(
-            if (onNavigateUp != null) {
-                Modifier.onPreviewKeyEvent { event ->
-                    if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionUp) {
-                        onNavigateUp()
-                    } else {
-                        false
-                    }
+
+        // 按钮块: 一颗作用于当前轮播条目的动作钮 + 一颗页面级入口. 组合条件带上落点请求
+        // (请求要先组合出按钮才能聚焦). 显示上等卡片区滚回顶部才淡入 (见 KDoc); 只淡出
+        // 不提前移除 —— 按钮可能还持有焦点, 提前销毁会让焦点悬空被全局兜底抢走.
+        // 关闭 48dp 最小可交互尺寸约束, 否则缩小后的按钮被撑到 48dp 高、内容居中.
+        if (buttonsPresent) {
+            val listAtTop by remember(listState) {
+                derivedStateOf {
+                    listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
                 }
-            } else Modifier,
-        ),
-    ) {
-        LazyRow(
-            state = listState,
-            horizontalArrangement = Arrangement.spacedBy(TV_PAGE_CARD_SPACING),
-            contentPadding = PaddingValues(
-                end = (this.maxWidth - TV_PAGE_CARD_WIDTH).coerceAtLeast(0.dp),
-            ),
-        ) {
-            items(virtualCount) { index ->
-                // derivedStateOf 收窄成布尔: 落点解析期间 resolvedTarget 变化只让目标卡
-                // 自己 (挂/摘请求器) 重组
-                val isTarget by remember(index) { derivedStateOf { resolvedTarget == index } }
-                // 请求器挂容器上, requestFocus 委托给内部第一个焦点目标 (卡片)
-                Box(
+            }
+            val buttonsShown = heroExpanded && listAtTop
+            val buttonsAlpha = animateFloatAsState(
+                if (buttonsShown) 1f else 0f,
+                tween(if (buttonsShown) TV_HERO_BUTTON_FADE_IN_MILLIS else TV_HERO_BUTTON_FADE_OUT_MILLIS),
+                label = "heroButtonsAlpha",
+            )
+            CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+                Column(
                     Modifier
-                        .onFocusChanged {
-                            if (it.hasFocus) {
-                                liveFocusedIndex = index
-                            } else if (liveFocusedIndex == index) {
-                                liveFocusedIndex = -1
+                        .padding(top = TV_HERO_INFO_TO_BUTTONS_GAP)
+                        // 淡入淡出读在 lambda 里, 过程只失效图层不重组
+                        .graphicsLayer { alpha = buttonsAlpha.value }
+                        .then(heroPlayKeyModifier)
+                        .onPreviewKeyEvent { event ->
+                            if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                            when (event.key) {
+                                Key.DirectionLeft -> {
+                                    if (carouselIndex() > 0) {
+                                        switchCarousel(-1)
+                                        true
+                                    } else {
+                                        false // 第一个条目: 交给焦点系统 -> 侧边栏探索按钮
+                                    }
+                                }
+
+                                Key.DirectionRight -> {
+                                    switchCarousel(1)
+                                    true
+                                }
+
+                                else -> false
                             }
-                        }
-                        .ifThen(isTarget) { focusRequester(targetRequester) },
-                ) {
-                    card(
-                        if (loopEnabled) index % itemCount else index,
-                        {
-                            focusedIndex = index
-                            if (index == resolvedTarget) targetArrived = true
                         },
+                    verticalArrangement = Arrangement.spacedBy(TV_HERO_BUTTON_GAP),
+                ) {
+                    // hero 只留一颗动作钮, 与卡片同一套约定: 确认 = 进详情, 播放键 = 直接播.
+                    // 图标用播放三角与遥控器播放键呼应 —— 省下的那一行给时间表入口
+                    TvHeroButton(
+                        text = stringResource(Lang.exploration_tv_watch_now),
+                        icon = Icons.Rounded.PlayArrow,
+                        filled = true,
+                        onClick = onWatchNowClick,
+                        onFocused = onHeroButtonFocused,
+                        // 进入主页 / 从卡片区按上返回时的聚焦目标
+                        focusRequester = primaryFocusRequester,
+                        onFocusChangedExtra = onPrimaryFocusChanged,
+                    )
+                    // 新番时间表入口: 页面级目的地, 与上面那颗"对当前条目的动作"不是同一层级 ——
+                    // 用描边款区分. hero 里最下面的可聚焦项: 下键显式路由进首行 (显式是必要的:
+                    // 卡片区向上出血后其焦点组边界盖过 hero, 空间搜索不再认为它在"下方").
+                    // 只能挂在本颗 (最下面) 按钮上: onPreviewKeyEvent 父先手, 挂整个按钮块会把
+                    // 上面那颗的下键也吞掉, 永远到不了本按钮 (真机踩过).
+                    TvHeroButton(
+                        text = stringResource(Lang.exploration_schedule),
+                        icon = Icons.Rounded.CalendarMonth,
+                        filled = false,
+                        onClick = onScheduleClick,
+                        onFocused = onHeroButtonFocused,
+                        modifier = Modifier.onPreviewKeyEvent { event ->
+                            if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown) {
+                                onNavigateDownToCards()
+                            } else {
+                                false
+                            }
+                        },
+                        focusRequester = scheduleFocusRequester,
+                        onFocusChangedExtra = onScheduleFocusChanged,
                     )
                 }
             }
@@ -1245,21 +1392,191 @@ private fun TvAnchoredCardRow(
 }
 
 /**
- * 统一焦点落点请求 (回 hero / 返回回行首卡 / 回推荐首行 / 进页恢复焦点只是目标参数不同):
- * [section] = TRENDING 时聚焦 hero 立即观看按钮 (忽略其余字段); 否则聚焦 [section] 区块
- * 第 [row] 行 (仅推荐区有多行) 的第 [cardIndex] 张卡, cardIndex < 0 表示该行自己跨导航
- * 保存的上次聚焦卡. [seq] 使连续发出的同参请求也能重新触发解析.
+ * 固定锚点横向卡片行 (探索页行内滚动): 聚焦卡片始终停靠在锚位, 按左右键时焦点视觉位置不动,
+ * 卡片列表整体滑过 —— 滚动由 [bringIntoViewSpec] (pivot 式) 在卡片聚焦时自动完成, 本组件
+ * 不驱动滚动. 行尾留出整行空白让末卡也能停到锚位.
  *
- * 解析分两段: 页面段把纵向列表滚到目标行让它组合 (hero 目标则轮询聚焦按钮 + 到位确认);
- * 行内段 (TvAnchoredCardRow) 滚动行内列表让目标卡组合并聚焦, reportFocus 确认到位后
- * 清空请求. 两段共享这一个页面级请求状态, 行重组/滚出滚回都不影响解析继续.
+ * 焦点记忆: 进入本行落回上次聚焦的卡 —— **按下标记 (`focusedIndex`), 不用官方
+ * `focusRestorer()`**. 后者记的是**节点引用**: 行整条滚出纵向视口 (或卡片还没组合出来) 时
+ * 节点已销毁, 引用失效就退化成"进组第一个可聚焦项"= 当前组合窗口里最左那张卡, 于是 pivot
+ * 把本行拉到那张卡上 —— 真机症状"上下导航时卡片左右挪一段, 与速度无关, 某些行必现".
+ * 下标存在 `rememberSaveable` 里, 由 LazyColumn 的 SaveableStateHolder 跨行销毁保住.
+ *
+ * [focusRequest] 是显式落点 (进页恢复 / 返回键分层), 解析带到位确认 + 滚动组合重试,
+ * cardIndex < 0 表示"本行保存的上次聚焦卡".
  */
-private data class TvExplorationFocusTarget(
-    val section: TvExplorationSection,
-    val row: Int = 0,
-    val cardIndex: Int = -1,
-    val seq: Int = 0,
+@Composable
+private fun TvAnchoredCardRow(
+    itemCount: Int,
+    isFirstRow: Boolean,
+    onNavigateUpToHero: () -> Unit,
+    focusRequest: TvCardFocusRequest?,
+    onFocusRequestDone: () -> Unit,
+    bringIntoViewSpec: BringIntoViewSpec,
+    modifier: Modifier = Modifier,
+    loop: Boolean = false,
+    card: @Composable (index: Int, reportFocus: () -> Unit) -> Unit,
+) {
+    // 上次聚焦卡, 跨导航/跨行销毁保存 (LazyColumn 的 saveable holder 保住)
+    var focusedIndex by rememberSaveable { mutableIntStateOf(-1) }
+    var rowHasFocus by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    // 从行外进入本行的落点: 挂在"上次聚焦的那张卡"上 (见 KDoc 为何不用 focusRestorer).
+    // 请求失败 (那张卡还没组合出来) 时不做任何事, 让默认进组行为兜住这一帧.
+    val enterRequester = remember { FocusRequester() }
+    // 落点解析: 目标卡挂请求器 → requestFocus → 卡片 reportFocus 确认到位; 目标未组合
+    // (聚焦失败) 就滚过去让它组合再试. "目标本来就聚焦"时不会有焦点事件, 到位判据用
+    // "行有焦点且聚焦下标==目标" 而不是事件闩.
+    var resolvedTarget by remember { mutableIntStateOf(-1) }
+    val targetRequester = remember { FocusRequester() }
+    val currentItemCount by rememberUpdatedState(itemCount)
+    val currentOnDone by rememberUpdatedState(onFocusRequestDone)
+    // 进组自救: 上次聚焦卡还没组合出来 (分页数据没到 / 行刚滚回视口) 时进组请求会失败,
+    // 此时**必须取消这次进组**并走解析 —— 放行默认进组会落到"组合窗口里最左那张卡",
+    // pivot 随即把整行拉到它上面, 就是真机看到的"上下导航时卡片左右挪一段".
+    var pendingEnter by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(focusRequest, pendingEnter) {
+        val wantedIndex = when {
+            focusRequest != null -> focusRequest.cardIndex
+            pendingEnter != null -> pendingEnter
+            else -> {
+                resolvedTarget = -1
+                return@LaunchedEffect
+            }
+        }
+        // 起点快照: 解析开始时焦点通常停在"要离开的那张卡"上, 不算用户介入
+        val startIndex = if (rowHasFocus) focusedIndex else -1
+        resolveFocusRepeatedly(
+            attempts = 60, // 目标卡可能要等分页数据到达 + 滚动组合
+            arrived = { rowHasFocus && resolvedTarget >= 0 && focusedIndex == resolvedTarget },
+            // 焦点跑到既非起点也非目标的卡上 = 用户自己按键移开了, 立即让路
+            abandon = {
+                rowHasFocus && focusedIndex >= 0 &&
+                        focusedIndex != startIndex && focusedIndex != resolvedTarget
+            },
+        ) {
+            val count = currentItemCount
+            if (count > 0) {
+                // 循环行的下标在虚拟空间 (可超出条目数); 非循环行夹到末卡
+                val idx = when {
+                    wantedIndex != null && wantedIndex >= 0 -> wantedIndex
+                    focusedIndex >= 0 -> focusedIndex
+                    else -> 0
+                }.let { if (loop && count > 1) it else it.coerceAtMost(count - 1) }
+                resolvedTarget = idx
+                runCatching { targetRequester.requestFocus() }
+                if (!(rowHasFocus && focusedIndex == idx)) {
+                    // 先瞬时对位再聚焦: 目标卡要先组合出来才能拿焦点, 且直接停在锚位就不会
+                    // 有"先落在别处再被 pivot 拉过去"的横向位移
+                    runCatching { listState.scrollToItem(idx) }
+                }
+            }
+        }
+        resolvedTarget = -1
+        pendingEnter = null
+        if (focusRequest != null) currentOnDone() // 到位或放弃都通知页面清落点, 不留悬挂请求
+    }
+    // 横向循环: 用虚拟"无限"列表, 卡片按 index % itemCount 取 —— 右移到末卡再右即回到首卡.
+    // 起点在 index 0 (首卡在最左), 左移到首卡再左则离开本行 (交给焦点系统 -> 侧边栏).
+    val loopEnabled = loop && itemCount > 1
+    val virtualCount = if (loopEnabled) Int.MAX_VALUE else itemCount
+    BoxWithConstraints(
+        modifier.ifThen(isFirstRow) {
+            // 最顶行按上键回 hero (显式路由: hero 按钮在卡片态没有组合, 空间搜索找不到它;
+            // 落点请求会先把按钮组合出来再聚焦)
+            onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionUp) {
+                    onNavigateUpToHero()
+                    true
+                } else {
+                    false
+                }
+            }
+        },
+    ) {
+        CompositionLocalProvider(LocalBringIntoViewSpec provides bringIntoViewSpec) {
+            LazyRow(
+                Modifier
+                    .onFocusChanged { rowHasFocus = it.hasFocus }
+                    // 从行外进来的焦点落回本行上次聚焦的卡 (按下标, 见 KDoc). onEnter 只在
+                    // 焦点组节点上生效, 所以显式补 focusGroup().
+                    .focusProperties {
+                        onEnter = {
+                            val saved = focusedIndex.coerceAtLeast(0)
+                            val ok = runCatching {
+                                enterRequester.requestFocus(FocusDirection.Enter)
+                            }.getOrDefault(false)
+                            if (!ok) {
+                                // 那张卡还没组合出来 -> 取消进组, 交给解析 (滚过去让它组合再
+                                // 聚焦); 放行默认进组会横向拽走整行, 见 pendingEnter 的注释
+                                pendingEnter = saved
+                                cancelFocus()
+                            }
+                        }
+                    }
+                    .focusGroup(),
+                state = listState,
+                horizontalArrangement = Arrangement.spacedBy(TV_PAGE_CARD_SPACING),
+                // start: 锚位线退回内容区左缘 (行本体已随卡片区向左出血); end: 行尾留出
+                // 整行空白让末卡也能停到锚位
+                contentPadding = PaddingValues(
+                    start = TV_EXPLORATION_ROW_START_BLEED,
+                    end = (this@BoxWithConstraints.maxWidth - TV_EXPLORATION_ROW_START_BLEED - TV_PAGE_CARD_WIDTH)
+                        .coerceAtLeast(0.dp),
+                ),
+            ) {
+                items(virtualCount) { index ->
+                    // derivedStateOf 收窄成布尔: 落点解析期间 resolvedTarget 变化只让目标卡
+                    // 自己 (挂/摘请求器) 重组
+                    val isTarget by remember(index) { derivedStateOf { resolvedTarget == index } }
+                    // 进组落点 = 上次聚焦卡 (没聚焦过则首卡); 同样收窄成布尔, 只让挂/摘请求器
+                    // 的那两张卡重组
+                    val isEnterTarget by remember(index) {
+                        derivedStateOf { focusedIndex.coerceAtLeast(0) == index }
+                    }
+                    // 卡片亮度跟位置走 (Prime 式): 越过锚位线的离场卡在 TV_CARD_FADE_DISTANCE
+                    // 内渐渐压暗到 TV_CARD_PAST_DIM_ALPHA 并保持 —— 滑过左侧出血区 (侧边栏
+                    // 底下) 时压暗可见, 直到滑出屏幕左缘; 向左导航时对称地提亮回来.
+                    // 位置读在 graphicsLayer 的 lambda 里, 滚动每帧只失效图层, 零重组.
+                    // 请求器挂容器上, requestFocus 委托给内部第一个焦点目标 (卡片).
+                    Box(
+                        Modifier
+                            .graphicsLayer {
+                                // 逐绘制指令调制 alpha, 不走离屏缓冲 (理由同 [rowTopFade])
+                                compositingStrategy = CompositingStrategy.ModulateAlpha
+                                val x = listState.layoutInfo.visibleItemsInfo
+                                    .firstOrNull { it.index == index }?.offset ?: 0
+                                alpha = if (x >= 0) 1f else {
+                                    val t = (-x / TV_CARD_FADE_DISTANCE.toPx()).coerceIn(0f, 1f)
+                                    1f - t * (1f - TV_CARD_PAST_DIM_ALPHA)
+                                }
+                            }
+                            .ifThen(isTarget) { focusRequester(targetRequester) }
+                            .ifThen(isEnterTarget) { focusRequester(enterRequester) },
+                    ) {
+                        card(
+                            if (loopEnabled) index % itemCount else index,
+                            { focusedIndex = index },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 显式卡片落点请求 (仅进页恢复与返回键分层两处使用; 其余焦点移动全走空间搜索 + 进组落点链).
+ * [rowKey] 是行的稳定键 (不用绝对行号: "继续观看"分页迟到会让推荐行整体位移);
+ * [cardIndex] < 0 = 该行自己跨导航保存的上次聚焦卡. 实例身份比较, 同参重发也能触发解析.
+ */
+private class TvCardFocusRequest(
+    val rowKey: String,
+    val cardIndex: Int,
 )
+
+/** hero 的两颗按钮作为焦点落点: 进页/返回键回 [PRIMARY] (立即观看); 卡片区顶行按上键回 [SCHEDULE]. */
+private enum class TvHeroFocusButton { PRIMARY, SCHEDULE }
 
 /** 聚焦卡片 → Hero 展示目标 (标题从卡片数据即时取得, 其余异步). */
 private data class TvHeroTarget(
@@ -1277,37 +1594,26 @@ private data class TvNextEpisodeMedia(
 )
 
 /**
- * 区块标题行. 只占文字自身高度 (标题到卡片行的距离统一由外部 [TV_SECTION_HEADER_TO_ROW_GAP] 控制,
- * 不再由固定盒高引入额外空白).
- * [transparent] 时文字不可见但仍占位: 聚焦区块自己的行内标题设为透明, 由顶部持久标题代替显示,
- * 避免"内容撑不满一屏无法滚动裁掉"时行内标题与持久标题重复; 透明保留高度, 切焦点无跳动.
+ * 区块标题. 两处用同一个组件, 保证两条路径的高度/字体完全一致 (它们必须等高, 否则 hero 态与
+ * 卡片态的行位置会差出去):
+ *  - 列表里的行内标题 (每个区块一个 item);
+ *  - 钉在 [TV_EXPLORATION_LABEL_TOP] 的固定标签覆盖层 (代替被滚到锚位上方的那一个).
+ *
+ * 可见度由调用方给的位置驱动 alpha 决定 (行内那个用 [sectionHeaderTopFade], 覆盖层取其补数),
+ * 本组件自己不管显隐.
  */
 @Composable
 private fun TvSectionHeader(
     title: String,
     modifier: Modifier = Modifier,
-    transparent: Boolean = false,
 ) {
-    Box(
-        modifier.fillMaxWidth(),
-        contentAlignment = Alignment.CenterStart,
-    ) {
-        Text(
-            title,
-            color = if (transparent) Color.Transparent else Color.Unspecified,
-            style = MaterialTheme.typography.titleMedium,
-            maxLines = 1,
-        )
-    }
+    Text(
+        title,
+        modifier,
+        style = MaterialTheme.typography.titleMedium,
+        maxLines = 1,
+    )
 }
-
-/**
- * 区块标题到卡片行的间距. 同时控制两种情形:
- * - 聚焦该区块时: 持久标题下方到吸顶卡片行的间距 (Spacer);
- * - 未聚焦时: 行内标题与卡片行 (及卡片行之间) 的 LazyColumn 竖向间距.
- * 一个参数保证两种情形距离一致.
- */
-private val TV_SECTION_HEADER_TO_ROW_GAP = 12.dp
 
 /**
  * 轮播指示器 (横排小圆点, 不可聚焦, 纯展示). 当前项为拉长胶囊, 其余为小圆点. 由外部左右键驱动
@@ -1344,14 +1650,60 @@ private fun TvCarouselIndicator(
     }
 }
 
+// ---------------------------------------------------------------------------
+// 行键 (页面级焦点簿记一律记键, 不记绝对行号)
+// ---------------------------------------------------------------------------
+
+private const val TV_FOLLOWED_HEADER_KEY = "followed-header"
+private const val TV_FOLLOWED_ROW_KEY = "followed-row"
+private const val TV_REC_HEADER_KEY = "rec-header"
+private const val TV_REC_ROW_KEY_PREFIX = "rec-row-"
+private fun tvRecRowKey(recRow: Int) = "$TV_REC_ROW_KEY_PREFIX$recRow"
+
+// ---------------------------------------------------------------------------
+// 三层叠放的几何常量: 卡片区顶边是常量, 与 hero/标签显隐完全解耦 (架构见页面 KDoc)
+// ---------------------------------------------------------------------------
+
+/** hero 覆盖层顶边 (对齐 backdrop 顶部区域). */
+private val TV_EXPLORATION_HERO_TOP = 28.dp
+
 /**
- * Hero 信息块固定高度 (标题 + 评分/连载行 + 简介). 简介用 weight 填满其下剩余空间 —— 调大此值
- * = 简介显示更多行; 固定高度保证不同条目切换 (简介长短不同) 时下方卡片区不跳动. 展开态 (焦点在 hero)
- * 时其下再叠加操作按钮块; 焦点移到卡片时按钮块消失, 卡片区顺势上移贴住信息块 (无大片空白).
- *
- * 标题已由至多两行改成定高一行 (长标题跑马灯滚动), 省下的一行自动归简介.
+ * Hero 覆盖层高度 —— **卡片态** (无操作按钮, 信息块吃满): 文字下边界正好落在固定标签的
+ * 上边线. 调大 = 文字下边界下移. 它只决定覆盖层自己的内容排布, 卡片区顶边是独立常量.
+ * hero 态见 [TV_HERO_BLOCK_HEIGHT_EXPANDED].
  */
-private val TV_HERO_INFO_HEIGHT = 200.dp
+private val TV_HERO_BLOCK_HEIGHT = 240.dp
+
+/** 锚位区块标签顶边 = hero 顶边 + hero 块高 (紧贴 hero 下缘). */
+private val TV_EXPLORATION_LABEL_TOP = TV_EXPLORATION_HERO_TOP + TV_HERO_BLOCK_HEIGHT
+
+/** 行间距, 同时也是标题到卡片行的距离 (一个参数保证行内标题与固定标签两条路径等距). */
+private val TV_EXPLORATION_ROW_GAP = 12.dp
+
+/**
+ * 区块标题块占位 = 标题行高 (titleMedium ≈ 24dp) + [TV_EXPLORATION_ROW_GAP].
+ *
+ * **固定标签覆盖层与列表里的行内标题必须占同一段高度**: 卡片态的锚位行紧贴固定标签下方,
+ * hero 态的首行紧贴行内标题下方 —— 两者差一点, hero↔卡片切换时行位置就差一点.
+ */
+private val TV_SECTION_LABEL_BLOCK = 24.dp + TV_EXPLORATION_ROW_GAP
+
+/**
+ * 卡片区顶边 = **锚位线** (聚焦行的卡片顶线). 常量 —— hero/按钮/标签的任何显隐都不挪它.
+ * hero 态列表停在 0, 于是首行在锚位下方一个 [TV_SECTION_LABEL_BLOCK] 处 (行内标题占着),
+ * 焦点进卡片区时那一段由 pivot 用 spring 滚掉 —— 与 main 观感一致, 但几何不变所以不抖.
+ */
+private val TV_EXPLORATION_CARD_TOP = TV_EXPLORATION_LABEL_TOP + TV_SECTION_LABEL_BLOCK
+
+/**
+ * Hero 覆盖层高度 —— **hero 态** (信息块 + 操作按钮块): 块底 = 锚位线上方一个行距, 于是
+ * 按钮下缘到"继续观看"行内标题恰好 [TV_EXPLORATION_ROW_GAP] (与 main 的 Column 排布等价).
+ *
+ * 从锚位线倒推而不是写死: 按钮块的高度是字号/内边距算出来的, 写死信息块高度的话按钮下面
+ * 会多出或缺掉一段空白 (真机一眼可见"按钮离继续观看太远").
+ */
+private val TV_HERO_BLOCK_HEIGHT_EXPANDED =
+    TV_EXPLORATION_CARD_TOP - TV_EXPLORATION_ROW_GAP - TV_EXPLORATION_HERO_TOP
 
 /** Hero 信息块与操作按钮块之间的间距 (较短, 让按钮贴近简介). */
 private val TV_HERO_INFO_TO_BUTTONS_GAP = 6.dp
@@ -1359,15 +1711,11 @@ private val TV_HERO_INFO_TO_BUTTONS_GAP = 6.dp
 /** 两枚操作按钮之间的间距 (很短). */
 private val TV_HERO_BUTTON_GAP = 4.dp
 
-/** 按钮块下方到继续观看栏的间距 (取代原 40dp 空标题, 让继续观看紧贴按钮). */
-private val TV_HERO_BUTTONS_TO_CONTENT_GAP = 12.dp
+/** hero 操作按钮离场淡出时长 (焦点进卡片区): 要快 —— 离场行会从按钮区域上滑过. */
+private const val TV_HERO_BUTTON_FADE_OUT_MILLIS = 90
 
-/**
- * 卡片区聚焦时介绍块的高度 (= 介绍块上下边界距离; 顶部固定). 比展开态 [TV_HERO_INFO_HEIGHT] 高一些,
- * 文字底对齐使其下边界随之下移并紧贴卡片行, 从而露出更多 backdrop、卡片不再上移遮挡. 调大则更靠下.
- * 与展开态保持同样的 40dp 差值.
- */
-private val TV_HERO_INFO_HEIGHT_COLLAPSED = 240.dp
+/** hero 操作按钮回场淡入时长. 起点是"卡片区已滚回顶部", 可以从容一点. */
+private const val TV_HERO_BUTTON_FADE_IN_MILLIS = 150
 
 /**
  * Hero "下一集"状态行的固定高度. 加上列间距 10dp 后恰为简介两行行距 (bodyMedium
@@ -1382,7 +1730,7 @@ private const val TV_CAROUSEL_MAX_DOTS = 20
 private const val TV_CAROUSEL_AUTO_ADVANCE_MILLIS = 6000L
 
 /** 轮播指示器相对 hero backdrop 下边界的上抬量 (0 = 指示器底边正好压在下边界上). */
-private val TV_CAROUSEL_INDICATOR_EDGE_RAISE = 18.dp
+private val TV_CAROUSEL_INDICATOR_EDGE_RAISE = 24.dp
 
 /**
  * backdrop 下缘渐隐起点的轮播 (hero) 态档位 (图片高度坐标 0..1); 卡片聚焦态用三页
@@ -1405,4 +1753,135 @@ private const val TV_BACKDROP_STATE_ANIM_MILLIS = 400
 /** 推荐区每行的条目数 (每行是一条固定锚点轮播, 行数随分页无限增长). */
 private const val TV_EXPLORATION_REC_ROW_SIZE = 12
 
+/**
+ * 卡片行的上边界淡出 (Prime 式"无边界"): 卡片区已向上出血 [TV_EXPLORATION_TOP_BLEED],
+ * 行越过锚位线后**继续可见地上移** (压着 hero 区域), 同时透明度按越线距离衰减,
+ * [TV_ROW_FADE_DISTANCE] 处完全消失 (Prime 实拍: 离场行是"移出去边淡", 不是原地消失,
+ * 也没有可见的裁剪边) —— 淡出淡入与滑动天然同步, 向上换行回来的行对称地边下移边浮现.
+ *
+ * 性能: 位置/透明度全部读在 graphicsLayer 的 lambda 里, 滚动每帧只失效图层, 零重组,
+ * 每帧仅几次可见项查表.
+ *
+ * **必须 [CompositingStrategy.ModulateAlpha]**: 默认的 Auto 档遇到 alpha < 1 会把整层先画进
+ * 离屏缓冲再合成 (`saveLayerAlpha`), 而这里的层是**整行宽**的 —— 1080p 下每行 ≈0.6MP, 4K UI
+ * 下 ≈1.5MP, 而聚焦行之下的预览行同时压着暗 (三四行), 于是每帧多出几 MP 的离屏光栅化.
+ * 行内卡片互不重叠、alpha 纯粹是压暗, 逐绘制指令调制 alpha 的结果与离屏合成一致 (卡内那条
+ * 半透明进度条在 45% 压暗下的极小差异肉眼不可辨), 缓冲整块省掉.
+ *
+ * [extraAlpha] 与位置透明度相乘 (推荐行的压暗档).
+ */
+private fun Modifier.rowTopFade(
+    listState: LazyListState,
+    key: String,
+    extraAlpha: () -> Float = { 1f },
+): Modifier = this.graphicsLayer {
+    compositingStrategy = CompositingStrategy.ModulateAlpha
+    val top = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == key }?.offset ?: 0
+    val positional = if (top >= 0) 1f else {
+        (1f + top / TV_ROW_FADE_DISTANCE.toPx()).coerceIn(0f, 1f)
+    }
+    alpha = positional * extraAlpha()
+}
 
+/**
+ * 区块标题 (行内那一个) 的位置驱动可见度 —— 也是"它占着标签线的程度", 固定标签覆盖层取
+ * `1 − max(各区块本值)`, 于是可见的标签恒为一份, 交接点就是标题的**停位线**(= 覆盖层位置):
+ *  - 停位线及以下 (含 hero 态露在 hero 下方、非聚焦区块露在下方): 完全可见, 跟着卡片一起移动
+ *    —— hero → 首行那一段就是标题从锚位线滑到停位线, 全程可见 (不是"消失后在上方出现");
+ *  - 越过停位线 (再往下换行): 按越线距离在 [TV_LABEL_FADE_DISTANCE] 内快速淡出, 同时覆盖层
+ *    在停位线上淡入接手 —— 标签不会跟着卡片一路平移上去. 淡出期间**钉在停位线上不动**
+ *    (见 [sectionHeaderTopFade]), 交接是原地的.
+ *  - 没组合出来 (滚远了): 0, 覆盖层全权显示 (位置与文字都一样, 这一跳看不见).
+ */
+private fun tvSectionHeaderAlpha(listState: LazyListState, key: String, density: Density): Float {
+    val above = tvSectionHeaderAboveLine(listState, key, density) ?: return 0f
+    if (above <= 0f) return 1f
+    return (1f - above / with(density) { TV_LABEL_FADE_DISTANCE.toPx() }).coerceIn(0f, 1f)
+}
+
+/**
+ * 行内标题越过停位线的距离 (px, >0 = 已在线上方); null = 没组合出来.
+ *
+ * 停位线用**实测**的标题高度算 (`info.size`), 不吃 [TV_SECTION_LABEL_BLOCK] 里 24dp 那个估值:
+ * 字体缩放下标题高度会变, 差一点点就会让停稳的标题挂在 0.97 alpha 上 (与覆盖层叠出双影).
+ */
+private fun tvSectionHeaderAboveLine(listState: LazyListState, key: String, density: Density): Float? {
+    val info = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == key } ?: return null
+    val rest = -(info.size + with(density) { TV_EXPLORATION_ROW_GAP.toPx() })
+    return rest - info.offset
+}
+
+/**
+ * [tvSectionHeaderAlpha] 挂在行内标题上的形态 (全读在 graphicsLayer 的 lambda 里, 零重组).
+ *
+ * 越线后**钉在停位线上只淡出、不跟着卡片上移**: 淡出的这一份与在同一位置淡入的固定标签覆盖层
+ * 就成了原地交接, 一个字都不动. 若放它照常上移, 交接期间会同时看到"一个推荐往上飞走、原地
+ * 还有一个推荐"(真机报过) —— 位置不同的两份互补 alpha 是叠影, 不是交接.
+ */
+private fun Modifier.sectionHeaderTopFade(listState: LazyListState, key: String): Modifier =
+    this.graphicsLayer {
+        val above = tvSectionHeaderAboveLine(listState, key, this) ?: return@graphicsLayer
+        translationY = above.coerceAtLeast(0f)
+        alpha = if (above <= 0f) {
+            1f
+        } else {
+            (1f - above / TV_LABEL_FADE_DISTANCE.toPx()).coerceIn(0f, 1f)
+        }
+    }
+
+/**
+ * 区块标题越过停位线后的淡出距离. 远小于行距 (≈168dp): 用户要的是"焦点确认进下一个区块时
+ * 标题快速渐隐", 而不是跟着卡片平移出画. 32dp ≈ 换行滚动的前 1/5 段 (~50ms).
+ */
+private val TV_LABEL_FADE_DISTANCE = 32.dp
+
+/**
+ * 行的位置驱动淡出距离: 行越过卡片区锚位线多远就多淡, 到此距离完全消失.
+ *
+ * 几何约束 (记号: 卡高 H = [TV_PAGE_CARD_WIDTH]/[TV_PORTRAIT_CARD_COVER_RATIO] ≈ 156dp,
+ * 行距 P = H + [TV_EXPLORATION_ROW_GAP] ≈ 168dp):
+ * - 必须 < P: 下一行完全停靠时上一行的 top 恰好在一个行距处, 淡出距离比它大就留下
+ *   永远挂着的半透明残影 (真机踩过, 180dp 时残 ~8%).
+ * - 用户定的观感基准: **下一行有一半高度进入焦点框时上一行必须完全看不见**.
+ *   下一行 top = H/2 时上一行 top = H/2 − P ≈ −88dp, 故取 88dp.
+ * - 也必须 < [TV_EXPLORATION_TOP_BLEED], 否则残余撞上出血区顶部的裁剪边.
+ */
+private val TV_ROW_FADE_DISTANCE = 88.dp
+
+/** 卡片区底部留白的下限 (内容本来就撑不满一屏时用它, 不会给出多余的可滚动空白). */
+private val TV_EXPLORATION_MIN_BOTTOM_PAD = 24.dp
+
+/**
+ * 卡片区向上出血量: 给离场行留出"越过锚位线继续上移边淡出"的可见空间
+ * (> [TV_ROW_FADE_DISTANCE], 到出血区顶部裁剪边时已完全透明).
+ */
+private val TV_EXPLORATION_TOP_BLEED = 200.dp
+
+/**
+ * 行内卡片越过锚位线后的压暗渐变距离: 在此距离内从全亮渐变到
+ * [TV_CARD_PAST_DIM_ALPHA] 并保持, 直到滑出屏幕左缘.
+ */
+private val TV_CARD_FADE_DISTANCE = 64.dp
+
+/**
+ * 越过锚位线的离场卡片的压暗亮度 (Prime 式左侧暗区, 同选集轮播的左侧压暗):
+ * 离场卡滑过左侧出血区 (侧边栏底下) 时压暗可见, 不是硬切消失.
+ */
+private const val TV_CARD_PAST_DIM_ALPHA = 0.45f
+
+/**
+ * 卡片区向左出血量 = 侧边栏收起宽度 ([TvNavigationRailDefaults.CollapsedWidth])
+ * + 内容列额外留白 ([TV_EXPLORATION_START_PAD]), 即内容区左缘到屏幕左缘的总距离:
+ * 出血后行的左缘就是屏幕左缘, 离场卡片可见地滑出屏幕.
+ */
+private val TV_EXPLORATION_ROW_START_BLEED = TvNavigationRailDefaults.CollapsedWidth + TV_EXPLORATION_START_PAD
+
+/**
+ * 聚焦行之下预览行的压暗亮度 (Prime Video 实测约四成亮): 全亮只留给聚焦行, 主次分明;
+ * 换行时旧行边下滑边压暗 / 下方行边上滑边提亮 ([TV_ROW_DIM_FADE_MILLIS], 与滑动大致同步).
+ * 仅在焦点位于卡片区时生效 —— hero 态整个卡片区都是预览, 主次由 backdrop 层级表达.
+ */
+private const val TV_ROW_UNFOCUSED_DIM_ALPHA = 0.45f
+
+/** 压暗档切换 (聚焦行↔预览行) 的渐变时长. */
+private const val TV_ROW_DIM_FADE_MILLIS = 200

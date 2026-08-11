@@ -76,7 +76,8 @@ fun TvMainScreenLayout(
         // 全屏背景由本外层 Box 统一绘制, 主壳内各页 (探索/收藏/缓存) 在 TV 上把自身 Scaffold
         // 设透明透出此色 (搜索/设置是独立页面, 不受影响); 颜色与侧边栏展开面板一致.
         modifier.fillMaxSize().background(AniThemeDefaults.shellBackgroundColor)
-            // 进入 Main 的焦点一律先送进内容区 (而非侧边栏)
+            // 进入 Main 的焦点一律先送进内容区 (而非侧边栏); 页面对落点还有更精确的意见时
+            // 在自己根上再挂一层 focusProperties.onEnter 改道 (如探索页回上次聚焦的卡)
             .focusProperties { onEnter = { contentFocus.requestFocus() } }
             .focusGroup(),
     ) {
@@ -131,7 +132,8 @@ fun TvMainScreenLayout(
             onAvatarClick = {
                 if (loggedIn) onNavigateToSettings(SettingsTab.PROFILE) else navigator.navigateEmailLoginStart()
             },
-            // 返回/右键: 还原回进入侧边栏之前内容区最后聚焦的元素
+            // 返回/右键: 还原回进入侧边栏之前内容区最后聚焦的元素 (经内容区 enter, 页面
+            // 自己的 onEnter 改道会把焦点送回原处, 如探索页的 focusRestorer 链)
             onExitFocus = { runCatching { contentFocus.requestFocus() } },
             items = buildTvRailItems(
                 onSearch = onNavigateToSearch,
