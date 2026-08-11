@@ -38,6 +38,9 @@ import me.him188.ani.app.ui.foundation.playback.LocalPlaybackSessionEntry
 import me.him188.ani.app.ui.foundation.playback.PlaybackSessionEntry
 import me.him188.ani.app.ui.foundation.playback.RetainedPlaybackSessionInfo
 import me.him188.ani.app.ui.mediaselect.summary.MediaSelectorSummary
+import me.him188.ani.utils.logging.info
+import me.him188.ani.utils.logging.logger
+import me.him188.ani.utils.logging.warn
 import org.openani.mediamp.MediaStatus
 import org.openani.mediamp.PlayerState
 import kotlin.time.Duration.Companion.seconds
@@ -238,7 +241,16 @@ class RetainedPlaybackSessionHolder : ViewModel(), ViewModelStoreOwner, Playback
 
     /** 只在不看着播放页时提示; 见 [notices]. */
     private fun notify(notice: RetainedPlaybackNotice) {
-        if (!playerPageVisible.value) _notices.tryEmit(notice)
+        if (playerPageVisible.value) {
+            // 打日志而不是静默丢掉: "该提示的时候没提示"事后完全无法从日志还原,
+            // 分不清是压根没走到这里, 还是走到了但被这条规则挡下 (2026-08-11 排查时吃过亏)
+            logger.info { "Notice suppressed (player page visible): $notice" }
+            return
+        }
+        logger.info { "Notice: $notice" }
+        if (!_notices.tryEmit(notice)) {
+            logger.warn { "Notice dropped, buffer full: $notice" }
+        }
     }
 
     /**
@@ -366,6 +378,8 @@ class RetainedPlaybackSessionHolder : ViewModel(), ViewModelStoreOwner, Playback
     }
 
     private companion object {
+        private val logger = logger<RetainedPlaybackSessionHolder>()
+
         /** 问题状态要持续这么久才提示, 见 [guard] 第 4 条. */
         private val PROBLEM_SETTLE_DELAY = 6.seconds
 
