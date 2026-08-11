@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.FlowRowOverflow
 import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
@@ -847,8 +848,12 @@ fun SubjectDetailsTvPage(
                             modifier = Modifier
                                 // 区块进入落点 (上方选集卡片下键经路由落到第一个头像)
                                 .focusRequester(sectionNav.entry(TvDetailsSection.CHARACTERS))
-                                .focusGroup()
-                                .padding(horizontal = pad),
+                                .focusGroup(),
+                            // 水平留白走行内 contentPadding 而**不是**外层 padding: 卡片行要
+                            // 保持全宽出血, 外层 padding 会把行的左边界一起右移, 于是向左滑过
+                            // 停靠位的卡片正好在停靠线上被硬裁出一条边 (同选集轮播, 见本页
+                            // 顶部 Column 的注释). 标题由区块内部按同一留白对齐.
+                            contentPadding = PaddingValues(horizontal = pad),
                             // 卡片下键显式送往下一区块 (跨区块空间搜索不可靠)
                             downFocus = sectionNav.downTargetFrom(TvDetailsSection.CHARACTERS),
                         )
@@ -899,10 +904,9 @@ fun SubjectDetailsTvPage(
                             }
                         }
                         if (related.itemCount > 0) {
-                            // TV 上用横向单行 rail 而非多行网格 (行内横向滚动由默认 BringIntoView 驱动)
+                            // TV 上用横向单行 rail 而非多行网格 (锚位条: 聚焦卡停在停靠位)
                             Column(
                                 Modifier
-                                    .padding(horizontal = pad)
                                     // 独立页: 关联卡片上键回制作人员 (中间隔着不可聚焦的
                                     // 信息表, 空间搜索不可靠). 内嵌变体维持原空间搜索行为
                                     .ifThen(!videoBackground) {
@@ -910,12 +914,18 @@ fun SubjectDetailsTvPage(
                                     },
                                 verticalArrangement = Arrangement.spacedBy(14.dp),
                             ) {
-                                SectionHeader(stringResource(Lang.subject_details_related_subjects))
+                                // 留白只加在标题上; 卡片行全宽出血, 停靠留边由行内
+                                // contentPadding 提供 (外层 padding 会在停靠线上硬裁离场卡)
+                                SectionHeader(
+                                    stringResource(Lang.subject_details_related_subjects),
+                                    modifier = Modifier.padding(horizontal = pad),
+                                )
                                 RelatedSubjectsLazyRow(
                                     related,
                                     onClick = rememberNavigateToRelatedSubject(),
                                     itemWidth = 150.dp,
                                     spacing = 20.dp,
+                                    contentPadding = PaddingValues(horizontal = pad),
                                 )
                             }
                         }

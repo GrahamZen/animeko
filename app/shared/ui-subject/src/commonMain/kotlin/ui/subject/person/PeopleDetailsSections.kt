@@ -9,7 +9,9 @@
 
 package me.him188.ani.app.ui.subject.person
 
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,7 +22,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -52,6 +53,9 @@ import me.him188.ani.app.ui.external.placeholder.placeholder
 import me.him188.ani.app.ui.foundation.ImageViewer
 import me.him188.ani.app.ui.foundation.LocalAniUiBehavior
 import me.him188.ani.app.ui.foundation.avatar.AvatarImage
+import me.him188.ani.app.ui.foundation.focus.FOCUS_BORDER_TEXT_INSET
+import me.him188.ani.app.ui.foundation.focus.TvAnchoredStrip
+import me.him188.ani.app.ui.foundation.focus.focusBorder
 import me.him188.ani.app.ui.foundation.layout.rememberConnectedScrollState
 import me.him188.ani.app.ui.foundation.rememberImageViewerHandler
 import me.him188.ani.app.ui.foundation.widgets.LocalToaster
@@ -294,11 +298,22 @@ internal fun PeopleSubjectCard(
     modifier: Modifier = Modifier,
     width: Dp = 96.dp,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
     Column(
         modifier
             .width(width)
+            // 示焦用主题色描边而不是涟漪的高亮状态层 (压在封面上分辨不出哪张有焦点)
+            .focusBorder(MaterialTheme.shapes.small)
             .clip(MaterialTheme.shapes.small)
-            .clickable(onClick = onClick),
+            // 焦点驱动 (TV) 下不要涟漪的焦点状态层: 半透明高亮 + 描边 = 两层特效, 且高亮本身
+            // 在封面上分辨不出哪张有焦点 (与 FocusHighlightCard 的取舍一致). 触摸端保留涟漪.
+            .clickable(
+                interactionSource = interactionSource,
+                indication = if (LocalAniUiBehavior.current.focusDrivenNavigation) null else LocalIndication.current,
+                onClick = onClick,
+            )
+            // 末行文字贴着卡底, 给聚焦描边留出余地 (横向内缩在文字上, 封面仍满宽)
+            .padding(bottom = FOCUS_BORDER_TEXT_INSET),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Box(Modifier.fillMaxWidth().aspectRatio(COVER_WIDTH_TO_HEIGHT_RATIO).clip(MaterialTheme.shapes.small)) {
@@ -306,6 +321,7 @@ internal fun PeopleSubjectCard(
         }
         Text(
             subject.displayName,
+            Modifier.padding(horizontal = FOCUS_BORDER_TEXT_INSET),
             style = MaterialTheme.typography.bodySmall,
             fontWeight = FontWeight.Medium,
             maxLines = 1,
@@ -314,6 +330,7 @@ internal fun PeopleSubjectCard(
         if (caption != null) {
             Text(
                 caption,
+                Modifier.padding(horizontal = FOCUS_BORDER_TEXT_INSET),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -340,11 +357,22 @@ internal fun PeoplePortraitCard(
     width: Dp = PersonCastCardWidth,
     circleCrop: Boolean = false,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
     Column(
         modifier
             .width(width)
+            // 示焦用主题色描边, 同 [PeopleSubjectCard]
+            .focusBorder(MaterialTheme.shapes.small)
             .clip(MaterialTheme.shapes.small)
-            .clickable(onClick = onClick),
+            // 焦点驱动 (TV) 下不要涟漪的焦点状态层: 半透明高亮 + 描边 = 两层特效, 且高亮本身
+            // 在封面上分辨不出哪张有焦点 (与 FocusHighlightCard 的取舍一致). 触摸端保留涟漪.
+            .clickable(
+                interactionSource = interactionSource,
+                indication = if (LocalAniUiBehavior.current.focusDrivenNavigation) null else LocalIndication.current,
+                onClick = onClick,
+            )
+            // 末行文字贴着卡底, 给聚焦描边留出余地 (横向内缩在文字上, 头像仍满宽)
+            .padding(bottom = FOCUS_BORDER_TEXT_INSET),
         horizontalAlignment = if (circleCrop) Alignment.CenterHorizontally else Alignment.Start,
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -369,6 +397,7 @@ internal fun PeoplePortraitCard(
         }
         Text(
             name,
+            Modifier.padding(horizontal = FOCUS_BORDER_TEXT_INSET),
             style = MaterialTheme.typography.bodySmall,
             fontWeight = FontWeight.Medium,
             maxLines = 1,
@@ -377,6 +406,7 @@ internal fun PeoplePortraitCard(
         if (caption != null) {
             Text(
                 caption,
+                Modifier.padding(horizontal = FOCUS_BORDER_TEXT_INSET),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -386,7 +416,12 @@ internal fun PeoplePortraitCard(
     }
 }
 
-/** 通用横滑条区块: 标题 (+可选 查看全部) + LazyRow 内容. */
+/**
+ * 通用横滑条区块: 标题 (+可选 查看全部) + 横滑内容.
+ *
+ * TV 上是锚位条 (聚焦卡停在行首, 入场不横跳), 见 [TvAnchoredStrip]; 手机形态不变.
+ * [itemContent] 的第二个参数必须挂到卡片的可聚焦节点上.
+ */
 @Composable
 internal fun <T : Any> PeopleStripSection(
     title: String,
@@ -394,7 +429,7 @@ internal fun <T : Any> PeopleStripSection(
     modifier: Modifier = Modifier,
     onViewAll: (() -> Unit)? = null,
     itemSpacing: Dp = 12.dp,
-    itemContent: @Composable (T) -> Unit,
+    itemContent: @Composable (T, Modifier) -> Unit,
 ) {
     if (items.itemCount == 0) return
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -403,11 +438,9 @@ internal fun <T : Any> PeopleStripSection(
         } else {
             SectionHeader(title)
         }
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(itemSpacing)) {
-            items(items.itemCount) { i ->
-                val item = items[i] ?: return@items
-                itemContent(item)
-            }
+        TvAnchoredStrip(items.itemCount, itemSpacing = itemSpacing) { i, itemModifier ->
+            val item = items[i] ?: return@TvAnchoredStrip
+            itemContent(item, itemModifier)
         }
     }
 }

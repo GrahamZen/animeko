@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -38,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -52,6 +55,7 @@ import me.him188.ani.app.data.models.subject.SubjectCollectionStats
 import me.him188.ani.app.data.models.subject.nameCn
 import me.him188.ani.app.ui.foundation.LocalAniUiBehavior
 import me.him188.ani.app.ui.foundation.avatar.AvatarImage
+import me.him188.ani.app.ui.foundation.focus.TvAnchoredStrip
 import me.him188.ani.app.ui.foundation.ifThen
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.subject_details_characters
@@ -197,38 +201,39 @@ fun CharactersSection(
         )
         val onClickCharacter = rememberPeopleClickHandler()
         if (LocalAniUiBehavior.current.focusDrivenNavigation) {
-            // 焦点驱动形态: 卡片形态 (与"查看全部"弹窗同款 PersonCard + 聚焦高亮容器), 横向滚动行;
-            // 卡宽按视口均分, 一行正好放下 CHARACTER_CARDS_PER_ROW 张完整卡
+            // 焦点驱动形态: 卡片形态 (与"查看全部"弹窗同款 PersonCard + 聚焦高亮容器), 锚位横滑条
+            // (聚焦卡停在行首, 整行滑动; 入场不动 —— 见 TvAnchoredStrip 的 KDoc).
+            // 卡宽按**留白内**的视口均分, 一行正好放下 CHARACTER_CARDS_PER_ROW 张完整卡: 减掉
+            // contentPadding 才是可见宽度, 否则内容恒比视口宽出那点留白, 首尾卡永远差一截
+            val layoutDirection = LocalLayoutDirection.current
             BoxWithConstraints {
-                val cardWidth =
-                    (maxWidth - itemSpacing * (CHARACTER_CARDS_PER_ROW - 1)) / CHARACTER_CARDS_PER_ROW
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(itemSpacing),
+                val cardWidth = (
+                        maxWidth - contentPadding.calculateStartPadding(layoutDirection) -
+                                contentPadding.calculateEndPadding(layoutDirection) -
+                                itemSpacing * (CHARACTER_CARDS_PER_ROW - 1)
+                        ) / CHARACTER_CARDS_PER_ROW
+                TvAnchoredStrip(
+                    itemCount = exposedCharacters.itemCount,
+                    itemSpacing = itemSpacing,
                     contentPadding = contentPadding,
-                ) {
-                    items(exposedCharacters.itemCount) { i ->
-                        val item = exposedCharacters[i] ?: return@items
-                        FocusHighlightCard(
-                            Modifier
-                                .width(cardWidth)
-                                // 最右一张卡的右键显式指到标题行"查看全部" (空间搜索够不到)
-                                .ifThen(i == exposedCharacters.itemCount - 1) {
-                                    focusProperties { right = viewAllFocus }
-                                }
-                                .ifThen(downFocus != null) {
-                                    focusProperties { down = downFocus!! }
-                                },
-                        ) {
-                            PersonCard(
-                                item,
-                                Modifier
-                                    .fillMaxWidth()
-                                    .clip(MaterialTheme.shapes.small)
-                                    .clickable {
-                                        onClickCharacter(PeoplePreviewTarget.Character(item.character.id))
-                                    },
-                            )
-                        }
+                ) { i, itemModifier ->
+                    val item = exposedCharacters[i] ?: return@TvAnchoredStrip
+                    FocusHighlightCard(
+                        Modifier
+                            .width(cardWidth)
+                            .then(itemModifier)
+                            // 最右一张卡的右键显式指到标题行"查看全部" (空间搜索够不到)
+                            .ifThen(i == exposedCharacters.itemCount - 1) {
+                                focusProperties { right = viewAllFocus }
+                            }
+                            .ifThen(downFocus != null) {
+                                focusProperties { down = downFocus!! }
+                            },
+                        // 点击与焦点都在卡容器上 (不在内部的 PersonCard 上): 锚位滚动按焦点目标
+                        // 矩形算, 见 FocusHighlightCard 的 KDoc
+                        onClick = { onClickCharacter(PeoplePreviewTarget.Character(item.character.id)) },
+                    ) {
+                        PersonCard(item, Modifier.fillMaxWidth())
                     }
                 }
             }
