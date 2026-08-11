@@ -10,6 +10,7 @@
 package me.him188.ani.app.ui.exploration.schedule
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -64,6 +65,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -97,9 +99,11 @@ import me.him188.ani.app.navigation.LocalNavigator
 import me.him188.ani.app.navigation.SubjectDetailPlaceholder
 import me.him188.ani.app.ui.foundation.focus.GridFocusController
 import me.him188.ani.app.ui.foundation.focus.GridFocusTransitAnchor
+import me.him188.ani.app.ui.foundation.focus.TV_FOCUS_MOVE_MAX_PER_SECOND_HORIZONTAL
 import me.him188.ani.app.ui.foundation.focus.TvScrollAnimator
 import me.him188.ani.app.ui.foundation.focus.gridKeyNavigation
 import me.him188.ani.app.ui.foundation.focus.resolveFocusRepeatedly
+import me.him188.ani.app.ui.foundation.focus.tvFocusMoveRateLimit
 import me.him188.ani.app.ui.foundation.consumeHeldConfirmKey
 import me.him188.ani.app.ui.foundation.ifThen
 import me.him188.ani.app.ui.foundation.navigation.BackHandler
@@ -182,17 +186,25 @@ fun TvSchedulePage(
         days.indexOfFirst { it.kind == ScheduleDay.Kind.TODAY }.coerceAtLeast(0)
     }
     var selectedDayIndex by rememberSaveable { mutableIntStateOf(todayIndex) }
-    val selectedDay = days.getOrNull(selectedDayIndex.coerceIn(0, days.lastIndex.coerceAtLeast(0)))
+    // 网格与概况行**实际显示**的那一天: 从日期行换天时它比 [selectedDayIndex] 落后一小段 ——
+    // 先把当天内容淡出, 等按键静默下来才换、换完再淡入 (见 dayContentAlpha 那个效应).
+    // 日期行是"聚焦即切换", 长按方向键一秒能过好几天, 每一天都当场换掉一整屏卡片就是用户报的
+    // "日期上左右导航时下面的卡片闪得太快". 从网格跨天那条路不吃这个延迟 (同上处)。
+    var displayedDayIndex by remember { mutableIntStateOf(selectedDayIndex) }
+    val displayedDay = days.getOrNull(displayedDayIndex.coerceIn(0, days.lastIndex.coerceAtLeast(0)))
+    // 换天过渡: 当天内容 (概况行 + 卡片网格) 的整体透明度. 读在 graphicsLayer 的 lambda 里,
+    // 淡入淡出期间只失效图层、不重组 (同本页与探索页其它位置驱动效果的纪律).
+    val dayContentAlpha = remember { Animatable(1f) }
 
     // 当天的卡片列表. 上游已把"当前时刻指示器"插在正确位置 (仅今天有), 它之前的即已播出;
     // 指示器不占卡片位 (会打乱网格的行列换算), 只用来划已播/未播的界与取"现在几点".
     // 过去的日子整天都已播出, 未来的日子一部都还没播.
-    val dayItems = remember(presentation, selectedDay, selectedDayIndex, todayIndex) {
-        val columnItems = selectedDay
+    val dayItems = remember(presentation, displayedDay, displayedDayIndex, todayIndex) {
+        val columnItems = displayedDay
             ?.let { day -> presentation.airingSchedules.firstOrNull { it.date == day.date }?.episodes }
             .orEmpty()
         val indicatorPos = columnItems.indexOfFirst { it is AiringScheduleColumnItem.CurrentTimeIndicator }
-        val isPast = selectedDay != null && selectedDayIndex < todayIndex
+        val isPast = displayedDay != null && displayedDayIndex < todayIndex
         val cards = columnItems.mapIndexedNotNull { pos, columnItem ->
             when (columnItem) {
                 is AiringScheduleColumnItem.Data -> TvScheduleCardData(
@@ -335,10 +347,44 @@ fun TvSchedulePage(
             if (lastFocusedCard >= 0) gridFocus.request(lastFocusedCard) else focusSelectedDate()
         }
     }
+    // 换天的过渡: 当天内容一路淡出, 淡到底即换成新一天, 紧接着淡入 (一进一出错开, 不是两份
+    // 内容叠在一起互相穿透).
+    //
+    // 淡出时长**长于长按连发的间隔** (见 [TV_SCHEDULE_DAY_FADE_OUT_MILLIS]), 于是长按方向键
+    // 期间一次都不换内容: 卡片安静地淡下去, 松手落在哪天就浮现哪天 —— 既没有"一秒闪十几屏",
+    // 也顺带省掉了那十几次整屏卡片重建 (每一天都要重算 dayItems、换掉全部可见卡与图).
+    //
+    // **从网格跨天 (有挂起落点) 时不做过渡, 当场换**: 那条路焦点正被送往新一天的某张卡, 而
+    // 落点解析一遇到用户的下一次按键就放弃 (见 GridFocusController.resolve), 拖这么一下就会
+    // 把"长按右键顺着时间线走过整周"变成"焦点弹回日期行". 何况那时用户盯的是自己那张卡走到
+    // 哪一格, 不是整屏换页.
+    LaunchedEffect(selectedDayIndex) {
+        if (displayedDayIndex == selectedDayIndex) {
+            // 又回到了正在显示的那天 (先右再左这种): 别把内容留在半透明上
+            if (dayContentAlpha.value != 1f) {
+                dayContentAlpha.animateTo(1f, tween(TV_SCHEDULE_DAY_FADE_IN_MILLIS, easing = LinearEasing))
+            }
+            return@LaunchedEffect
+        }
+        if (gridFocus.pending != null) {
+            displayedDayIndex = selectedDayIndex
+            dayContentAlpha.snapTo(1f)
+            return@LaunchedEffect
+        }
+        // 淡出铺满静默期, 到底即换、紧接着淡入: 全程只有一条连续的 alpha 斜坡, 中间不停顿.
+        // **两条斜坡都取 LinearEasing**: 标准的加速/减速曲线会把"看得出在变"的那一小段挤在
+        // 斜坡的一头 (300ms 的 accelerate 里, alpha 从 0.6 掉到 0.1 只占 80ms), 观感就是
+        // "在那儿好好的, 突然没了" —— 正是这次要修的毛病. 线性斜坡才是均匀的渐隐渐现.
+        dayContentAlpha.animateTo(0f, tween(TV_SCHEDULE_DAY_FADE_OUT_MILLIS, easing = LinearEasing))
+        displayedDayIndex = selectedDayIndex
+        dayContentAlpha.animateTo(1f, tween(TV_SCHEDULE_DAY_FADE_IN_MILLIS, easing = LinearEasing))
+    }
     // 换天: 网格回到顶部, 焦点与滚动簿记复位 (从日期行换天时焦点在胶囊上, 不受影响).
     // 已有挂起落点 (从网格跨天进来, 要落到上一天的最后一张) 时不复位滚动: 落点解析自己会滚到
     // 目标那一行, 先弹回顶部再滚下去会闪一下. topRow 留着旧值也无妨 —— 锚点逻辑会夹回来.
-    LaunchedEffect(selectedDayIndex) {
+    // 键是**显示中**的那天而不是选中的那天: 过渡期间卡片还是旧那一天的, 此刻复位就等于在
+    // 淡出途中把内容抽走.
+    LaunchedEffect(displayedDayIndex) {
         lastFocusedCard = -1
         if (gridFocus.pending == null) {
             topRow = 0
@@ -527,7 +573,14 @@ fun TvSchedulePage(
 
             // 概况行: 今天显示"现在几点 · 待播几部", 其余显示总数; 都跟上"你追的几部".
             // 首屏占位期间不显示 (骨架卡的数量不是真数量, 报出来是假信息); 高度恒定占位, 数据到达不跳
-            Box(Modifier.padding(top = TV_SCHEDULE_RAIL_TO_SUMMARY_GAP).height(TV_SCHEDULE_SUMMARY_HEIGHT)) {
+            // 与卡片同步淡入淡出: 它也是"这一天的内容", 单独瞬切会跟下面的卡片脱节
+            Box(
+                Modifier.padding(top = TV_SCHEDULE_RAIL_TO_SUMMARY_GAP).height(TV_SCHEDULE_SUMMARY_HEIGHT)
+                    .graphicsLayer {
+                        compositingStrategy = CompositingStrategy.ModulateAlpha
+                        alpha = dayContentAlpha.value
+                    },
+            ) {
                 if (!presentation.isPlaceholder && dayItems.cards.isNotEmpty()) {
                     TvScheduleSummaryLine(
                         dayItems = dayItems,
@@ -569,6 +622,13 @@ fun TvSchedulePage(
             BoxWithConstraints(
                 Modifier.weight(1f).fillMaxWidth()
                     .padding(top = TV_SCHEDULE_SUMMARY_TO_GRID_GAP)
+                    // 换天时整块淡出/淡入 (含空态提示). **必须 ModulateAlpha**: 默认 Auto 档遇
+                    // alpha < 1 会把整块先画进离屏缓冲再合成, 而这块是整个视口大小 (4K UI 下
+                    // 约 8MP/帧); 网格内卡片互不重叠, 逐绘制指令调制的结果一致
+                    .graphicsLayer {
+                        compositingStrategy = CompositingStrategy.ModulateAlpha
+                        alpha = dayContentAlpha.value
+                    }
                     .onFocusChanged { gridHasFocus = it.hasFocus },
             ) {
                 // 卡片尺寸由可用高度反推, 使 [TV_SCHEDULE_GRID_VISIBLE_ROWS] 行正好放进视口 ——
@@ -752,11 +812,11 @@ fun TvSchedulePage(
                                     lastFocusedCard = index
                                     anyFocusObtained = true
                                     gridFocus.onCardFocused(index)
-                                    if (item != null && selectedDay != null) {
+                                    if (item != null && displayedDay != null) {
                                         focusedTarget = TvScheduleBackdropTarget(
                                             subjectId = item.subjectId,
                                             originalName = item.subjectName.ifBlank { item.subjectTitle },
-                                            airDate = selectedDay.date.toString(),
+                                            airDate = displayedDay.date.toString(),
                                         )
                                     }
                                 },
@@ -859,37 +919,42 @@ private fun TvScheduleDateRail(
         }
     }
     LazyRow(
-        modifier.onPreviewKeyEvent { event ->
-            if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-            onUserNavigation()
-            when (event.key) {
-                // 本行已是最上面一层, 上键消费掉不动: 交回默认方向搜索会跳出内容区
-                Key.DirectionUp -> {
-                    onNavigateUp()
-                    true
-                }
-
-                Key.DirectionDown -> onNavigateDown()
-
-                // 首项按左也消费掉: 日期行不做出口, 交回默认空间搜索的落点不可预测
-                Key.DirectionLeft -> {
-                    if (focusedDateIndex > 0) focusDate(focusedDateIndex - 1)
-                    true
-                }
-
-                Key.DirectionRight -> when (focusedDateIndex) {
-                    in 0..<days.size - 1 -> {
-                        focusDate(focusedDateIndex + 1)
+        modifier
+            // 长按方向键的移动频率上限 (同探索页/选集轮播/详情页选集条). 本行尤其需要: 它是
+            // "聚焦即切换", 系统连发 ~20 次/秒的话一秒要翻十几天, 而每翻一天下面就是一整屏
+            // 新卡片. 挂在限流之后的 onPreviewKeyEvent 只会收到放行的那几发
+            .tvFocusMoveRateLimit()
+            .onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                onUserNavigation()
+                when (event.key) {
+                    // 本行已是最上面一层, 上键消费掉不动: 交回默认方向搜索会跳出内容区
+                    Key.DirectionUp -> {
+                        onNavigateUp()
                         true
                     }
 
-                    days.size - 1 -> true // 末项按右: 必须消费, 否则方向搜索会绕回首项
+                    Key.DirectionDown -> onNavigateDown()
+
+                    // 首项按左也消费掉: 日期行不做出口, 交回默认空间搜索的落点不可预测
+                    Key.DirectionLeft -> {
+                        if (focusedDateIndex > 0) focusDate(focusedDateIndex - 1)
+                        true
+                    }
+
+                    Key.DirectionRight -> when (focusedDateIndex) {
+                        in 0..<days.size - 1 -> {
+                            focusDate(focusedDateIndex + 1)
+                            true
+                        }
+
+                        days.size - 1 -> true // 末项按右: 必须消费, 否则方向搜索会绕回首项
+                        else -> false
+                    }
+
                     else -> false
                 }
-
-                else -> false
-            }
-        },
+            },
         state = listState,
         horizontalArrangement = Arrangement.spacedBy(TV_SCHEDULE_DATE_SPACING),
     ) {
@@ -1307,6 +1372,30 @@ private val TV_SCHEDULE_CARD_MIN_WIDTH = 64.dp
  * 真正决定卡宽的是"两行铺满整屏"那套反推.
  */
 private val TV_SCHEDULE_CARD_MAX_WIDTH = 160.dp
+
+// ---- 换天过渡 ----
+
+/**
+ * 换天时当天内容 (概况行 + 卡片网格) 的淡出时长, **同时就是换内容前要等的按键静默期** ——
+ * 淡出正好铺满整个静默期, 中间不留"已经全透明但还没换"的空档.
+ *
+ * 两者合一是被观感逼出来的: 曾经是"淡出 110ms + 干等 190ms", 用户看到的是"直接消失、空屏
+ * 一下、又出现" —— 短促的 alpha 斜坡根本读不出是渐变, 后面那段全透明就成了纯粹的空屏.
+ *
+ * 值必须长于长按方向键的连发间隔, 否则长按期间仍会在两发之间换掉一整屏卡片 (那正是要消除的
+ * "闪"): 由限流上限推出, 免得两个常数各自漂移 (日期行的限流见 [tvFocusMoveRateLimit]),
+ * 多留的那几十毫秒是"松手那一发"的余量.
+ */
+private const val TV_SCHEDULE_DAY_FADE_OUT_MILLIS =
+    1000 / TV_FOCUS_MOVE_MAX_PER_SECOND_HORIZONTAL + 70
+
+/**
+ * 新一天内容的淡入时长. **用户手调过, 改前先问**.
+ *
+ * 比淡出短一档是刻意的: 淡出那条斜坡的长度被静默期定死 (见上), 而浮现只要读得出是"浮上来"
+ * 就够 —— 拖长了反倒像在等加载.
+ */
+private const val TV_SCHEDULE_DAY_FADE_IN_MILLIS = 200
 
 // ---- 长按窥视 backdrop ----
 
