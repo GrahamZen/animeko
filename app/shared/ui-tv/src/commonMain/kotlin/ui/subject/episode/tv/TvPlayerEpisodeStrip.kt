@@ -64,9 +64,6 @@ private const val TV_STRIP_VISIBLE_CARDS = 4
 /** 卡片间距. */
 private val TV_STRIP_CARD_SPACING = 16.dp
 
-/** 聚焦卡吸附行首时左侧露出的上一张卡切边宽度 (可视化"左边还有"). */
-private val TV_STRIP_PREV_CARD_PEEK = 16.dp
-
 /** 选集条展开/收起的滑动动画时长 (毫秒). */
 private const val TV_STRIP_SLIDE_MS = 250
 
@@ -184,8 +181,6 @@ internal fun TvPlayerEpisodeStrip(
                 cellWidth = cellWidth,
                 cellHeight = cellHeight,
                 cellSpacing = TV_STRIP_CARD_SPACING,
-                // 聚焦卡吸附行首时左侧露出上一张卡切边
-                focusedCardPeek = TV_STRIP_PREV_CARD_PEEK,
                 // 集信息不放卡片行上方: 简介/时长/日期由下方区域展示 (见 onDisplayedChanged)
                 showEpisodeInfo = false,
                 onDisplayedChanged = { displayed = it },
