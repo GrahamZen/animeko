@@ -273,8 +273,9 @@ class RetainedPlaybackSessionHolder : ViewModel(), ViewModelStoreOwner, Playback
                     //
                     // loadMedia 的 setMediaData(playWhenReady = true) 一落地, playWhenReady 就是 true,
                     // 这条规则会在首帧之前就按下去, 于是播放器在后台**永远到不了** isPlaying:
-                    // 1. 第 3 条的就绪提示等的是 isPlaying, 等不到 → 退化成 25 秒超时兜底,
-                    //    提示"已就绪"时其实还没开播 —— 正是这个提示当初要避免的说谎;
+                    // 1. 播放器一次都不播, 于是"播过一次"才做的事全都不做了 —— 当时表现为第 3 条的
+                    //    就绪提示等不到 (那时它还在等 isPlaying). 第 3 条现已改成等
+                    //    `Ready && !isBuffering`, 不再受这条影响, 但下面两条仍然成立;
                     // 2. 后台那段时间不再预热缓冲与解码器, 回页面要从头缓冲 (实测多等 3 秒),
                     //    保留会话的意义就没了;
                     // 3. 缩略图预热也等 isPlaying, 于是它恰好在主播放器做完整初始缓冲的峰值上开工,
@@ -305,15 +306,45 @@ class RetainedPlaybackSessionHolder : ViewModel(), ViewModelStoreOwner, Playback
                     // 万一被合并掉或者一直卡在缓冲, 靠超时兜底照样提示 (地址确实有了, 让用户
                     // 自己决定要不要回去等).
                     //
-                    // 这里要的是**严格** isPlaying (时钟真的在走 = 首帧出来了), 不是 playWhenReady ——
-                    // 后者在还在缓冲时就是 true, 提示"已就绪"时用户回去仍是黑屏, 正是要避免的
+                    // 判据是"媒体已打开且当前位置的数据够了", 而**不是** isPlaying ——
+                    // `isPlaying = mediaStatus == Ready && playWhenReady && !isBuffering`, 它要求
+                    // playWhenReady, 而退出播放页必然把播放器按成暂停 (AutoPauseEffect + 本类第 2 条),
+                    // 于是后台**永远**到不了 isPlaying. 原先按 isPlaying 等, 每次都只能落到下面那个
+                    // 25 秒超时兜底 —— 而用户在等它, 通常等不到 25 秒就自己走回播放页了, 那一刻
+                    // notify 被 playerPageVisible 挡掉, 提示一次都不响
+                    // (2026-08-11 真机: 本地文件 17:59:20 就绪, 播放器一直没动, 18:01:03 用户回到
+                    //  页面的同一秒才首次开播; 换一集的另一次同样精确落在进页面那一秒).
+                    //
+                    // 不含 playWhenReady 的这两条正是"点进去就能看"的充要条件: 媒体开好了, 且当前
+                    // 位置不缺数据. 时钟走不走取决于用户在不在看, 与"就绪"无关.
                     val state = withTimeoutOrNull(PLAYBACK_START_WAIT) {
                         vm.player.state.first {
-                            it.isPlaying || it.mediaStatus is MediaStatus.Error
+                            (it.mediaStatus == MediaStatus.Ready && !it.isBuffering) ||
+                                    it.mediaStatus is MediaStatus.Error
                         }
                     }
                     // 播放器直接报错: 交给第 4 条报"打不开这个源", 别再说一句"已就绪"
                     if (state?.mediaStatus is MediaStatus.Error) return@collectLatest
+
+                    // 缓冲够了**还不等于**"点进去就能看": 还要恢复历史进度, 而 seek 会作废已经缓冲好的
+                    // 数据, 在新位置重新缓冲一次 —— 实测 3 秒左右. 在那之前提示就绪, 用户点进去看到的
+                    // 仍然是"正在缓冲"(2026-08-11 真机复现).
+                    //
+                    // 前提是那次 seek 得**在后台就发生**. RememberPlayProgressExtension 原先把它关在
+                    // `isPlaying` 分支里 (后台永远进不去), 已改成媒体一 Ready 就恢复 —— 能不能 seek
+                    // 的真正前提是时长已知, 不是时钟在走. 那两处必须一起看.
+                    //
+                    // 没有"还有没有待处理的 seek"这种信号可问, 就用稳定性代替: isBuffering 连续
+                    // [PLAYBACK_SETTLE_DELAY] 保持 false 才算稳住. seek 起步比首帧晚一点也没关系 ——
+                    // 它一把 isBuffering 顶起来, debounce 的计时就重置, 于是必然等到它缓冲完.
+                    // 反过来若 seek 起步比这个窗口还晚 (或压根没有历史进度), 最坏也只是回到
+                    // 改之前的行为: 提示早了一点, 不会更差.
+                    withTimeoutOrNull(PLAYBACK_SETTLE_WAIT) {
+                        vm.player.state.map { it.isBuffering }
+                            .distinctUntilChanged()
+                            .debounce(PLAYBACK_SETTLE_DELAY)
+                            .first { !it }
+                    }
                     notify(RetainedPlaybackNotice.Ready)
                 }
         }
@@ -340,6 +371,18 @@ class RetainedPlaybackSessionHolder : ViewModel(), ViewModelStoreOwner, Playback
 
         /** 解析成功后最多等这么久的"真的开播", 到点仍然提示就绪, 见 [guard] 第 3 条. */
         private val PLAYBACK_START_WAIT = 25.seconds
+
+        /**
+         * 开播之后, `isBuffering` 要连续这么久是 false 才算"稳住了", 见 [guard] 第 3 条.
+         *
+         * 取值要盖住"首帧出来"到"恢复历史进度的 seek 真正起步"之间的空档 (那之间要等
+         * `mediaProperties` 报出时长, 通常紧随首帧). 太小会在 seek 起步前就放过去, 太大则纯粹
+         * 推迟提示 —— 没有历史进度时这段是白等的.
+         */
+        private val PLAYBACK_SETTLE_DELAY = 2.seconds
+
+        /** 等"稳住"的上限. 到点照样提示: 宁可早一点, 也别把这声提示彻底吞掉. */
+        private val PLAYBACK_SETTLE_WAIT = 30.seconds
     }
 }
 
