@@ -10,6 +10,8 @@
 package me.him188.ani.app.ui.main
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -273,11 +275,19 @@ private fun MainScreenNavigationLayout(
             // 毛玻璃导航栏覆盖在内容上方时, 页面内容需要额外的 bottom insets 才不会被遮挡.
             val pageWindowInsets = AniWindowInsets.forPageContent()
                 .add(LocalAppChromeOverlayInsets.current)
+            // TV 沉浸壳: 关掉 AnimatedContent 默认 SizeTransform 的裁剪 —— 探索页卡片区
+            // 向左出血到侧边栏底下, 默认裁剪会把出血切掉; 三个 tab 都是 fillMaxSize 等大,
+            // 不依赖尺寸过渡裁剪. 非沉浸壳 (手机/桌面) 保持默认.
+            val immersiveShell = LocalAniUiBehavior.current.immersiveShell
             AnimatedContent(
                 page,
                 Modifier.fillMaxSize(),
                 transitionSpec = {
-                    aniMotionScheme.topLevelTransition
+                    if (immersiveShell) {
+                        aniMotionScheme.topLevelTransition using SizeTransform(clip = false)
+                    } else {
+                        aniMotionScheme.topLevelTransition
+                    }
                 },
             ) { page ->
                 when (page) {
@@ -443,14 +453,7 @@ private fun TabContent(
 
         else -> RectangleShape
     }
-    Surface(
-        modifier.clip(shape),
-        shape = shape,
-        color = if (immersiveShell) Color.Transparent else AniThemeDefaults.pageContentBackgroundColor,
-        // color 透明会使 contentColorFor(Transparent)=Unspecified, 令内部文字退回默认黑色;
-        // 显式指定内容色 (onSurface) 保证深色主题下文字可读. 不透明时与原默认一致.
-        contentColor = MaterialTheme.colorScheme.onSurface,
-    ) {
+    val inner: @Composable () -> Unit = {
         Box(Modifier.fillMaxWidth()) {
             content()
 
@@ -464,6 +467,23 @@ private fun TabContent(
                 UpdateNotifierWithVersionExpiryCheck()
             }
         }
+    }
+    // 沉浸式外壳 (TV): 不能用 Surface —— 它对内容按 shape 硬裁剪 (透明也裁), 会把探索页
+    // 卡片区向左出血到侧边栏底下的离场卡片切掉. 改为直接提供内容色, 不裁剪不画底
+    // (原本就是透明直角, 视觉不变).
+    if (immersiveShell) {
+        CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
+            Box(modifier) { inner() }
+        }
+        return
+    }
+    Surface(
+        modifier.clip(shape),
+        shape = shape,
+        color = AniThemeDefaults.pageContentBackgroundColor,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+    ) {
+        inner()
     }
 }
 

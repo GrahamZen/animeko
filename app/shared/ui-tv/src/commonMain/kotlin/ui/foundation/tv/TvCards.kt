@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -87,9 +88,14 @@ fun TvPortraitCard(
      * 其余卡片淡掉露出 backdrop. 只在真正变化时回调, 不会在每次组合时空报一次.
      */
     onMenuExpandedChange: ((Boolean) -> Unit)? = null,
+    /**
+     * false 时聚焦不自绘外圈 —— 固定锚点轮播行 (探索页) 用: 聚焦框由行叠放的
+     * [TvPortraitCardFocusRing] 钉在锚位统一画, 卡片只在框下滑动 (Prime Video 式).
+     * 网格页 (追番/搜索/时间表) 焦点在二维空间移动, 保持默认自绘.
+     */
+    showFocusRing: Boolean = true,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
-    val focused by interactionSource.collectIsFocusedAsState()
     var menuExpanded by remember { mutableStateOf(false) }
     val setMenuExpanded = { value: Boolean ->
         if (menuExpanded != value) {
@@ -97,18 +103,22 @@ fun TvPortraitCard(
             onMenuExpandedChange?.invoke(value)
         }
     }
+    // 自绘外圈时才订阅焦点态: 固定框模式下卡片外观不随焦点变, 省掉每次导航进出焦点
+    // 的两张卡重组
+    val ringModifier = if (showFocusRing) {
+        val focused by interactionSource.collectIsFocusedAsState()
+        if (focused) {
+            Modifier.border(
+                TV_CARD_FOCUS_RING_WIDTH,
+                MaterialTheme.colorScheme.primary,
+                RoundedCornerShape(TV_PORTRAIT_CARD_CORNER + TV_CARD_FOCUS_GAP),
+            )
+        } else Modifier
+    } else Modifier
     Box(
         modifier
             .aspectRatio(TV_PORTRAIT_CARD_COVER_RATIO)
-            .then(
-                if (focused) {
-                    Modifier.border(
-                        TV_CARD_FOCUS_RING_WIDTH,
-                        MaterialTheme.colorScheme.primary,
-                        RoundedCornerShape(TV_PORTRAIT_CARD_CORNER + TV_CARD_FOCUS_GAP),
-                    )
-                } else Modifier,
-            ),
+            .then(ringModifier),
     ) {
         Surface(
             modifier = Modifier.fillMaxSize().padding(TV_CARD_FOCUS_GAP),
@@ -200,6 +210,25 @@ fun TvPortraitCard(
             }
         }
     }
+}
+
+/**
+ * [TvPortraitCard] 的固定锚位聚焦框 (Prime Video 式): 叠放在固定锚点轮播区的锚位上,
+ * 框钉着不动, 导航时只有卡片列表在框下滑动 (卡片传 showFocusRing=false 关掉自绘外圈).
+ * 尺寸与描边几何与卡片自绘外圈完全一致, 卡片停靠到位后与自绘视觉无差.
+ */
+@Composable
+fun TvPortraitCardFocusRing(modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .width(TV_PAGE_CARD_WIDTH)
+            .aspectRatio(TV_PORTRAIT_CARD_COVER_RATIO)
+            .border(
+                TV_CARD_FOCUS_RING_WIDTH,
+                MaterialTheme.colorScheme.primary,
+                RoundedCornerShape(TV_PORTRAIT_CARD_CORNER + TV_CARD_FOCUS_GAP),
+            ),
+    )
 }
 
 /**
@@ -545,8 +574,15 @@ private val TV_PORTRAIT_CARD_CORNER = 8.dp
 /** 聚焦外圈描边宽度 (主题主色). */
 private val TV_CARD_FOCUS_RING_WIDTH = 2.5.dp
 
-/** 聚焦外圈与封面之间的空隙 (卡片内容常驻内缩此值, 聚焦时空隙处露出底色形成"色圈+留白"). */
-private val TV_CARD_FOCUS_GAP = 3.dp
+/**
+ * 聚焦外圈与封面之间的空隙 (卡片内容常驻内缩此值, 聚焦时空隙处露出底色形成"色圈+留白").
+ *
+ * public 是因为**它同时是卡片外框与焦点目标之间的偏差**: 可聚焦节点是内缩后的封面, 而
+ * [TvPortraitCardFocusRing] 画在外框上. 于是"把聚焦项滚到锚位"的 pivot 式
+ * `BringIntoViewSpec` (拿到的是焦点目标矩形) 必须把锚加上本值, 否则框与卡片差这一点点
+ * 对不齐 —— 真机肉眼可见 (2026-08-10 探索页踩到).
+ */
+val TV_CARD_FOCUS_GAP = 3.dp
 
 /** 继续观看卡片底部集数进度条 (样式对齐详情页 FocusEpisodeProgressBar): 条厚. */
 private val TV_CARD_PROGRESS_BAR_HEIGHT = 2.5.dp
