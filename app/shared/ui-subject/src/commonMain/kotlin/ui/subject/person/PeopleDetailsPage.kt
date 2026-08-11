@@ -458,23 +458,25 @@ private fun PersonStrips(
         stringResource(Lang.person_details_casts),
         casts,
         onViewAll = { showAllCasts = true },
-    ) { cast ->
+    ) { cast, itemModifier ->
         PeoplePortraitCard(
             imageUrl = cast.character.imageMedium,
             name = cast.character.displayName,
             caption = cast.subject.displayName,
             onClick = { navigation.onClickCharacter(cast.character.id) },
+            modifier = itemModifier,
         )
     }
     PeopleStripSection(
         stringResource(Lang.person_details_works),
         works,
         onViewAll = { showAllWorks = true },
-    ) { work ->
+    ) { work, itemModifier ->
         PeopleSubjectCard(
             subject = work.subject,
             caption = work.positions.firstNotNullOfOrNull { it.nameCn },
             onClick = { navigation.onClickSubject(work.subject) },
+            modifier = itemModifier,
         )
     }
 
@@ -590,11 +592,12 @@ private fun CharacterStrips(
         stringResource(Lang.person_details_character_subjects),
         subjects,
         onViewAll = { showAllSubjects = true },
-    ) { item ->
+    ) { item, itemModifier ->
         PeopleSubjectCard(
             subject = item.subject,
             caption = item.role.nameCn,
             onClick = { navigation.onClickSubject(item.subject) },
+            modifier = itemModifier,
         )
     }
 

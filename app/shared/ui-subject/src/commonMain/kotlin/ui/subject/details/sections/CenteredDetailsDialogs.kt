@@ -12,6 +12,7 @@ package me.him188.ani.app.ui.subject.details.sections
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.IndicationNodeFactory
 import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.InteractionSource
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
@@ -142,25 +143,36 @@ internal fun <T : Any> ViewAllGridDialog(
 /**
  * 聚焦卡容器: 包住本身带 clickable 的移动端条目 (如 PersonCard), 使其在 TV 网格中
  * 呈卡片形态 —— 子树获得焦点时主题色描边示焦 (容器底色不变, 不做提亮"背光").
- * 自身不可聚焦, 焦点在内部条目上.
- *
  * 内部条目的 clickable 自带涟漪指示器, 其焦点状态层会在卡里再画一块小尺寸高亮
  * (与描边叠成两层特效); 这里整体禁用内部指示器, 示焦只由卡容器描边承担
  * (与播放器面板条目 TvPanelItem 的单层效果一致).
+ *
+ * [onClick] 给**固定锚位横滑条**里的卡用 (见 `TvAnchoredStrip`): 传了它, 卡容器自己就是焦点
+ * 目标, 内部条目不再挂 clickable. 必须这样 —— 锚位滚动按**焦点目标矩形**算, 焦点若在内部
+ * (比外框内缩一圈 [FOCUS_HIGHLIGHT_CARD_PADDING]), 框架会把内部那圈对齐到锚位, 外框连描边一起
+ * 被顶出视口左缘 (真机症状: "第一张卡最左边被挡住一点点"); 且挂在外框上的落点请求器会因为
+ * 外框不可聚焦而静默失效. 不传 [onClick] 时行为不变 (自身不可聚焦, 焦点在内部条目上).
  */
 @Composable
 internal fun FocusHighlightCard(
     modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
+    val interactionSource = remember { MutableInteractionSource() }
     Surface(
-        modifier.onFocusChanged { focused = it.hasFocus },
+        modifier
+            .onFocusChanged { focused = it.hasFocus }
+            // indication = null: 示焦仍只由下面的描边承担 (涟漪的焦点状态层会再叠一块高亮)
+            .ifThen(onClick != null) {
+                clickable(interactionSource = interactionSource, indication = null, onClick = onClick!!)
+            },
         shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = TV_CARD_CONTAINER_ALPHA),
         border = if (focused) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
     ) {
-        Column(Modifier.padding(10.dp)) {
+        Column(Modifier.padding(FOCUS_HIGHLIGHT_CARD_PADDING)) {
             CompositionLocalProvider(LocalIndication provides NoIndication) {
                 content()
             }
@@ -263,6 +275,9 @@ private fun CommentGridCard(
 /** TV 详情弹窗宽/高占屏比例 (与人物"查看全部"弹窗一致). */
 private const val TV_DETAILS_DIALOG_WIDTH_FRACTION = 0.85f
 private const val TV_DETAILS_DIALOG_HEIGHT_FRACTION = 0.88f
+
+/** [FocusHighlightCard] 卡容器到内部条目的内边距 (＝焦点目标相对外框的内缩量). */
+internal val FOCUS_HIGHLIGHT_CARD_PADDING = 10.dp
 
 /** TV 卡片容器不透明度 (未聚焦/聚焦档): 半透明隐约透出下层背景, 不压住 backdrop. */
 internal const val TV_CARD_CONTAINER_ALPHA = 0.45f
