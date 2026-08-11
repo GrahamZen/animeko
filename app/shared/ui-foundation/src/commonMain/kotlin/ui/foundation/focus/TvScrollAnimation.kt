@@ -9,10 +9,12 @@
 
 package me.him188.ani.app.ui.foundation.focus
 
+import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.AnimationState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateTo
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.ScrollableState
 import androidx.compose.foundation.lazy.LazyListState
@@ -47,9 +49,15 @@ class TvScrollAnimator {
     private var velocity = 0f
 
     /**
-     * 平滑滚动到 [index], 停靠在视口起点偏移 [scrollOffset] 处 (语义同
-     * [LazyListState.animateScrollToItem], 支持负值).
+     * 平滑滚动到 [index], 停靠位由 [scrollOffset] 微调, **符号语义与
+     * [LazyListState.animateScrollToItem] 一致**: 正值 = 向列表起点方向多滚 (条目停在
+     * 起点线的起点侧, 部分收进留白/视口外), 负值 = 停在起点线之后.
      * 目标不在组合中 (远跳, 如恢复焦点) 时回退自带实现 —— 那类场景本就该快进.
+     *
+     * 动画路径的停靠条件是 `item.offset == -scrollOffset` (原生停靠后的 layout offset
+     * 即为 -scrollOffset). 此前这里写成 `== scrollOffset`, 与回退路径的原生语义正好相反 ——
+     * 选集轮播 (唯一非零调用方) 的吸附实际停在了与注释相反的一侧, 固定聚焦框按注释
+     * 放位后对不上卡片才暴露出来.
      */
     suspend fun animateScrollToItem(state: LazyListState, index: Int, scrollOffset: Int = 0) {
         val target = state.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
@@ -58,7 +66,7 @@ class TvScrollAnimator {
             state.animateScrollToItem(index, scrollOffset)
             return
         }
-        animateBy(state, (target.offset - scrollOffset).toFloat())
+        animateBy(state, (target.offset + scrollOffset).toFloat())
     }
 
     /** [LazyGridState] 版, 语义同上; 取主轴 offset. */
@@ -71,7 +79,7 @@ class TvScrollAnimator {
             return
         }
         val mainAxisOffset = if (info.orientation == Orientation.Vertical) target.offset.y else target.offset.x
-        animateBy(state, (mainAxisOffset - scrollOffset).toFloat())
+        animateBy(state, (mainAxisOffset + scrollOffset).toFloat())
     }
 
     private suspend fun animateBy(state: ScrollableState, distance: Float) {
@@ -105,8 +113,38 @@ class TvScrollAnimator {
 }
 
 /**
+ * pivot 式 [BringIntoViewSpec] (androidx.tv 弃用 TvLazyList 后的官方迁移做法, 替代
+ * `PivotOffsets`): 聚焦项一律滚到距容器起始边 [anchorPx] 的**锚位**, 而不是默认的
+ * "最小滚动到可见" (后者让聚焦项在容器内游走, 做不了固定聚焦框).
+ *
+ * 用法: 普通 LazyRow/LazyColumn + `CompositionLocalProvider(LocalBringIntoViewSpec provides …)`,
+ * 滚动**不要手写**: 卡片一聚焦 (`Modifier.focusable` 自带 bring-into-view 请求) 框架就滚到位.
+ * [calculateScrollDistance] 每帧重算, 框架的 `UpdatableAnimationState` 据此自动改目标、
+ * 速度连续 —— 连按方向键时列表连续流动 (leanback 手感), 无需手写速度继承/取消.
+ *
+ * [anchorPx] = 内容的 rest 位置 (即该轴的 `contentPadding` 起始值) **加上"卡片外框到焦点
+ * 目标矩形的偏差"**: bring-into-view 拿到的是焦点目标 (可聚焦节点) 的矩形, 若卡片的可聚焦
+ * 节点比卡片外框内缩了一圈 (如探索页竖版卡的封面内缩 `TV_CARD_FOCUS_GAP`), 不补这一段,
+ * 固定聚焦框与卡片就会差那么多对不齐, 且首项永远停不到 rest 位置.
+ *
+ * [BringIntoViewSpec.scrollAnimationSpec] 在 Compose 1.10 已标记弃用但仍被 `ContentInViewNode`
+ * 读取 (定制动画曲线目前只有这一条路); 若未来版本移除, pivot 定位仍工作, 只是退回默认
+ * spring —— 到时再评估手感. 曲线与 [TvScrollAnimator] 共用 [TV_SCROLL_STIFFNESS].
+ */
+fun tvAnchorBringIntoViewSpec(anchorPx: Float): BringIntoViewSpec =
+    object : BringIntoViewSpec {
+        @Deprecated("Animation spec customization is no longer supported.")
+        override val scrollAnimationSpec: AnimationSpec<Float> = spring(stiffness = TV_SCROLL_STIFFNESS)
+
+        override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float =
+            offset - anchorPx
+    }
+
+/**
  * 焦点滚动 spring 刚度: 决定"单格滚动多久". 260f ≈ 260ms 停靠 (质量 1, 临界阻尼下
  * 停靠时间 ≈ 4/√stiffness 秒). 调大更快更利落, 调小更慢更从容; Leanback 的参照区间是
- * 单格 200-250ms. 只调这里, 全部 TV 焦点滚动 (网格吸顶/探索页行/选集轮播) 统一手感.
+ * 单格 200-250ms. 只调这里, 全部 TV 焦点滚动统一手感 —— 除本动画器 (网格吸顶/选集轮播)
+ * 外, public 也给探索页那套官方 pivot 式 `BringIntoViewSpec` 的 `scrollAnimationSpec` 用,
+ * 两条路径同一条曲线.
  */
-private const val TV_SCROLL_STIFFNESS = 260f
+const val TV_SCROLL_STIFFNESS = 260f
