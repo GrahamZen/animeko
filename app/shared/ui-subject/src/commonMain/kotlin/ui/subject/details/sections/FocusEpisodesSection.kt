@@ -13,6 +13,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -30,6 +31,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -45,6 +47,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.material3.HorizontalDivider
@@ -63,6 +66,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -74,11 +78,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
@@ -97,7 +102,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.PlayArrow
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import coil3.PlatformContext
 import coil3.compose.LocalPlatformContext
@@ -109,7 +113,9 @@ import me.him188.ani.app.ui.foundation.rememberAsyncImageRetryState
 import me.him188.ani.app.ui.foundation.rememberTvLongPressKeyState
 import me.him188.ani.app.ui.foundation.tvLongPressKey
 import me.him188.ani.app.ui.foundation.focus.TvScrollAnimator
+import me.him188.ani.app.ui.foundation.focus.tvAnchorBringIntoViewSpec
 import me.him188.ani.app.ui.foundation.focus.resolveFocusRepeatedly
+import me.him188.ani.app.ui.foundation.focus.tvFocusMoveRateLimit
 import me.him188.ani.app.ui.foundation.theme.glassContainerColor
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.subject_details_episodes
@@ -123,9 +129,9 @@ import me.him188.ani.datasources.api.topic.UnifiedCollectionType
 import org.jetbrains.compose.resources.stringResource
 
 /**
- * TV 选集: 单行固定锚点轮播 —— 聚焦卡片始终吸附在行首并带外圈高亮,
- * 遥控器左右导航时焦点视觉位置不动, 卡片列表整体平滑滑过. 行上方展示当前聚焦集的
- * "集号. 集名 + 简介". 自动滚至当前集.
+ * TV 选集: 单行固定锚点轮播 (Prime Video 式) —— 聚焦框钉在行首停靠位不动,
+ * 遥控器左右导航时只有卡片列表在框下平滑滑过, 聚焦卡滑进框里停靠. 行上方展示当前
+ * 聚焦集的 "集号. 集名 + 简介". 自动滚至当前集.
  *
  * 未聚焦任何格子时展示 [currentEpisodeId] (当前/下一集) 的信息.
  */
@@ -167,11 +173,6 @@ fun FocusEpisodeCarousel(
      * 集信息 (如播放器选集条在卡片行下方放简介). null 时不回调.
      */
     onDisplayedChanged: ((EpisodeListItem?) -> Unit)? = null,
-    /**
-     * 聚焦卡片吸附到行首时额外露出的上一张卡片切边宽度 (0 = 不露, 原行为).
-     * 首张卡不适用 (左边没有卡).
-     */
-    focusedCardPeek: Dp = 0.dp,
     cellWidth: Dp = 256.dp,
     cellHeight: Dp = 144.dp,
     cellSpacing: Dp = 16.dp,
@@ -215,7 +216,7 @@ fun FocusEpisodeCarousel(
     onRevealConsumed: () -> Unit = {},
     /**
      * 非 null 时挂在卡片行 (LazyRow) 上: 调用方对它 requestFocus 可把焦点送进轮播,
-     * focusRestorer 会恢复到上次聚焦的卡片 (首次为当前集). 详情页返回键分层用
+     * 进行落点改道会送到展示中的那张卡 (首次为当前集). 详情页返回键分层用
      * ("选集之下的区域按返回回到选集卡片").
      */
     rowFocusRequester: FocusRequester? = null,
@@ -224,6 +225,12 @@ fun FocusEpisodeCarousel(
     // 实时聚焦的卡片 (失焦即清空), 区别于 focusedEpisodeId (记录"最后聚焦", 不清空):
     // 焦点断言必须用实时值 —— 用最后聚焦值会在"目标恰好是上次聚焦的卡"时误判已完成
     var activeFocusEpisodeId by remember { mutableStateOf<Int?>(null) }
+    // 实时聚焦卡的下标 (与 activeFocusEpisodeId 同步簿记, 焦点离行清 -1): 供"聚焦卡左侧
+    // 压暗"的每卡判断用 —— 直接记下标, 不经 episodes 映射 (映射 lambda 会被 item 的
+    // remember 缓存住旧实例, 见 [FocusEpisodeAnchorRing] 的教训)
+    var activeFocusIndex by remember { mutableIntStateOf(-1) }
+    // 聚焦卡是否正被按住 (长按确认键): 固定聚焦框读它跟着缩放
+    var pressingCard by remember { mutableStateOf(false) }
 
     // 长按卡片打开的单集操作菜单; 关闭后把焦点还给弹窗当前显示的那集的卡片
     var actionTarget by remember { mutableStateOf<EpisodeListItem?>(null) }
@@ -239,13 +246,13 @@ fun FocusEpisodeCarousel(
     }
     var actionRestoreEpisodeId by remember { mutableStateOf<Int?>(null) }
     // 本次焦点恢复期间"焦点被还给这张卡"不算用户介入 (见下方 yieldEpisodeId): 窗口关闭时
-    // 系统/focusRestorer 会把焦点还给弹窗打开前聚焦的那张卡, 与显式聚焦目标集竞争
+    // 系统会把焦点还给弹窗打开前聚焦的那张卡, 与显式聚焦目标集竞争
     var actionRestoreYieldEpisodeId by remember { mutableStateOf<Int?>(null) }
     val actionRestoreFocus = remember { FocusRequester() }
     LaunchedEffect(actionRestoreEpisodeId) {
         val target = actionRestoreEpisodeId ?: return@LaunchedEffect
         // 只请求一次不够: 对话框窗口关闭时系统会异步把焦点还给宿主窗口之前的元素,
-        // LazyRow 的 focusRestorer 又会把它"恢复"到上一张聚焦卡 (或回退卡), 与这里的
+        // 落到行上又会经 onEnter 改道到"展示中的那张卡", 与这里的
         // 显式聚焦竞争, 谁后执行谁生效 (表现为随机跳错集). 另外 scrollToItem 后目标卡
         // 可能还没组合完成, 首次请求会落空.
         //
@@ -296,14 +303,18 @@ fun FocusEpisodeCarousel(
     }
     // 初始滚动位置直接建在当前集 (而非从 0 起再靠效应滚动): 播放器选集条每次展开
     // 都是全新组合, 若初始在 0, 焦点解析会赶在滚动前落到第一张卡 —— 当前集卡尚未
-    // 组合, focusRestorer 的兜底请求器没挂上, 落点就错了. 初始即在当前集,
+    // 组合, 进行落点的请求器没挂上, 落点就错了. 初始即在当前集,
     // 当前集卡首帧组合, 落焦必中.
     val listState = rememberLazyListState(
         initialFirstVisibleItemIndex = currentIndex.coerceAtLeast(0),
     )
-    // 吸附偏移: 负值让目标卡片停在行首偏右, 左侧露出上一张卡的切边; 首张卡不偏 (左边没有卡)
-    val peekPx = with(LocalDensity.current) { focusedCardPeek.roundToPx() }
-    val snapOffsetFor: (Int) -> Int = { index -> if (index > 0) -peekPx else 0 }
+    // 停靠一律 scrollToItem(index, 0): 每张卡 (含首卡) 停靠后左边缘都在 horizontalPadding,
+    // 聚焦框恒定不动; 非首卡停靠时上一张卡在屏幕左缘自然露出 horizontalPadding - cellSpacing
+    // 宽的切边. 详情页与播放器选集条完全同一套几何, 没有任何按调用方分叉的停靠逻辑.
+    // 曾有过 focusedCardPeek 参数 (播放器条首卡停 horizontalPadding、其余卡停偏左 peek 处,
+    // 用 scrollOffset=±peek 表达): TvScrollAnimator 与原生实现的 scrollOffset 符号语义相反
+    // + 多条滚动路径混用, 真机上出过"每次右导航停靠位漂移", 且聚焦框要在两个停靠位之间
+    // 跳 —— 整个删除, 别再引入非零 scrollOffset 或分叉停靠位.
     // 数据异步到达后补一次"滚到当前集" (进页首帧 episodes 常为空, currentIndex = -1).
     //
     // 用户已在轮播里定位过 (聚焦过卡片 / 在简介或弹窗上左右切过) 之后就不再跟随: 停留期间
@@ -312,15 +323,16 @@ fun FocusEpisodeCarousel(
     // [focusedEpisodeId] 只在效应体内读, 不作 key, 不会让本函数 body 订阅热状态
     LaunchedEffect(currentIndex) {
         if (currentIndex >= 0 && focusedEpisodeId == null) {
-            listState.scrollToItem(currentIndex, snapOffsetFor(currentIndex))
+            listState.scrollToItem(currentIndex)
         }
     }
 
     // 焦点停在简介块上时左右键切换聚焦集: 展示的集号/标题/简介随之更新, 卡片行同步
     // 滑动一格 (此时没有卡片真正聚焦, 滚动不能靠 activeFocusEpisodeId 驱动), 到两端无效果
     val scope = rememberCoroutineScope()
-    // 三处滚动 (卡片行吸附 / 简介左右切换 / 弹窗左右切换) 共用: 同一 listState 的动画互相
-    // 取消时速度经它继承, 连发左右键时轮播连续流动
+    // 焦点不在卡片上时的两处滚动 (简介块左右切换 / 弹窗左右切换) 共用: 同一 listState 的
+    // 动画互相取消时速度经它继承, 连发左右键时轮播连续流动. 卡片自己的吸附不走这里 ——
+    // 那是焦点驱动的, 交给 pivot 式 BringIntoViewSpec (见下方 LazyRow)
     val scrollAnimator = remember { TvScrollAnimator() }
     val moveDisplayedBy: (Int) -> Unit = moveDisplayed@{ delta ->
         val displayedId = focusedEpisodeId ?: currentEpisodeId
@@ -328,7 +340,7 @@ fun FocusEpisodeCarousel(
         val target = index + delta
         if (target !in episodes.indices) return@moveDisplayed
         focusedEpisodeId = episodes[target].episodeId
-        scope.launch { scrollAnimator.animateScrollToItem(listState, target, snapOffsetFor(target)) }
+        scope.launch { scrollAnimator.animateScrollToItem(listState, target) }
     }
 
     // 跳到指定集 (选集网格菜单关闭后): 先滚动让目标卡片进入组合, 再复用 actionRestore 的下一帧聚焦机制.
@@ -340,11 +352,11 @@ fun FocusEpisodeCarousel(
             if (index >= 0) {
                 // 焦点归还的落点 = 跳转前"最后聚焦"的那张卡, 记下来供恢复解析放行 (不算用户介入)
                 actionRestoreYieldEpisodeId = focusedEpisodeId
-                // "最后聚焦"立刻改为目标集: 信息行 / focusRestorer 的兜底请求器 (fallbackIndex)
+                // "最后聚焦"立刻改为目标集: 信息行 / 进行落点请求器 (fallbackIndex)
                 // 都读它, 不改的话它们仍指着旧卡 —— 于是归还与显式聚焦一起把焦点往旧卡上拉,
                 // 表现为"长按 N 却停在旧卡上" (旧卡滚出组合的远距离跳转才碰巧正常)
                 focusedEpisodeId = revealEpisodeId
-                listState.scrollToItem(index, snapOffsetFor(index))
+                listState.scrollToItem(index)
                 actionRestoreEpisodeId = revealEpisodeId
             }
             onRevealConsumed()
@@ -418,7 +430,7 @@ fun FocusEpisodeCarousel(
                             val nextEpisode = episodes[next]
                             actionTarget = nextEpisode
                             focusedEpisodeId = nextEpisode.episodeId
-                            scope.launch { scrollAnimator.animateScrollToItem(listState, next, snapOffsetFor(next)) }
+                            scope.launch { scrollAnimator.animateScrollToItem(listState, next) }
                         }
                     },
                     background = stillBackground,
@@ -455,13 +467,17 @@ fun FocusEpisodeCarousel(
             }
         }
 
-        // 焦点从行外进入时恢复到上次聚焦的卡片 (首次进入落到当前集), 而不是交给空间焦点搜索 ——
-        // 否则从右上角的按钮向下导航会命中右缘刚组合出来的卡片, 触发横向 BringIntoView 把整行拉向左.
-        // 兜底目标跟随当前展示的集 (而非固定当前集): 在简介上左右切换后上次聚焦卡可能已滚出组合,
-        // 此时进入卡片行应落到展示中的集
+        // 焦点从行外进入时的落点: 一律"展示中的那张卡" (上次聚焦的卡, 或在简介上左右切过之后
+        // 的那张; 首次进入是当前集), 而不是交给空间焦点搜索 —— 否则从右上角的按钮向下导航会
+        // 命中右缘刚组合出来的卡片, pivot 随即把整行往左拽.
+        //
+        // 用 onEnter 改道到这个请求器, **不用 `focusRestorer`**: 它记的是节点引用, 卡片滚出
+        // 组合后引用失效就退化成"进组第一个可聚焦项"= 右缘那张 (探索页同一个坑); 而且它记的
+        // "上次聚焦卡"与"展示中的集"会分叉 —— 在简介上左右切过之后, 上次聚焦卡可能还组合着,
+        // 于是进行时焦点回到它、整行又滑回去一格.
         val restoreFocus = remember { FocusRequester() }
-        // 兜底目标下标跟随"展示中的集": 热状态推导包进 derivedStateOf, body 不读值 ——
-        // 每个 item 自己再包一层"我是不是兜底卡"的布尔 (见 LazyRow 内), 变化只重组进出的两张卡
+        // 落点下标跟随"展示中的集": 热状态推导包进 derivedStateOf, body 不读值 ——
+        // 每个 item 自己再包一层"我是不是落点卡"的布尔 (见 LazyRow 内), 变化只重组进出的两张卡
         val fallbackIndexState = remember(episodes, currentEpisodeId) {
             derivedStateOf {
                 val displayedId = focusedEpisodeId ?: currentEpisodeId
@@ -470,38 +486,37 @@ fun FocusEpisodeCarousel(
             }
         }
 
-        // 固定锚点轮播: 聚焦卡片始终吸附在行首, 按左右键时焦点的视觉位置不动,
-        // 卡片列表整体平滑滑过 (最后一集也一样 —— 行尾留出整行空白让末卡也能吸附到行首).
-        // 为此禁用默认 BringIntoView 的"最小滚动"(它只保证可见, 焦点卡片会在行内游走),
-        // 横向滚动改由当前聚焦下标显式驱动 (activeFocusEpisodeId 声明在函数开头).
+        // 固定锚点轮播: 聚焦卡片始终吸附在停靠位 (= contentPadding start), 按左右键时焦点的
+        // 视觉位置不动, 卡片列表整体平滑滑过 (最后一集也一样 —— 行尾留出整行空白让末卡也能
+        // 吸附到停靠位).
         //
-        // 焦点恢复期间 (actionRestoreEpisodeId != null) 焦点可能被系统归还给旧卡一两帧,
-        // 这几帧不跟随滚动: 跟了就是"滑向旧卡又滑回来"的抖动, 而目标位置 reveal 时已经滚到位.
-        // 恢复结束 (置回 null) 时快照流会再发射一次, 按当时真实的聚焦卡补上滚动 —— 用户中途
-        // 自己把焦点移走 (解析放弃) 的情况下, 吸附不会漏做.
-        // 热状态经 snapshotFlow 观察而非当 effect key (key 在组合中求值 = body 订阅);
-        // collectLatest 保持"新聚焦取消进行中的滚动动画"的旧语义.
-        LaunchedEffect(episodes) {
-            snapshotFlow {
-                val idx = activeFocusEpisodeId?.let { id -> episodes.indexOfFirst { it.episodeId == id } } ?: -1
-                idx to actionRestoreEpisodeId
-            }.collectLatest { (activeFocusIndex, restore) ->
-                if (activeFocusIndex >= 0 && (restore == null || restore == activeFocusEpisodeId)) {
-                    scrollAnimator.animateScrollToItem(listState, activeFocusIndex, snapOffsetFor(activeFocusIndex))
-                }
-            }
+        // 滚动交给官方 pivot 式 BringIntoViewSpec (与探索页卡片区同一套, 见
+        // [tvAnchorBringIntoViewSpec]): 卡片一聚焦, 框架就把它滚到锚位, 每帧重算目标、速度
+        // 连续. 此前是"no-op spec + 快照观察聚焦下标 + 手动 animateScrollToItem": 那条路要自己
+        // 处理连发取消/速度继承, 且比焦点晚一帧, 焦点恢复期间还得额外躲开系统归还给旧卡的那
+        // 一两帧 (否则"滑向旧卡又滑回来"). pivot 下这些都不存在 —— 归还与显式聚焦发生在同一
+        // 帧序列里, 框架只会朝最后一个焦点滚, 速度连续所以中途改向也不跳.
+        //
+        // 焦点没在卡片上的两条路 (简介块左右键 / 数据到达后对齐当前集) 仍显式滚动, 见
+        // moveDisplayedBy 与上面的 LaunchedEffect(currentIndex).
+        val density = LocalDensity.current
+        // 锚位 = 停靠位, 无需补偏差: 卡片的可聚焦节点就是卡片外框本身 (聚焦框是行层的
+        // overlay, 向外探出而不内缩卡片), 焦点目标矩形与卡片外框一致
+        val bringIntoViewSpec = remember(density, horizontalPadding) {
+            tvAnchorBringIntoViewSpec(with(density) { horizontalPadding.toPx() })
         }
-        val noBringIntoView = remember {
-            object : BringIntoViewSpec {
-                override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float = 0f
-            }
-        }
-        CompositionLocalProvider(LocalBringIntoViewSpec provides noBringIntoView) {
+        CompositionLocalProvider(LocalBringIntoViewSpec provides bringIntoViewSpec) {
             BoxWithConstraints {
                 LazyRow(
                     Modifier
                         .then(rowFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
-                        .focusRestorer(restoreFocus),
+                        // 长按左右键的移动频率上限: 系统连发 ~20 次/秒, 每发都换卡的话滑动动画
+                        // 不断被打断, 卡片是闪过去而不是滑过去 (与探索页卡片区同一个限流器)
+                        .tvFocusMoveRateLimit()
+                        // 进行落点改道 (见上方 restoreFocus). onEnter 只在**焦点组**节点上生效,
+                        // 少一个 focusGroup 就完全不触发 (探索页真机踩过)
+                        .focusProperties { onEnter = { runCatching { restoreFocus.requestFocus() } } }
+                        .focusGroup(),
                     state = listState,
                     horizontalArrangement = Arrangement.spacedBy(cellSpacing),
                     // start: 停靠时聚焦卡片与其他区块左对齐; end: 行尾留出整行空白让末卡也能
@@ -514,89 +529,178 @@ fun FocusEpisodeCarousel(
                     itemsIndexed(episodes, key = { _, item -> item.episodeId }) { index, item ->
                         // "我是不是XX"的判断一律包 derivedStateOf: 源状态每次导航都变
                         // (activeFocusEpisodeId 还会 置null→写新值 变两次), 直读让全部可见卡
-                        // 每键陪跑重组两遍; 包过之后只有布尔真正翻转的两张卡重组
-                        // 外圈高亮: 聚焦时沿卡片圆角紧贴描边, 用主题动态色
-                        // (详情页启用封面取色主题, primary 即动态色)
-                        val ringFocused by remember(item.episodeId) {
-                            derivedStateOf { item.episodeId == activeFocusEpisodeId }
-                        }
+                        // 每键陪跑重组两遍; 包过之后只有布尔真正翻转的两张卡重组.
+                        // 聚焦外圈不在卡片上画 —— 由行叠放的固定锚位聚焦框统一画 (见 LazyRow 之后)
                         val isFallback by remember(index) {
                             derivedStateOf { index == fallbackIndexState.value }
                         }
                         val isActionRestoreTarget by remember(item.episodeId) {
                             derivedStateOf { item.episodeId == actionRestoreEpisodeId }
                         }
-                        Box {
-                        FocusEpisodeCard(
-                            item,
-                            stillUrl = episodeStills[item.episodeId],
-                            isPlaying = item.episodeId == currentEpisodeId,
-                            onClick = { onEpisodeClick(item) },
-                            monochrome = monochrome,
-                            glass = glass,
-                            modifier = Modifier.width(cellWidth)
-                                .then(
-                                    if (ringFocused) {
-                                        Modifier.border(
-                                            FOCUS_RING_WIDTH,
-                                            if (monochrome) {
-                                                // 黑白态: 纯白描边 (同播放器面板条目)
-                                                SolidColor(Color.White)
-                                            } else {
-                                                // 主题动态色渐变 (左上 primary → 右下 secondary)
-                                                Brush.linearGradient(
-                                                    listOf(
-                                                        MaterialTheme.colorScheme.primary,
-                                                        MaterialTheme.colorScheme.secondary,
-                                                    ),
-                                                )
-                                            },
-                                            RoundedCornerShape(EPISODE_CARD_CORNER),
-                                        )
-                                    } else Modifier,
-                                )
-                                .then(if (isFallback) Modifier.focusRequester(restoreFocus) else Modifier)
-                                .then(
-                                    if (isActionRestoreTarget) {
-                                        Modifier.focusRequester(actionRestoreFocus)
-                                    } else Modifier,
-                                )
-                                .then(
-                                    if (upFocus != null || downFocus != null) {
-                                        Modifier.focusProperties {
-                                            if (upFocus != null) up = upFocus
-                                            if (downFocus != null) down = downFocus
+                        // Prime Video 式左侧压暗: 聚焦卡左侧的卡片 (停靠线左边露出的切边)
+                        // 压暗, 全亮只留给聚焦卡及其右侧; 向右导航时离场卡滑进暗区的过程
+                        // 即自然变暗, 穿过聚焦框轮廓的圆角错位也被压得看不出.
+                        // 状态读在 graphicsLayer 的 lambda 里, 渐变过程只失效图层不重组
+                        val dimmedPast by remember(index) {
+                            derivedStateOf { activeFocusIndex > index }
+                        }
+                        val dimAlpha = animateFloatAsState(
+                            if (dimmedPast) EPISODE_PAST_CARD_DIM_ALPHA else 1f,
+                            tween(EPISODE_DIM_FADE_MILLIS),
+                            label = "pastCardDim",
+                        )
+                        Box(
+                            Modifier.graphicsLayer {
+                                // 逐绘制指令调制 alpha, 不进离屏缓冲: 默认 Auto 档遇 alpha < 1 会把
+                                // 整张卡先画进离屏缓冲再合成 (saveLayerAlpha), 而卡内容 (剧照 + 贴底
+                                // 的字/进度条) 不重叠, 调制的结果与合成一致
+                                compositingStrategy = CompositingStrategy.ModulateAlpha
+                                alpha = dimAlpha.value
+                            },
+                        ) {
+                            FocusEpisodeCard(
+                                item,
+                                stillUrl = episodeStills[item.episodeId],
+                                isPlaying = item.episodeId == currentEpisodeId,
+                                onClick = { onEpisodeClick(item) },
+                                monochrome = monochrome,
+                                glass = glass,
+                                modifier = Modifier.width(cellWidth)
+                                    .then(if (isFallback) Modifier.focusRequester(restoreFocus) else Modifier)
+                                    .then(
+                                        if (isActionRestoreTarget) {
+                                            Modifier.focusRequester(actionRestoreFocus)
+                                        } else Modifier,
+                                    )
+                                    .then(
+                                        if (upFocus != null || downFocus != null) {
+                                            Modifier.focusProperties {
+                                                if (upFocus != null) up = upFocus
+                                                if (downFocus != null) down = downFocus
+                                            }
+                                        } else Modifier,
+                                    )
+                                    .onFocusChanged {
+                                        if (it.isFocused) {
+                                            focusedEpisodeId = item.episodeId
+                                            activeFocusEpisodeId = item.episodeId
+                                            activeFocusIndex = index
+                                        } else if (activeFocusEpisodeId == item.episodeId) {
+                                            // 焦点离开整行时熄灭外圈; 行内移动会先聚焦新卡再走到这里, 不受影响
+                                            activeFocusEpisodeId = null
+                                            activeFocusIndex = -1
                                         }
-                                    } else Modifier,
-                                )
-                                .onFocusChanged {
-                                    if (it.isFocused) {
-                                        focusedEpisodeId = item.episodeId
-                                        activeFocusEpisodeId = item.episodeId
-                                    } else if (activeFocusEpisodeId == item.episodeId) {
-                                        // 焦点离开整行时熄灭外圈; 行内移动会先聚焦新卡再走到这里, 不受影响
-                                        activeFocusEpisodeId = null
+                                    },
+                                height = cellHeight,
+                                progress = playProgress[item.episodeId],
+                                onLongClick = if (onSetEpisodeCollectionType == null) null else {
+                                    {
+                                        actionOpenedOnEpisodeId = item.episodeId
+                                        actionTarget = item
                                     }
                                 },
-                            height = cellHeight,
-                            progress = playProgress[item.episodeId],
-                            onLongClick = if (onSetEpisodeCollectionType == null) null else {
-                                {
-                                    actionOpenedOnEpisodeId = item.episodeId
-                                    actionTarget = item
-                                }
-                            },
-                        )
+                                onPressingChanged = { pressingCard = it },
+                                // 边按方向键边按住确认键时, 卡片还在滑向固定聚焦框 —— 等它停进框里
+                                // 才触发 (计时照常从按下算, 不会因此要按更久); 这种按住不出缩放反馈
+                                pressReady = { !listState.isScrollInProgress },
+                            )
                         }
                     }
                 }
+                // 固定锚位聚焦框 (Prime Video 式): 框钉在吸附停靠位不动, 左右导航时只有
+                // 卡片列表在框下滑动; 焦点离开整行 (含移到简介上) 时熄灭, 语义同原先画在
+                // 聚焦卡上的外圈. 热状态 (是否有聚焦卡) 经 provider lambda 传入, 只在子组件里读
+                FocusEpisodeAnchorRing(
+                    visible = { activeFocusEpisodeId != null },
+                    pressed = { pressingCard },
+                    cellWidth = cellWidth,
+                    cellHeight = cellHeight,
+                    horizontalPadding = horizontalPadding,
+                    monochrome = monochrome,
+                )
             }
         }
     }
 }
 
-/** TV 选集卡片聚焦时的外圈描边宽度 (紧贴卡片圆角, 画在卡片边缘内侧, 不会被 LazyRow 裁掉). */
-private val FOCUS_RING_WIDTH = 1.5.dp
+/**
+ * 选集轮播的固定锚位聚焦框: 钉在吸附停靠位不随卡片动. 样式与探索页竖版卡的聚焦框同款 ——
+ * 描边画在卡片轮廓之外, 与卡片之间留一圈空隙 (框比卡大一圈, 圆角 = 卡片圆角 + 空隙).
+ * [visible] 的源状态每次左右导航都变 (热状态), 在本组件内经 derivedStateOf 收窄成布尔,
+ * 只在焦点进出行时翻转 (上层 BoxWithConstraints 作用域不订阅, 否则它的 LazyRow content
+ * lambda 捕获不稳定引用, 每次进出行全部可见卡重建).
+ */
+@Composable
+private fun FocusEpisodeAnchorRing(
+    visible: () -> Boolean,
+    pressed: () -> Boolean,
+    cellWidth: Dp,
+    cellHeight: Dp,
+    horizontalPadding: Dp,
+    monochrome: Boolean,
+) {
+    // 上层重组可能换 provider lambda 实例, 缓存进 derivedStateOf 前必须经 rememberUpdatedState
+    // 读最新实例 —— 直接捕获会永久留住首帧那个 (真机踩过: 捕获了空 episodes 的旧 lambda
+    // 让框永远不亮)
+    val currentVisible by rememberUpdatedState(visible)
+    val show by remember { derivedStateOf { currentVisible() } }
+    val currentPressed by rememberUpdatedState(pressed)
+    val pressedNow by remember { derivedStateOf { currentPressed() } }
+    // 与卡片同一个比例、同一条默认曲线 -> 按住时框与卡一起缩, 不脱开
+    val pressScale by animateFloatAsState(if (pressedNow) EPISODE_CARD_PRESS_SCALE else 1f)
+    if (show) {
+        Box(
+            Modifier
+                // 框比卡大一圈: 向左上各偏一个空隙宽度使卡片仍停在原位, 四边各探出一个
+                // 空隙 (offset 允许负值; 父容器不裁剪, 探出到行距/留白里没关系)
+                .padding(start = horizontalPadding)
+                .offset {
+                    val gap = FOCUS_RING_GAP.roundToPx()
+                    IntOffset(-gap, -gap)
+                }
+                .size(cellWidth + FOCUS_RING_GAP * 2, cellHeight + FOCUS_RING_GAP * 2)
+                // 定尺寸之后缩放 = 绕框自身中心缩, 与卡片 (绕卡中心缩) 同心
+                .scale(pressScale)
+                .border(
+                    FOCUS_RING_WIDTH,
+                    if (monochrome) {
+                        // 黑白态: 纯白描边 (同播放器面板条目)
+                        SolidColor(Color.White)
+                    } else {
+                        // 主题动态色渐变 (左上 primary → 右下 secondary)
+                        Brush.linearGradient(
+                            listOf(
+                                MaterialTheme.colorScheme.primary,
+                                MaterialTheme.colorScheme.secondary,
+                            ),
+                        )
+                    },
+                    RoundedCornerShape(EPISODE_CARD_CORNER + FOCUS_RING_GAP),
+                ),
+        )
+    }
+}
+
+/**
+ * 按住确认键时卡片与固定聚焦框的缩放比例 ("缩下去又弹回来"= 长按已触发).
+ * 两者必须同值同曲线, 否则按住时框与卡脱开一圈.
+ */
+private const val EPISODE_CARD_PRESS_SCALE = 0.94f
+
+/** TV 选集聚焦框的描边宽度 (同探索页竖版卡聚焦框). */
+private val FOCUS_RING_WIDTH = 2.5.dp
+
+/**
+ * 聚焦卡左侧卡片的压暗亮度 (Prime Video 逐帧实测约四成亮): 左侧切边是"已经过去的内容",
+ * 压暗与聚焦卡拉开主次; 离场卡滑进暗区时随 [EPISODE_DIM_FADE_MILLIS] 渐暗.
+ */
+private const val EPISODE_PAST_CARD_DIM_ALPHA = 0.45f
+
+/** 左侧压暗的渐变时长 (与单格滚动 260ms 大致同步, 边滑边暗). */
+private const val EPISODE_DIM_FADE_MILLIS = 200
+
+/** TV 选集聚焦框与卡片轮廓之间的空隙 (框圆角 = 卡片圆角 + 此值, 同探索页竖版卡聚焦框). */
+private val FOCUS_RING_GAP = 3.dp
 
 /**
  * 玻璃态无图卡片的墨色浓度 (见 [FocusEpisodeCard] 的 `glass`).
@@ -698,6 +802,10 @@ fun FocusEpisodeCard(
     progress: Float? = null,
     /** 非 null 时支持长按确认键 (按住 OK) 触发, 用于打开单集操作菜单. */
     onLongClick: (() -> Unit)? = null,
+    /** 按住确认键的状态变化上报 (行层的固定聚焦框据此同步缩放). */
+    onPressingChanged: ((Boolean) -> Unit)? = null,
+    /** 长按触发的闸门 (见 [tvLongPressKey] 的 `readyToFire`): 卡片还在滑向聚焦框时先别触发. */
+    pressReady: (() -> Boolean)? = null,
     /**
      * true 时改用纯黑白配色 (半透明白底 + 白字, 聚焦即白底黑字), 与播放器控制层的胶囊按钮一致.
      *
@@ -783,16 +891,23 @@ fun FocusEpisodeCard(
             onLongPress = onLongClick,
             onShortPress = onClick,
             state = longPressState,
+            readyToFire = pressReady,
         )
     }
 
     // 按住确认键的视觉反馈 (同网格方块): 按住期间轻微缩小, 达到长按阈值后弹回 —
     // "缩下去又弹回来" = 长按已经触发
     val pressing = onLongClick != null && longPressState.pressing
-    val pressScale by animateFloatAsState(if (pressing) 0.94f else 1f)
+    val pressScale by animateFloatAsState(if (pressing) EPISODE_CARD_PRESS_SCALE else 1f)
+    // 上报给行: 固定锚位聚焦框在行层, 拿不到本卡的按住状态, 要靠它跟着缩. 同一时刻只有聚焦卡
+    // 收得到按键, 所以行里一个布尔就够
+    if (onPressingChanged != null) {
+        LaunchedEffect(pressing) { onPressingChanged(pressing) }
+    }
     Surface(
         onClick = onClick,
-        // scale 放链最外层: 调用方 modifier 里带聚焦外圈描边, 按住缩小时描边跟着一起缩
+        // scale 放链最外层: 按住缩小时整张卡 (含调用方 modifier 里的装饰) 一起缩;
+        // 行层的固定锚位聚焦框按同一比例同步缩 —— 框不缩的话按住时卡与框脱开一圈, 像焦点掉了
         modifier = Modifier.scale(pressScale).then(modifier).height(height).then(longPressModifier),
         shape = RoundedCornerShape(EPISODE_CARD_CORNER),
         color = containerColor,
