@@ -9,6 +9,7 @@
 
 package me.him188.ani.app.torrent.io
 
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.io.IOException
@@ -86,8 +87,30 @@ class TorrentInput(
     /**
      * 当 [SeekableInput] 需要等待 piece 完成时, 会[切换][withContext]到的 [CoroutineContext].
      */
-    private val awaitCoroutineContext: CoroutineContext = EmptyCoroutineContext,
+    awaitCoroutineContext: CoroutineContext = EmptyCoroutineContext,
 ) : BufferedSeekableInput(bufferSize) {
+    /**
+     * [awaitCoroutineContext] 去掉 [Job] 之后的版本, 供 [fillBuffer] 里的 `runBlocking` 使用.
+     *
+     * **必须去掉 Job**: 这个参数的语义是"等 piece 时切到哪个 dispatcher", 不是生命周期父级。
+     * 而 mediamp 0.3.0 传进来的 context 里那个 Job **在 createInput 返回时就已经完成了** ——
+     * 它把调用点从
+     *     `data.createInput(currentCoroutineContext())`
+     * 改成了
+     *     `withContext(Dispatchers.IO) { data.createInput(currentCoroutineContext()) }`
+     * 于是 `currentCoroutineContext()` 拿到的是 `withContext` 那个块自己的协程 context,
+     * 它的 Job 在块结束时立刻完成. `runBlocking(带已完成的 Job)` 会在 `initParentJob` 里
+     * 当场被 parentCancelled 掉, 每一次读都抛
+     *     JobCancellationException: Parent job is Completed
+     *
+     * 后果是整条 BT 播放链路全废: ExoPlayer 收到 Source error → PlayerLoadErrorHandler 换源 →
+     * 逐个源失败; 而失败时 `AnitorrentEntry` 会把文件优先级设回 IGNORE, 于是**一个 piece 都不请求**,
+     * 表现为"peer 连上了但零字节、BT 完全不下载"(2026-08-11 真机, 诊断端口 6890 实测
+     * peerCount=2 / downloadedBytes=0).
+     *
+     * 保留 dispatcher 等其它元素, 只摘 Job.
+     */
+    private val awaitCoroutineContext: CoroutineContext = awaitCoroutineContext.minusKey(Job)
 
     // exclusive
     private val logicalLastOffset = logicalStartOffset + size - 1
