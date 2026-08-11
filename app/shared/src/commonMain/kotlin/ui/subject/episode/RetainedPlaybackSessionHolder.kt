@@ -38,8 +38,8 @@ import me.him188.ani.app.ui.foundation.playback.LocalPlaybackSessionEntry
 import me.him188.ani.app.ui.foundation.playback.PlaybackSessionEntry
 import me.him188.ani.app.ui.foundation.playback.RetainedPlaybackSessionInfo
 import me.him188.ani.app.ui.mediaselect.summary.MediaSelectorSummary
-import org.openani.mediamp.PlaybackState
-import org.openani.mediamp.isPlaying
+import org.openani.mediamp.MediaStatus
+import org.openani.mediamp.PlayerState
 import kotlin.time.Duration.Companion.seconds
 
 /**
@@ -264,10 +264,24 @@ class RetainedPlaybackSessionHolder : ViewModel(), ViewModelStoreOwner, Playback
         launch {
             combine(
                 playerPageVisible,
-                vm.player.playbackState,
+                vm.player.state,
                 vm.playbackAutomationSuppressed,
             ) { visible, state, roomControlled -> Triple(visible, state, roomControlled) }
                 .collect { (visible, state, roomControlled) ->
+                    // 这里必须是**严格** isPlaying (时钟真的在走), 不能图省事换成 playWhenReady ——
+                    // 换过, 三个症状一起来 (2026-08-11 真机复现):
+                    //
+                    // loadMedia 的 setMediaData(playWhenReady = true) 一落地, playWhenReady 就是 true,
+                    // 这条规则会在首帧之前就按下去, 于是播放器在后台**永远到不了** isPlaying:
+                    // 1. 第 3 条的就绪提示等的是 isPlaying, 等不到 → 退化成 25 秒超时兜底,
+                    //    提示"已就绪"时其实还没开播 —— 正是这个提示当初要避免的说谎;
+                    // 2. 后台那段时间不再预热缓冲与解码器, 回页面要从头缓冲 (实测多等 3 秒),
+                    //    保留会话的意义就没了;
+                    // 3. 缩略图预热也等 isPlaying, 于是它恰好在主播放器做完整初始缓冲的峰值上开工,
+                    //    两路抢带宽/解码器 → prewarm 失败 → framesAvailable 被永久置 false
+                    //    (只有换媒体才重置) → 整集彻底没缩略图.
+                    //
+                    // 代价是时钟起走的那一瞬可能漏出一点声音, 这是原设计接受的取舍.
                     if (!visible && !roomControlled && state.isPlaying) {
                         // 记下是自动暂停的: 回到播放页由 AutoPauseEffect 自动恢复
                         vm.autoPausedOnLeave = true
@@ -287,16 +301,19 @@ class RetainedPlaybackSessionHolder : ViewModel(), ViewModelStoreOwner, Playback
                     // 建解码器、缓冲首帧 —— 实测 1~18 秒, 在线源越慢越久. 按 Succeed 提示的话用户回来
                     // 还得对着黑屏干等 (进度条右侧还是 0:00), 那这声提示就没起到作用. 等真的开播再说.
                     //
-                    // 后台一到 PLAYING 就会被第 2 条按成 PAUSED, 但这里是常驻的收集者, 那一次 PLAYING
-                    // 收得到; 万一被合并掉或者一直卡在缓冲, 靠超时兜底照样提示 (地址确实有了, 让用户
+                    // 后台一开播就会被第 2 条按回暂停, 但这里是常驻的收集者, 那一次开播收得到;
+                    // 万一被合并掉或者一直卡在缓冲, 靠超时兜底照样提示 (地址确实有了, 让用户
                     // 自己决定要不要回去等).
+                    //
+                    // 这里要的是**严格** isPlaying (时钟真的在走 = 首帧出来了), 不是 playWhenReady ——
+                    // 后者在还在缓冲时就是 true, 提示"已就绪"时用户回去仍是黑屏, 正是要避免的
                     val state = withTimeoutOrNull(PLAYBACK_START_WAIT) {
-                        vm.player.playbackState.first {
-                            it == PlaybackState.PLAYING || it == PlaybackState.ERROR
+                        vm.player.state.first {
+                            it.isPlaying || it.mediaStatus is MediaStatus.Error
                         }
                     }
                     // 播放器直接报错: 交给第 4 条报"打不开这个源", 别再说一句"已就绪"
-                    if (state == PlaybackState.ERROR) return@collectLatest
+                    if (state?.mediaStatus is MediaStatus.Error) return@collectLatest
                     notify(RetainedPlaybackNotice.Ready)
                 }
         }
@@ -305,9 +322,9 @@ class RetainedPlaybackSessionHolder : ViewModel(), ViewModelStoreOwner, Playback
         launch {
             combine(
                 vm.videoStatisticsFlow.map { it.videoLoadingState }.distinctUntilChanged(),
-                vm.player.playbackState,
+                vm.player.state,
                 vm.pageState.map { selectionProblemOf(it) }.distinctUntilChanged(),
-            ) { loading, playback, selection -> problemOf(loading, playback, selection) }
+            ) { loading, playerState, selection -> problemOf(loading, playerState, selection) }
                 .distinctUntilChanged()
                 // 等状态稳定下来再提示: 播放失败常常是一闪而过的中间态 —— SwitchMediaOnPlayerErrorExtension
                 // 会在出错约 1 秒后自动换下一个源重试, 每换一次都必然路过 Failed, 逐个弹提示就成了刷屏.
@@ -351,14 +368,14 @@ private fun selectionProblemOf(state: EpisodePageState?): SelectionProblem {
 
 private fun problemOf(
     loading: VideoLoadingState,
-    playback: PlaybackState,
+    playerState: PlayerState,
     selection: SelectionProblem,
 ): RetainedPlaybackNotice? = when {
     // Cancelled 不是问题: 它是"换源"的中间态 (loadMedia 被取消), 紧接着就会重新开始解析
     loading is VideoLoadingState.Failed && loading != VideoLoadingState.Cancelled ->
         RetainedPlaybackNotice.LoadFailed(loading)
 
-    playback == PlaybackState.ERROR -> RetainedPlaybackNotice.PlayerError
+    playerState.mediaStatus is MediaStatus.Error -> RetainedPlaybackNotice.PlayerError
     selection == SelectionProblem.NeedsManualSelection -> RetainedPlaybackNotice.NeedsManualSelection
     selection == SelectionProblem.NoMedia -> RetainedPlaybackNotice.NoMediaFound
     else -> null

@@ -42,7 +42,6 @@ import me.him188.ani.utils.logging.logger
 import me.him188.ani.utils.logging.warn
 import org.openani.mediamp.ExperimentalMediampApi
 import org.openani.mediamp.MediampPlayer
-import org.openani.mediamp.PlaybackState
 import org.openani.mediamp.features.FramePreview
 import org.openani.mediamp.source.MediaData
 import org.openani.mediamp.source.UriMediaData
@@ -144,13 +143,13 @@ internal fun rememberTvFramePreviewState(
                 // 超时兜底是怕"一直没开播"(卡缓冲/用户进来就暂停)时预热永远不做: 那样第一次拖拽
                 // 要现场等一遍建会话, 也拿不到能力探测的结果.
                 withTimeoutOrNull(PREWARM_PLAYBACK_WAIT) {
-                    player.playbackState.first { it == PlaybackState.PLAYING }
+                    player.state.first { it.isPlaying }
                 }
                 // 预热: 建会话 (含 ExoPlayer 启动 + 容器/播放列表解析) 是这条链路最贵的一步,
                 // 提前做掉, 首次拖拽就不用等它. 同时也是一次能力探测 ——
                 // 失败会把 MediaProgressFramePreviewState.framesAvailable 置 false,
                 // 浮窗直接退化成只显示时间, 而不是先给一块黑底
-                runCatching { state.prewarm(player.getCurrentPositionMillis()) }
+                runCatching { state.prewarm(player.currentPositionMillis.value) }
             }
         }
     }

@@ -17,7 +17,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import me.him188.ani.app.domain.episode.EpisodeSession
 import org.koin.core.Koin
-import org.openani.mediamp.PlaybackState
 import org.openani.mediamp.features.PlaybackSpeed
 import kotlin.coroutines.CoroutineContext
 
@@ -54,9 +53,13 @@ class PlaybackSpeedExtension(
             // 没人再把倍速交给它, 于是画面声音都是原速, 界面上却写着 1.25x.
             //
             // 等到真的在播 (音频管线已就绪) 再下发一次, 才是真的变速.
-            context.player.mediaData.distinctUntilChanged().collectLatest { data ->
+            // 不加 distinctUntilChanged: mediaData 是 StateFlow, 本身就按值去重 ——
+            // coroutines 1.11 起对 StateFlow 调它是编译错误 (Operator Fusion)
+            context.player.mediaData.collectLatest { data ->
                 if (data == null) return@collectLatest
-                context.player.playbackState.first { it == PlaybackState.PLAYING }
+                // 要的是**严格** isPlaying (时钟真的在走 = 音频管线已就绪), 不是 playWhenReady ——
+                // 后者在管线还没建起来时就已经是 true, 那时补发等于没补
+                context.player.state.first { it.isPlaying }
                 val speed = playbackSpeedFlow.first()
                 if (speed != 1f) {
                     applySpeed(speed, force = true)
@@ -69,7 +72,7 @@ class PlaybackSpeedExtension(
      * @param force 播放器层面的参数已经是 [speed] 时也强制走一遍下发 (见实现里的注释).
      */
     private suspend fun applySpeed(speed: Float, force: Boolean = false) {
-        // 必须切到主线程再碰播放器 (同 PlayerSession.loadMedia 里的 player.resume()):
+        // 必须切到主线程再碰播放器 (同 PlayerSession.loadMedia 里的 player.setMediaData()):
         // 本任务跑在 Dispatchers.Default, 而 ExoPlayer 有 application thread 检查,
         // 从别的线程调会抛 "Player is accessed on the wrong thread".
         //

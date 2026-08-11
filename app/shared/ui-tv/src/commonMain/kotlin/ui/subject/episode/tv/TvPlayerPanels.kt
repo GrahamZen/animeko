@@ -1350,7 +1350,7 @@ internal fun TvDanmakuSendEntry(
         scope.launch {
             danmakuEditorState.post(
                 DanmakuContent(
-                    vm.player.getCurrentPositionMillis(),
+                    vm.player.currentPositionMillis.value,
                     text = text,
                     color = Color.White.toArgb(),
                     location = DanmakuLocation.NORMAL,

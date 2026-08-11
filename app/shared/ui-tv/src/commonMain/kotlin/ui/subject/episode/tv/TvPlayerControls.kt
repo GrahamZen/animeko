@@ -1180,7 +1180,7 @@ private fun TvSkipOpEdButton(vm: EpisodeViewModel, modifier: Modifier = Modifier
     val seconds = duration.inWholeSeconds
     val label = stringResource(Lang.subject_episode_fast_forward_seconds, seconds)
     TvBottomRowLabeled(label = label, modifier) {
-        TvBottomRowIconButton({ vm.onClickSkipOpEd(vm.player.getCurrentPositionMillis()) }) {
+        TvBottomRowIconButton({ vm.onClickSkipOpEd(vm.player.currentPositionMillis.value) }) {
             val icon = when (seconds) {
                 85L -> AniIcons.Forward85
                 90L -> AniIcons.Forward90

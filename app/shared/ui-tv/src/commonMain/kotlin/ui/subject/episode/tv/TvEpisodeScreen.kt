@@ -92,10 +92,8 @@ import me.him188.ani.app.videoplayer.ui.rememberPlayerStatsState
 import me.him188.ani.app.videoplayer.ui.rememberVideoSideSheetsController
 import me.him188.ani.danmaku.ui.DanmakuHostState
 import org.openani.mediamp.MediampPlayer
-import org.openani.mediamp.PlaybackState
 import org.openani.mediamp.features.PlaybackSpeed
-import org.openani.mediamp.isPlaying
-import org.openani.mediamp.togglePause
+import org.openani.mediamp.togglePlayWhenReady
 
 /** 遥控器左右键单次快进/快退步长. 也是长按拖拽预览的起步步长, 见 [TV_SCRUB_MAX_SPEEDUP]. */
 internal const val TV_PLAYER_SEEK_STEP_MILLIS = 5_000L
@@ -343,20 +341,19 @@ fun TvEpisodeScreenContent(
      * 分支 showControls() 唤了回来 —— 净效果本来就是"留着", 中间那趟往返却看得见: 焦点会先被
      * 甩到 OP/ED 提示按钮上 (纯视频态屏上只剩它) 再弹回进度条. 索性不收.
      *
-     * 提交路径用 `resume()` 而不是 `togglePause()`, **无条件**变成播放态: 进入拖拽必然先暂停
+     * 提交路径用 `play()` 而不是 `togglePlayWhenReady()`, **无条件**变成播放态: 进入拖拽必然先暂停
      * (见 [enterScrub]), 所以"确认"在这个态里只可能是"从圆点这儿开始播" —— 与进入之前是播放
      * 还是暂停无关. 换成 toggle 的话从暂停进来的那次会把播放器又切回暂停.
      */
     fun exitScrub(commit: Boolean) {
         if (commit) {
-            // resume 必须在 seek **之前**: mediamp 的 resume() 只在 READY/PAUSED 两个状态下才真的
-            // 动手 (见 AbstractMediampPlayer.resume), 而 seekTo 会把状态推到 PAUSED_BUFFERING ——
-            // ExoPlayer 在 seekTo 内部就同步派发了 STATE_BUFFERING, 所以下一行 resume() 必然
-            // 落在 PAUSED_BUFFERING 上被静默丢弃, 表现为"按确认键后还是暂停"(确定性复现).
+            // mediamp 0.3.0 之前这里的顺序是硬约束: 旧 `resume()` 只在 READY/PAUSED 两个状态下才
+            // 真的动手, 而 seekTo 会把状态推到 PAUSED_BUFFERING (ExoPlayer 在 seekTo 内部就同步派发
+            // STATE_BUFFERING), 于是 seek 之后再 resume 必然被静默丢弃, 表现为"按确认键后还是暂停".
             //
-            // 反过来先 resume: 此刻状态一定是 PAUSED (进拖拽态时暂停的, 拖动期间不 seek),
-            // resume 生效后 playWhenReady=true, 紧接着的 seek 落地即续播
-            vm.player.resume()
+            // v2 的 `play()` 只是置播放意图 (playWhenReady), 不再被状态门控, 顺序上已经不敏感;
+            // 这里保留"先置意图再 seek"是因为它语义更直白: 落地即续播, 中间不会出现一帧暂停态.
+            vm.player.play()
             progressSliderState.finishPreview() // 内部走 onPreviewFinished -> player.seekTo
         } else {
             progressSliderState.cancelPreview()
@@ -685,9 +682,10 @@ fun TvEpisodeScreenContent(
                         // 此刻 fastForwarding 一定还是 true: 协程挂在"等松手"上, 要到下一次
                         // 调度才会走到还原, 而这里是同一次事件回调内同步读的
                         if (!fastForwarding) {
-                            // 暂停态下恢复播放不唤出控制层 (画面动起来即反馈); 播放态下暂停仍唤出
-                            val resuming = vm.player.playbackState.value == PlaybackState.PAUSED
-                            vm.player.togglePause()
+                            // 暂停态下恢复播放不唤出控制层 (画面动起来即反馈); 播放态下暂停仍唤出.
+                            // 按播放意图判断而非严格 isPlaying: 缓冲中按一下应当是"暂停", 不是"恢复"
+                            val resuming = !vm.player.state.value.playWhenReady
+                            vm.player.togglePlayWhenReady()
                             if (!resuming) overlay.showControls()
                         }
                     }
@@ -710,8 +708,8 @@ fun TvEpisodeScreenContent(
                 when (key) {
                     Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause -> {
                         // 暂停态下恢复播放不唤出控制层 (画面动起来即反馈); 播放态下暂停仍唤出
-                        val resuming = vm.player.playbackState.value == PlaybackState.PAUSED
-                        vm.player.togglePause()
+                        val resuming = !vm.player.state.value.playWhenReady
+                        vm.player.togglePlayWhenReady()
                         if (!resuming) overlay.showControls()
                         true
                     }
@@ -836,7 +834,7 @@ fun TvEpisodeScreenContent(
                     Key.DirectionCenter, Key.Enter, Key.NumPadEnter ->
                         if (overlay.focusRegion == TvPlayerFocusRegion.PROGRESS) {
                             if (progressSliderState.isPreviewing) exitScrub(commit = true)
-                            else vm.player.togglePause()
+                            else vm.player.togglePlayWhenReady()
                             true
                         } else {
                             false
@@ -846,7 +844,7 @@ fun TvEpisodeScreenContent(
                         // 播放键在拖拽预览中与确认键同义 (遥控器上播放/暂停通常是同一个物理键,
                         // 拖拽态本来就是暂停的, 按它的意思只可能是"从这儿开始播")
                         if (progressSliderState.isPreviewing) exitScrub(commit = true)
-                        else vm.player.togglePause()
+                        else vm.player.togglePlayWhenReady()
                         true
                     }
 
@@ -872,7 +870,7 @@ fun TvEpisodeScreenContent(
                 }
 
                 key == Key.MediaPlayPause || key == Key.MediaPlay || key == Key.MediaPause -> {
-                    if (isKeyDown) vm.player.togglePause()
+                    if (isKeyDown) vm.player.togglePlayWhenReady()
                     true
                 }
 
@@ -1005,8 +1003,9 @@ fun TvEpisodeScreenContent(
                 return@collectLatest
             }
             delay(TV_PLAYER_AUTO_HIDE_MILLIS)
-            // 暂停时不自动隐藏 (Prime 行为); 到点时再查一次播放状态
-            if (vm.player.playbackState.value.isPlaying) {
+            // 暂停时不自动隐藏 (Prime 行为); 到点时再查一次播放意图.
+            // 用 playWhenReady 而非严格 isPlaying: 卡在缓冲上不该把控制层永久钉住
+            if (vm.player.state.value.playWhenReady) {
                 overlay.hideAll()
             }
         }
@@ -1230,12 +1229,10 @@ private fun TvPauseFlash(
     var flashKey by remember { mutableIntStateOf(0) }
     LaunchedEffect(player) {
         var prev: Boolean? = null
-        player.playbackState.collect { state ->
-            val playing = when (state) {
-                PlaybackState.PLAYING -> true
-                PlaybackState.PAUSED -> false
-                else -> return@collect
-            }
+        // 只看播放意图的翻转. v1 时这里必须显式排掉 PAUSED_BUFFERING 等中间态 (否则缓冲一下就闪一次
+        // 暂停图标); v2 的 playWhenReady 本身就只在用户/程序真的暂停时才变 false, 天然没有这个噪声.
+        player.state.collect { state ->
+            val playing = state.playWhenReady
             if (prev == true && !playing) {
                 visible = true
                 flashKey++
