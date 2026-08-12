@@ -232,15 +232,21 @@ fun TvExplorationPage(
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
 
-    // 聚焦条目 (卡片 onFocusChanged 上报); 标题/封面来自卡片自身数据, 立即可显示
-    var heroTarget by remember { mutableStateOf<TvHeroTarget?>(null) }
+    // 聚焦条目 (卡片 onFocusChanged 上报); 标题/封面来自卡片自身数据, 立即可显示.
+    // 初值取上次离开时的目标 (见 TvHeroMediaCache.lastTarget): 返回本页时首帧就能算出背景图,
+    // 不必等卡片重新上报聚焦
+    var heroTarget by remember { mutableStateOf(TvHeroMediaCache.lastTarget) }
     // subjectId -> Bangumi 完整条目信息 (评分/连载/简介). 在看列表的条目自带, 聚焦时直接种入.
     val infoCache = remember { mutableStateMapOf<Int, SubjectCollectionInfo>() }
+    // 两张 hero 背景图的解析结果表. **进程级, 不是 remember** —— 跟着组合销毁的话返回本页时
+    // 背景图要重解析约 300ms, 那层 Crossfade 便在页面入场动画中途才起步, 观感是"alpha 突然
+    // 跳一档". 详见 [TvHeroMediaCache].
+    //
     // subjectId -> TMDB backdrop URL (null = 已查过但没有, 不再重查; 请求失败不缓存)
-    val backdropCache = remember { mutableStateMapOf<Int, String?>() }
+    val backdropCache = TvHeroMediaCache.backdrops
     // 继续观看行: subjectId -> 下一集 TMDB 数据 (剧照 + 单集简介; 字段为 null = 查过没有).
     // 记录 episodeId 是为了看完一集后 (下一集变化) 自动换图, 服务层有持久缓存, 重查很便宜.
-    val episodeStillCache = remember { mutableStateMapOf<Int, TvNextEpisodeMedia>() }
+    val episodeStillCache = TvHeroMediaCache.nextEpisodeMedia
     // 播放历史 (响应式): 退出播放器回到本页时进度条 / 剩余分钟自动更新.
     // 继续观看卡的进度条与 hero 剩余分钟都从这里取"下一集"的播放位置.
     val playHistories by playHistoryRepository.flow.collectAsStateWithLifecycle(emptyList())
@@ -295,6 +301,7 @@ fun TvExplorationPage(
                     }.onSuccess { media ->
                         // 存原图档 URL, 显示时才按设置降档 (见下方 backdropUrl) —— 存降档结果的话
                         // 用户开完整视觉效果得清缓存才生效
+                        TvHeroMediaCache.trimIfNeeded()
                         episodeStillCache[target.subjectId] =
                             TvNextEpisodeMedia(nextEpisodeId, media?.stillUrl, media?.overview)
                     }
@@ -316,6 +323,7 @@ fun TvExplorationPage(
                             activeAsOfDate = info.episodes.newestAiredDateStringOrNull(),
                         )
                     }.onSuccess { url ->
+                        TvHeroMediaCache.trimIfNeeded()
                         backdropCache[target.subjectId] = url
                     }
                 }
@@ -348,6 +356,8 @@ fun TvExplorationPage(
             // 进度/下一集要跟着变 (只在缺失时写入会把 info 冻结在页面首次聚焦时的状态)
             if (seed != null && (fromFollowed || subjectId !in infoCache)) infoCache[subjectId] = seed
             heroTarget = TvHeroTarget(subjectId, title, fromFollowed)
+            // 供返回本页时做初值, 见 TvHeroMediaCache.lastTarget
+            TvHeroMediaCache.lastTarget = heroTarget
         }
     // 进详情页: 先等目标页首屏的材料备齐再跳, 备不齐则最多等 [TV_NAV_READY_BUDGET].
     //
@@ -1670,6 +1680,56 @@ private data class TvNextEpisodeMedia(
     val stillUrl: String?,
     val overview: String?,
 )
+
+/**
+ * hero 背景图的**进程内**缓存 (条目 -> 已解析的图), 跨导航存活.
+ *
+ * ## 为什么不能是页面里的 `remember`
+ *
+ * 导航离开时页面退出组合, `remember` 的解析结果一并销毁; 返回本页要从头再解析一遍
+ * (读 DataStore 缓存 -> 出 URL -> Coil 取图), 约 300ms. 而背景图外面套着一层
+ * [TV_BACKDROP_CROSSFADE_MILLIS] 的 `Crossfade` (换聚焦条目时用的), URL 迟到就意味着
+ * **这层 crossfade 在页面入场动画中途才起步** —— 屏幕上同时跑着两条互不相干的透明度曲线,
+ * 相乘出来的观感就是"alpha 走着走着突然跳一档".
+ *
+ * 真机逐帧实测 (2026-08-12, 从详情页返回本页, 60fps 录屏): 页面自身的入场淡入在第 219 帧
+ * 就已跑完 (页面其余内容此后完全静止), 背景图那一层却在第 218 帧只有最终亮度的 **37%**、
+ * 下一帧跳到 **81%**、再花 150ms 才爬到 100%; 中途整屏平均亮度一度掉到起始值的 43%.
+ * 这就是那下"闪"与"折线感"的来源, 与文字/排版无关.
+ *
+ * 提到进程级之后返回时首帧就有 URL, `Crossfade` 的初值即终值 (初值不触发动画), 背景图与页面
+ * 其余部分共用同一条入场淡入曲线.
+ *
+ * ## 容量
+ *
+ * 单条极小 (一个 URL / 一集的剧照 URL + 简介), 超量整表清空 —— 纯加速缓存, 清空只是让下次多
+ * 解析一遍, 没有正确性影响, 不值得为它引一套 LRU. 上限远高于一次浏览会掠过的条目数.
+ */
+private object TvHeroMediaCache {
+    private const val MAX_ENTRIES = 300
+
+    /** subjectId -> TMDB 整部 backdrop URL; 值为 `null` = 已查过确认没有, 不再重查. */
+    val backdrops = mutableStateMapOf<Int, String?>()
+
+    /** subjectId -> "继续观看"下一集的 TMDB 剧照与简介. */
+    val nextEpisodeMedia = mutableStateMapOf<Int, TvNextEpisodeMedia>()
+
+    /**
+     * 上次离开本页时 hero 指向的条目, 用作返回时的初值.
+     *
+     * 光把上面两张表提到进程级还不够: `backdropUrl` 是 `heroTarget?.let { ... }` 算出来的,
+     * 而 `heroTarget` 要等卡片重新上报聚焦才有值 —— 返回后的头几帧它仍是 null, `Crossfade`
+     * 照样从空白起步. 用上次的值开局即可跳过这几帧; 焦点恢复到同一张卡时它本来就等于新值,
+     * 落到别的卡上则是两张真图之间的正常 crossfade (仍好过从黑底淡入).
+     */
+    var lastTarget: TvHeroTarget? = null
+
+    /** 写入前调用: 超量则整表清空 (见 KDoc 的容量说明). */
+    fun trimIfNeeded() {
+        if (backdrops.size > MAX_ENTRIES) backdrops.clear()
+        if (nextEpisodeMedia.size > MAX_ENTRIES) nextEpisodeMedia.clear()
+    }
+}
 
 /**
  * 区块标题. 两处用同一个组件, 保证两条路径的高度/字体完全一致 (它们必须等高, 否则 hero 态与
