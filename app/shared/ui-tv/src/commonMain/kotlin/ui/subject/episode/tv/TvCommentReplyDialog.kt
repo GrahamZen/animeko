@@ -243,6 +243,8 @@ internal fun TvCommentReplyDialog(
      * 引用区聚焦时按左右键: 原地翻到相邻的一条评论 (`delta` = -1/+1), 由调用方换 [target]
      * 并同步滚动背后的评论面板. 到端点等无效场合由调用方忽略.
      *
+     * 输入框里有草稿时不发这个回调 (换一条评论会连草稿一起清掉, 见按键处理).
+     *
      * 用左右键而不是上下键: 上下键在这个弹窗里是"翻长评论正文 / 翻到底进输入框", 抢不得.
      */
     onNavigate: ((delta: Int) -> Unit)? = null,
@@ -366,6 +368,11 @@ internal fun TvCommentReplyDialog(
                             if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                             val page = (scrollState.viewportSize * TV_REPLY_QUOTE_PAGE_FRACTION)
                                 .coerceAtLeast(1f)
+                            // 有草稿就不翻: 调用方换 target 时会按新评论重开编辑态
+                            // ([CommentEditorState.startEdit] 一换 target 就清空输入框),
+                            // 在软键盘上敲了半天的字会无声消失, 翻回来也只是再覆盖一次空串.
+                            // 键仍然吞掉 (下同), 免得焦点飘出弹窗
+                            val draftEmpty = editorState.content.text.isBlank()
                             when {
                                 event.key == Key.DirectionDown && scrollState.canScrollForward -> {
                                     scope.launch { scrollState.animateScrollBy(page) }
@@ -378,21 +385,24 @@ internal fun TvCommentReplyDialog(
                                 }
 
                                 event.key == Key.DirectionLeft -> {
-                                    onNavigate?.invoke(-1)
+                                    if (draftEmpty) onNavigate?.invoke(-1)
                                     true
                                 }
 
                                 event.key == Key.DirectionRight -> {
-                                    onNavigate?.invoke(1)
+                                    if (draftEmpty) onNavigate?.invoke(1)
                                     true
                                 }
 
                                 else -> false
                             }
                         }
-                        // 只读态下面没有输入框, 不能给 down 指一个未附着的请求器
+                        // 只读态与预览态下面都没有输入框 (预览把 BasicTextField 整个换掉了),
+                        // 不能给 down 指一个未附着的请求器: 焦点搜索命中自定义落点后就不再退回
+                        // 空间搜索, 而未附着的请求器只是静默返回 false, 下键当场变死键.
+                        // 不给 down, 空间搜索会自己落到下面的按钮行 (与 [actionUpFocus] 对称)
                         .then(
-                            if (target.canReply) {
+                            if (target.canReply && !previewing) {
                                 Modifier.focusProperties { down = fieldFocusRequester }
                             } else {
                                 Modifier
@@ -570,8 +580,9 @@ internal fun TvCommentReplyDialog(
                 }
 
                 Spacer(Modifier.height(16.dp))
-                // 预览态下输入框不在场, 上键就没有落点可指 (指一个未附着的请求器会当场抛):
-                // 不给 up, 焦点组会把这一下拦在弹窗内
+                // 预览态下输入框不在场, 上键就没有落点可指 (指一个未附着的请求器不会抛,
+                // 只是静默吃掉这次焦点搜索, 上键变死键): 不给 up, 交回空间搜索 —— 预览块
+                // 不可聚焦, 于是落到引用区; 没有引用区时焦点组会把这一下拦在弹窗内
                 val actionUpFocus = fieldFocusRequester.takeIf { !previewing }
                 Row(
                     Modifier.fillMaxWidth(),
@@ -717,7 +728,7 @@ private fun TvCommentQuoteImage(url: String) {
     )
 }
 
-/** 上键落点; 传 null = 不指定 (预览态下输入框不在场, 指一个未附着的请求器会当场抛). */
+/** 上键落点; 传 null = 不指定 (预览态下输入框不在场, 指一个未附着的请求器会静默吃掉这次焦点搜索). */
 private fun Modifier.upFocus(requester: FocusRequester?): Modifier =
     if (requester == null) this else focusProperties { up = requester }
 

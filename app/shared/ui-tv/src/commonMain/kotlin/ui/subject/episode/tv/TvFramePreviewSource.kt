@@ -100,6 +100,9 @@ private val FRAME_FIRST_TIMEOUT: Duration = 30.seconds
  *
  * 会话真坏掉不用我们操心: media3 的 `FrameExtractorInternal.submitTask` 里 `needsNewPlayer`
  * 包含 `player.getPlayerError() != null`, 它自己会重建.
+ *
+ * **只对已经出过帧的会话生效**: 会话建立后第一次就超时的那种 (见 [FRAME_FIRST_TIMEOUT]) 立即销毁,
+ * 详见 `extractFrame` 里的说明.
  */
 private const val MAX_CONSECUTIVE_FAILURES = 3
 
@@ -265,7 +268,11 @@ private class TvFramePreviewSource(
                 }
                 if (frame == null) {
                     consecutiveFailures++
-                    val giveUp = consecutiveFailures >= MAX_CONSECUTIVE_FAILURES
+                    // 建会话后的第一次超时直接销毁, 不进重试计数: 它已经吃过 FRAME_FIRST_TIMEOUT 的宽限
+                    // 还没出过一帧, 会话本身就没证明自己是好的. 留着它更糟 —— sessionFrameCount 只在成功时
+                    // 自增, 所以下一次仍然算"第一次", 又用 30 秒的尺子量, 连吃三次就是 90 秒不释放,
+                    // 这期间第二路 ExoPlayer 一直占着解码器和带宽跟主播放器抢.
+                    val giveUp = firstOfSession || consecutiveFailures >= MAX_CONSECUTIVE_FAILURES
                     logger.warn {
                         "Frame extraction timed out at $positionMillis ms after $timeout " +
                                 "(firstOfSession=$firstOfSession, consecutiveFailures=$consecutiveFailures)" +

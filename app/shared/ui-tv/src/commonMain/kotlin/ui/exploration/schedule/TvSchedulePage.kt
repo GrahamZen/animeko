@@ -545,9 +545,32 @@ fun TvSchedulePage(
                 // 就把上午的番吸顶滚出视口, 且过去的日子 (整天都已播出) 会退化成跳到最后一张;
                 // 首卡是唯一可预测的落点 —— 播出前后靠文字颜色区分, 待播几部看概况行.
                 // 走统一落点解析 (等数据/滚动/到位确认, 直连 requestFocus 在目标未组合时会被静默拒绝)
+                //
+                // 换天过渡 (见 dayContentAlpha 那个效应) 还没走完时, 网格里仍是**上一天**的卡片:
+                // 直接落点会把焦点送到一张马上就要消失的卡上 —— 淡出到点换成新一天时整批 item key
+                // 全变, 持焦节点被销毁, 而那次落点请求此时早已消化完 (pending 已清), 没有任何东西
+                // 会把焦点补回来 (解析循环只在 pending 非 null 时才重新落点). 所以这条路一旦撞上
+                // 过渡期就把过渡**当场收尾**, 与"从网格跨天 (有挂起落点) 不做过渡"是同一个取舍:
+                // 焦点要进网格时, 用户盯的是自己落在哪张卡上, 不是那半截淡出.
                 val enterGrid: () -> Boolean = {
-                    if (dayItems.cards.isNotEmpty()) {
+                    val switchingDay = selectedDayIndex != displayedDayIndex
+                    // 过渡期内 dayItems 还是旧那天的, 要按**将要显示**的那天数卡片
+                    val cardCount = if (switchingDay) {
+                        days.getOrNull(selectedDayIndex)?.let { day ->
+                            presentation.airingSchedules.firstOrNull { it.date == day.date }?.episodes
+                                ?.count { it is AiringScheduleColumnItem.Data }
+                        } ?: 0
+                    } else {
+                        dayItems.cards.size
+                    }
+                    if (cardCount > 0) {
                         gridFocus.request(0)
+                        if (switchingDay) {
+                            displayedDayIndex = selectedDayIndex
+                            // snapTo 抢走 Animatable 的 mutex, 顺带取消还在淡出的那条过渡协程;
+                            // displayedDayIndex 已由上一行落定, 那条协程剩下的两步都不必再跑
+                            scope.launch { dayContentAlpha.snapTo(1f) }
+                        }
                         true
                     } else {
                         runCatching { errorCardFocusRequester.requestFocus() }.isSuccess

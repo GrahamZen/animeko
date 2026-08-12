@@ -46,6 +46,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -283,8 +284,15 @@ fun TvNavigationSideRail(
         // (如"探索"), 不随进入位置变化.
         val enterFocus = remember { FocusRequester() }
         val hasDefaultFocusItem = items.any { it.defaultFocus }
-        // 每个条目一个落点: 条目会来去 (正在播放 / 一起看), 带着焦点消失时要有人接手, 见 TvRailIconItem
-        val itemAnchors = remember(items.size) { List(items.size) { FocusRequester() } }
+        // 每个条目一个落点: 条目会来去 (正在播放 / 一起看), 带着焦点消失时要有人接手, 见 TvRailIconItem.
+        //
+        // 按 label 缓存, 不能用 remember(items.size): 条目增删恰恰就是 size 变化的那一刻, 按 size 记
+        // 会把整份列表重建 —— 消失的条目 onDispose 里握着的是**旧**对象, 而上一个条目此刻挂的已是新
+        // 对象, 旧对象不挂在任何节点上, requestFocus 只会打一行警告返回 false (Compose 1.11 的
+        // FocusRequester.findFocusTarget 不抛异常), 交接静默失效. 按 label 取则条目增删不影响其余
+        // 条目的落点身份. (侧边栏条目的 label 两两不同, 可以当稳定标识用.)
+        val itemAnchorCache = remember { mutableMapOf<String, FocusRequester>() }
+        val itemAnchors = items.map { itemAnchorCache.getOrPut(it.label) { FocusRequester() } }
         Column(
             Modifier
                 // 居中, 但两端给浮出按钮留够高度: 居中位置放不下时整列往里让, 让到还是放不下
@@ -570,9 +578,17 @@ private fun TvRailIconItem(
     // Compose 会把这种显式请求按 Enter 方向找**最左**的子树, 也就是本侧边栏, 又被下面 onEnter
     // 那道"只允许按左进入"的门挡掉 (Cancelled), 于是每 100ms 重试一次、次次失败.
     // 那道门现在放行 Enter 了, 但兜底落点是"探索", 不如就近交给上一个条目.
+    //
+    // onDispose 里不能直接读 clusterFocused: 节点被移除时 Compose 会在 onDispose **之前**就把
+    // onFocusChanged 同步刷成"无焦点" (FocusTargetNode.onDetach → FocusOwnerImpl.clearFocus
+    // (refreshFocusEvents = true) → dispatchFocusCallbacks, 全部在 applyChanges 里跑完, 而
+    // onDispose 排在其后的 dispatchRememberObservers 里), 于是读到的永远是 false, 交接一次都不会
+    // 发生. 这里改读"最后一次**重组**时的值": 真正的失焦 (用户把焦点移走) 会经过一次重组把它刷成
+    // false, 而"带着焦点被移除"没有重组的机会, 它还停在 true —— 正好用来区分这两种情况.
+    val clusterFocusedAtLastComposition = rememberUpdatedState(clusterFocused)
     DisposableEffect(fallbackFocus) {
         onDispose {
-            if (clusterFocused && fallbackFocus != null) {
+            if (clusterFocusedAtLastComposition.value && fallbackFocus != null) {
                 runCatching { fallbackFocus.requestFocus() }
             }
         }

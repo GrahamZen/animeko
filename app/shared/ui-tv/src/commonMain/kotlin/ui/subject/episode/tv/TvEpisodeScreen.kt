@@ -31,6 +31,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
@@ -59,6 +60,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.LocalPlatformContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
@@ -66,6 +68,7 @@ import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import me.him188.ani.app.utils.formatSpeedValue
 import me.him188.ani.app.ui.foundation.LocalImageLoader
@@ -1018,6 +1021,28 @@ fun TvEpisodeScreenContent(
             logger.info { "Re-applying playback speed $target after fast forward" }
             playbackSpeed.set(target)
             pendingSpeedRestore = null
+        }
+    }
+    // 组合销毁时把还没补发出去的那一次交接给会话级 scope.
+    //
+    // 上面那个补发协程与 pendingSpeedRestore 都只活到本页组合为止, 而播放会话由
+    // RetainedPlaybackSessionHolder 持有, 活得比播放页久 (退出播放页只是暂停, 下次从侧边栏
+    // 回来接着播). 于是"松手时正在缓冲 → 缓冲还没结束就按返回退出"这条路上待办会随组合一起丢掉,
+    // 且再没有人会纠正它: desiredRate 此刻正好已经被写成 1f, 而 mediamp 两处"恢复播放时补发"
+    // 的分支都要求 desiredRate != 1f. 结果是回到播放页继续看时画面声音仍是长按时的倍速.
+    //
+    // 交接后不再看 fastForwarding: 页面都没了, 不可能再有新一轮长按来跟它抢.
+    DisposableEffect(vm) {
+        onDispose {
+            val target = pendingSpeedRestore ?: return@onDispose
+            val playbackSpeed = vm.player.features[PlaybackSpeed] ?: return@onDispose
+            // Dispatchers.Main 不能省: backgroundScope 跑在 Default 上, 而 PlaybackSpeed.set
+            // 里有 checkMainThread (mediamp 是先写 valueFlow 再碰播放器, 抛了就变成假倍速)
+            vm.backgroundScope.launch(Dispatchers.Main) {
+                vm.player.state.first { it.isPlaying }
+                logger.info { "Re-applying playback speed $target after leaving player page" }
+                playbackSpeed.set(target)
+            }
         }
     }
     // 自动隐藏 (Prime 行为): 播放中且无面板/侧 sheet/下拉/输入态, 5 秒无按键收起.

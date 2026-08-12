@@ -385,6 +385,12 @@ fun TvExplorationPage(
     var navLocked by remember { mutableStateOf(false) }
     fun lockNavigationForTransition() {
         navLocked = true
+    }
+    // 解锁计时必须从**导航真正发出**那一刻起算, 不是从按键那一刻: navigateToSubject 按下之后
+    // 还要先过一道最长 [TV_NAV_READY_BUDGET] 的门控 (这段时间屏幕上没有任何反馈, 正是用户会
+    // 补按一次确认的时候). 从按键起算的话, 门吃满时锁会比本页的退场动画先到期, 尾部漏出一截
+    // "本页仍在组合、仍在收按键, 锁却已经开了"的窗口 —— 与这把锁要消除的现象是同一个.
+    fun unlockNavigationAfterTransition() {
         scope.launch {
             delay(TV_NAV_LOCK_MILLIS)
             navLocked = false
@@ -407,6 +413,7 @@ fun TvExplorationPage(
                         subjectId = subjectId,
                         placeholder = SubjectDetailPlaceholder(id = subjectId, name = name, coverUrl = cover),
                     )
+                    unlockNavigationAfterTransition()
                 }
             }
         }
@@ -426,6 +433,8 @@ fun TvExplorationPage(
                     }
                     lockNavigationForTransition()
                     navigator.navigateEpisodeDetails(subjectId, episodeId)
+                    // 这条路没有门控, 按键即导航, 锁的起点与转场起点本就重合
+                    unlockNavigationAfterTransition()
                 }
             } else {
                 navigateToSubject(subjectId, name, cover, source)
@@ -1518,6 +1527,13 @@ private fun TvAnchoredCardRow(
                 return@LaunchedEffect
             }
         }
+        // 本轮开始先清掉上一轮遗留的目标: 本协程的 key 是 (focusRequest, pendingEnter, rowLaidOut),
+        // 任一变化都会取消上一轮, 取消时末尾那行复位根本跑不到. 而 resolveFocusRepeatedly 是
+        // **先查 arrived 再 attempt**, 若上一轮的目标刚好已经到位, 新一轮首帧就会拿着这个与本次
+        // 请求毫无关系的旧下标判成"已到位", 一次 requestFocus 都不发就 currentOnDone() 清掉请求
+        // (表现为"这一下返回键完全没反应, 要再按一次才回到首卡").
+        // 顺带也让下面行 onEnter 里那句"resolvedTarget >= 0 = 解析进行中"不再被残留值骗到.
+        resolvedTarget = -1
         // 起点快照: 解析开始时焦点通常停在"要离开的那张卡"上, 不算用户介入
         val startIndex = if (rowHasFocus) focusedIndex else -1
         resolveFocusRepeatedly(
