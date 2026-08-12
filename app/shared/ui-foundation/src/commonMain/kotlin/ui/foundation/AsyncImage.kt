@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.layout.ContentScale
+import coil3.ComponentRegistry
 import coil3.EventListener
 import coil3.Image
 import coil3.ImageLoader
@@ -241,9 +242,19 @@ internal class ImageLoadIssueTracker {
 internal expect fun imageLoadIssueEventListenerFactory(): EventListener.Factory
 
 /**
- * 平台侧的解码器设置 (Android 上要绕开一个 Coil 的坑, 并补上动图支持; 其他平台无事可做).
+ * 平台侧 builder 层面的解码器开关 (Android 上要绕开一个 Coil 的坑; 其他平台无事可做).
+ *
+ * 只放开关, **不要**在这里调 `components {}`: `ImageLoader.Builder.components {}` 是拿一个全新的
+ * `ComponentRegistry.Builder` 建好后**整体赋值**, 不是往已有 registry 上追加 —— 调两次的话后一次会把
+ * 前一次注册的组件整批丢掉. 解码器请注册到 [addPlatformDecoders], 它与其它组件共用
+ * [createDefaultImageLoader] 里那唯一一个 `components {}` 块.
  */
 internal expect fun ImageLoader.Builder.configurePlatformDecoders(): ImageLoader.Builder
+
+/**
+ * 平台侧要额外注册的解码器. 必须与其它组件共用同一个 `components {}` 块, 理由见 [configurePlatformDecoders].
+ */
+internal expect fun ComponentRegistry.Builder.addPlatformDecoders()
 
 @OptIn(ExperimentalCoilApi::class)
 fun createDefaultImageLoader(
@@ -255,6 +266,11 @@ fun createDefaultImageLoader(
      * 同一目录在进程内复用同一 DiskCache 实例 (见 [sharedDiskCache]).
      */
     diskCacheDirectory: okio.Path? = null,
+    /**
+     * 额外配置. **不要**在里面调 `components {}` —— 那是整体替换 registry, 会把下面注册的解码器与
+     * 网络 fetcher 一起冲掉 (表现是全应用一张网络图都加载不出来, 且没有任何报错), 见
+     * [configurePlatformDecoders].
+     */
     config: ImageLoader.Builder.() -> Unit = {}
 ): ImageLoader {
     return ImageLoader.Builder(context).apply {
@@ -282,7 +298,10 @@ fun createDefaultImageLoader(
         }
         networkCachePolicy(CachePolicy.ENABLED)
 
+        // 全应用只能有这一个 components {} 块: 它是整体赋值而不是追加, 多调一次就会把前面注册的全丢掉
         components {
+            addPlatformDecoders()
+
             add(SvgDecoder.Factory())
 
             add(
