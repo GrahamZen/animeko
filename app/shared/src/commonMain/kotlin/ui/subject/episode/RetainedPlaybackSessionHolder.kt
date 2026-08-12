@@ -11,6 +11,7 @@ package me.him188.ani.app.ui.subject.episode
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -28,6 +29,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -76,60 +78,91 @@ sealed interface RetainedPlaybackNotice {
  *
  * 播放页的 [EpisodeViewModel] 默认挂在播放页那个返回栈条目上, 按返回退出即被销毁 —— 播放器、
  * 已经搜出来的数据源、已经解析好的播放流全部作废, 再进去从头再来 (而"从头再来"在 web 源上意味着
- * 重搜一遍 + 重新嗅探视频地址, 是十几秒的量级). 本类把它挪到**自己的** [ViewModelStore] 里,
+ * 重搜一遍 + 重新嗅探视频地址, 是十几秒的量级). 本类把它挪到**自己的** [Session] 里,
  * 而本类挂在应用根部, 于是:
  *
- * - 退出播放页只销毁界面, 会话照旧活着, 再进来 [androidx.lifecycle.viewmodel.compose.viewModel]
- *   按同一个 key 拿回同一个 [EpisodeViewModel] —— 状态自然接上, 没有任何"恢复"逻辑;
+ * - 退出播放页只销毁界面, 会话照旧活着, 再进来 [openSession] 按"这个会话在播哪一集"认回同一个
+ *   [Session], `viewModel(...)` 也就拿回同一个 [EpisodeViewModel] —— 状态自然接上, 没有任何
+ *   "恢复"逻辑;
  * - 数据源还在搜的时候退出去, 搜索继续跑 (见 [guard] 里对 `pageState` 的订阅), 起播就绪或者
  *   卡住了都从 [notices] 发一声让外面提示用户 —— 这正是这套机制的用处;
- * - 全程只保留一个会话: [prepare] 见到不是同一集就先 [ViewModelStore.clear] 掉旧的再让调用方
- *   建新的. **先销后建**是刻意的 —— 两个 ExoPlayer 同时在场会在低端电视盒子上抢硬件解码器;
+ * - 常态只保留一个会话: [openSession] 见到要播的不是保留着的那一集, 先销毁**界面已经不在场的**
+ *   旧会话再让调用方建新的. **先销后建**是刻意的 —— 两个 ExoPlayer 同时在场会在低端电视盒子上
+ *   抢硬件解码器. 例外是播放页跳播放页的那段退场动画: 旧页的组合还活着时销毁它的会话, 那个页面
+ *   就会拿着一个已经 release 的播放器继续渲染, 所以只能等它的组合真正销毁 ([onPageDisposed]).
+ *   新会话要先搜数据源 (秒级) 才会碰解码器, 这点重叠无害;
  * - 会话随应用界面销毁 ([onCleared]), 不跨进程存活.
  *
- * 用一个私有 [ViewModelStore] 而不是自己 new [EpisodeViewModel]: `ViewModel.onCleared` 是
- * protected 的, 只有 store 能正确触发它 (播放器的释放、进度落库全挂在那条链上), 而 store 里
- * 恒定只有一个 VM, 所以"销毁当前会话"就是 `clear()`.
+ * 用 [ViewModelStore] 而不是自己 new [EpisodeViewModel]: `ViewModel.onCleared` 是 protected 的,
+ * 只有 store 能正确触发它 (播放器的释放、进度落库全挂在那条链上); 一个会话一个 store (而不是共用
+ * 一个 store 按 key 区分) 则是因为 [ViewModelStore.clear] 是清全部, 要做到"销毁上一个会话而不动
+ * 新的"就只能这样.
+ *
+ * 记账全部走**页面组合的生死** ([onPageComposed] / [onPageDisposed]), 不用"进页面时跑一次"的
+ * 一次性副作用: 转场没走完就按返回时离场页是原地复用的 (组合不重建, 那次副作用不会再跑), 那种
+ * 写法会把当前会话永远停在用户已经放弃的那一集上, 而且两个会话谁都不会被清.
  *
  * 侧边栏等入口只看 [PlaybackSessionEntry] 这一小片接口 (经 [LocalPlaybackSessionEntry] 拿到),
  * 不认识本类, 也就不可能自己造出第二个播放器.
  */
-class RetainedPlaybackSessionHolder : ViewModel(), ViewModelStoreOwner, PlaybackSessionEntry {
+class RetainedPlaybackSessionHolder : ViewModel(), PlaybackSessionEntry {
     /**
-     * 当前会话的 store, 恒定只装一个 [EpisodeViewModel].
+     * 一个会话: 一个私有 [ViewModelStore] 加里面唯一那个 [EpisodeViewModel].
      *
-     * 一个会话一个 store (而不是共用一个 store 按 key 区分): [ViewModelStore.clear] 是清全部,
-     * 要做到"销毁上一个会话而不动新的"就只能一个会话一个 store.
+     * 会话自己就是 [ViewModelStoreOwner], 且 [viewModelStore] **恒定不变** —— 播放页每次重组都会
+     * 重新读一遍 owner 的 store (`viewModel(viewModelStoreOwner = …)` 内部没有 remember), owner
+     * 若是"当前会话"这种会被换掉的东西, 退场动画期间重组一次的旧页面就会在新会话的空 store 里
+     * 凭空建出第二个 [EpisodeViewModel] (第二个播放器). 每个页面在自己的 remember 里认准一个
+     * [Session], 这类事就不可能发生.
      */
-    private var currentStore = ViewModelStore()
+    @Stable
+    class Session internal constructor(initialInfo: RetainedPlaybackSessionInfo) : ViewModelStoreOwner {
+        override val viewModelStore: ViewModelStore = ViewModelStore()
 
-    override val viewModelStore: ViewModelStore get() = currentStore
+        /**
+         * 这个会话此刻在播哪一集.
+         *
+         * **不是进页面时那一集**: 播放器内的选集条与详情层 (目标在选集列表里时) 以及播完自动连播
+         * 都是就地 [EpisodeViewModel.switchEpisode], 根本不导航. 记着进页面那一集的话, 用户从入口
+         * 回来 (或者去详情页点正在播的那一集) 都会与这个会话对不上, 于是把已经热好的会话销毁重建;
+         * 反过来点原来那一集又会被认成"同一集", 打开的却是别的集. 由 [guard] 第 5 条跟着 VM 更新.
+         */
+        var info: RetainedPlaybackSessionInfo by mutableStateOf(initialInfo)
+            internal set
+
+        /**
+         * 会话的 VM; 它本来就在 [viewModelStore] 里, 这里只是留个取得到的引用 (由播放页上报).
+         *
+         * 是 snapshot state: [ComposeRetainedContent] 要跟着它变.
+         */
+        internal var vm: EpisodeViewModel? by mutableStateOf(null)
+    }
 
     /**
-     * 已被替换、但界面可能还在退场动画里的上一个会话.
+     * 活着的会话. 常态只有一个 (保留着的那个).
      *
-     * 不当场销毁它: 播放页的组合还活着的时候销毁 VM, 那个页面就会拿着一个已经关掉的播放器继续
-     * 渲染 (退场动画期间它仍可能重组, 把 surface 重新交给已 release 的 ExoPlayer). 等它的组合
-     * 真正销毁 ([onPageDisposed]) 再清. 新会话要先搜数据源 (秒级) 才会碰解码器, 这点重叠无害.
+     * 播放页跳播放页的退场动画期间会多出一个 (连着跳几集就是几个): 旧页的组合还活着就还不能销毁
+     * 它的会话, 否则那个页面会拿着已 release 的播放器继续渲染. 这段重叠由退场动画封顶 (几百毫秒),
+     * 且新会话要先搜数据源 (秒级) 才会碰解码器, 见 [onPageDisposed].
      */
-    private var retiringStore: ViewModelStore? = null
-    private var retiringVm: EpisodeViewModel? = null
+    private val sessions = mutableListOf<Session>()
 
-    /** 当前有播放页组合在场的那个 VM (为 null 表示播放页不在组合里). */
-    private var composed: EpisodeViewModel? = null
+    /** 此刻有播放页组合在场的会话, 按组合先后排列 (末尾是最近进来的那个). */
+    private val composedSessions = mutableListOf<Session>()
 
-    override var session: RetainedPlaybackSessionInfo? by mutableStateOf(null)
-        private set
+    /** 当前会话. 是 snapshot state: [session] 与 [ComposeRetainedContent] 都要跟着它变. */
+    private var currentSession: Session? by mutableStateOf(null)
 
-    /**
-     * 当前会话的 VM; 它本来就在 [currentStore] 里, 这里只是留个取得到的引用.
-     *
-     * 是 snapshot state: [ComposeRetainedContent] 要跟着它变.
-     */
-    private var current: EpisodeViewModel? by mutableStateOf(null)
+    override val session: RetainedPlaybackSessionInfo? get() = currentSession?.info
 
     /** 播放页此刻是否在前台. 由导航状态驱动 ([setPlayerPageVisible]). */
     private val playerPageVisible = MutableStateFlow(true)
+
+    /** 应用整体是否在前台. 由根部的生命周期事件驱动 ([setAppForeground]). */
+    private val appForeground = MutableStateFlow(true)
+
+    /** 应用退到后台期间攒下的最后一条提示, 回到前台补发一次; 见 [notify]. */
+    private var pendingNotice: RetainedPlaybackNotice? = null
 
     private val _notices = MutableSharedFlow<RetainedPlaybackNotice>(extraBufferCapacity = 4)
 
@@ -142,54 +175,86 @@ class RetainedPlaybackSessionHolder : ViewModel(), ViewModelStoreOwner, Playback
 
     /** 监视当前会话的协程 (见 [guard]); 换会话时重启. */
     private var guardJob: Job? = null
+    private var guardedVm: EpisodeViewModel? = null
+
+    init {
+        viewModelScope.launch {
+            appForeground.collect { foreground ->
+                if (foreground) flushPendingNotice()
+            }
+        }
+    }
 
     /**
-     * 进播放页时先调用: 要播的不是当前保留的那一集就销毁旧会话, 腾出解码器给马上要建的新会话.
+     * 进播放页时调用: 拿到这一页该用的会话.
      *
-     * 同一集则什么都不做, 随后的 `viewModel(...)` 会拿回原来那个 VM (这正是"回得去"的实现).
+     * 要播的正是某个会话此刻在播的那一集 ([Session.info]) 就把它交回去 (这正是"回得去"的实现);
+     * 否则先销毁界面已经不在场的旧会话腾出解码器, 再建一个新的空会话让调用方往里放 VM.
+     *
+     * 调用方必须把结果 remember 住: 同一个页面每次重组都要拿到同一个 [Session], 见 [Session].
      */
-    fun prepare(subjectId: Int, episodeId: Int) {
-        val next = RetainedPlaybackSessionInfo(subjectId, episodeId)
-        if (session == next) return
-        guardJob?.cancel()
-        guardJob = null
-        // 上一轮退场的会话若还没清 (正常在页面销毁时就清了), 到这里一律清掉, 不留第二份
-        clearRetiring()
-        val outgoing = current
-        if (outgoing != null && composed === outgoing) {
-            // 旧播放页还在组合里 (从播放器直接跳另一集时的退场动画), 等它销毁再清
-            retiringVm = outgoing
-            retiringStore = currentStore
-        } else {
-            currentStore.clear()
+    fun openSession(subjectId: Int, episodeId: Int): Session {
+        val wanted = RetainedPlaybackSessionInfo(subjectId, episodeId)
+        sessions.firstOrNull { it.info == wanted }?.let { existing ->
+            makeCurrent(existing)
+            return existing
         }
-        currentStore = ViewModelStore()
-        current = null
-        session = next
+        // 先销后建: 界面还在场的会话不能动 (它的页面会拿着已 release 的播放器继续渲染),
+        // 其余的一律清掉, 不让两个播放器同时占着解码器
+        sessions.filter { it !in composedSessions }.forEach { destroy(it) }
+        return Session(wanted).also {
+            sessions += it
+            makeCurrent(it)
+        }
     }
 
-    /** 播放页拿到 VM 后登记, 本类据此监视它 (见 [guard]). */
-    fun attach(vm: EpisodeViewModel) {
-        if (current === vm) return
-        current = vm
+    /** 播放页的组合建立: 上报它建出来的 VM, 本类据此监视这个会话 (见 [guard]). */
+    fun onPageComposed(session: Session, vm: EpisodeViewModel) {
+        session.vm = vm
+        if (session !in composedSessions) composedSessions += session
+        updateGuard()
+    }
+
+    /** 播放页的组合销毁: 决定这个会话是留下来 (保留会话) 还是就此销毁. */
+    fun onPageDisposed(session: Session) {
+        composedSessions.remove(session)
+        val remaining = composedSessions.lastOrNull()
+        if (remaining != null) {
+            // 还有别的播放页在场: 本会话的界面已经没了, 不必再留 (常态只保留一个).
+            // 转场没走完就按返回时走的正是这条 —— 被放弃的那一集在这里销毁, 当前会话交回还在场
+            // 的那一页, 否则 current 会永远停在用户根本没看的那一集上, 两个播放器一起活着.
+            if (currentSession === session) makeCurrent(remaining)
+            destroy(session)
+        } else if (currentSession !== session) {
+            // 已经被新会话替换掉、界面又刚销毁的那个 (播放页跳播放页的退场动画走完)
+            destroy(session)
+        }
+        // else: 只剩它自己且它就是当前会话 —— 这正是要保留下来的那个, 不动
+    }
+
+    private fun makeCurrent(session: Session?) {
+        if (currentSession === session) return
+        currentSession = session
+        updateGuard()
+    }
+
+    private fun destroy(session: Session) {
+        sessions.remove(session)
+        composedSessions.remove(session)
+        if (currentSession === session) currentSession = null
+        session.vm = null
+        session.viewModelStore.clear() // 触发 VM.onCleared: 释放播放器、进度落库
+        updateGuard()
+    }
+
+    private fun updateGuard() {
+        val vm = currentSession?.vm
+        if (guardedVm === vm) return
         guardJob?.cancel()
-        guardJob = viewModelScope.launch { guard(vm) }
-    }
-
-    /** 播放页的组合建立/销毁; 用来判断能不能安全销毁一个会话 (见 [retiringStore]). */
-    fun onPageComposed(vm: EpisodeViewModel) {
-        composed = vm
-    }
-
-    fun onPageDisposed(vm: EpisodeViewModel) {
-        if (composed === vm) composed = null
-        if (retiringVm === vm) clearRetiring()
-    }
-
-    private fun clearRetiring() {
-        retiringStore?.clear()
-        retiringStore = null
-        retiringVm = null
+        guardedVm = vm
+        // 攒着的提示是上一个会话的, 换了会话就作废
+        pendingNotice = null
+        guardJob = vm?.let { viewModelScope.launch { guard(it) } }
     }
 
     /** 播放页是否在前台; 由导航状态驱动, 与组合的存活无关. */
@@ -197,22 +262,23 @@ class RetainedPlaybackSessionHolder : ViewModel(), ViewModelStoreOwner, Playback
         playerPageVisible.value = visible
     }
 
+    /** 应用整体是否在前台; 由根部的 `OnLifecycleEvent` 驱动. 见 [notify]. */
+    fun setAppForeground(foreground: Boolean) {
+        appForeground.value = foreground
+    }
+
     override fun close() {
-        guardJob?.cancel()
-        guardJob = null
-        clearRetiring()
-        currentStore.clear()
-        currentStore = ViewModelStore()
-        current = null
-        session = null
+        pendingNotice = null
+        sessions.toList().forEach { destroy(it) }
+        currentSession = null
+        updateGuard()
     }
 
     override fun onCleared() {
         super.onCleared()
-        clearRetiring()
-        currentStore.clear()
-        current = null
-        composed = null
+        sessions.toList().forEach { destroy(it) }
+        composedSessions.clear()
+        currentSession = null
     }
 
     /**
@@ -233,18 +299,28 @@ class RetainedPlaybackSessionHolder : ViewModel(), ViewModelStoreOwner, Playback
      */
     @Composable
     fun ComposeRetainedContent() {
-        val vm = current ?: return
+        val vm = currentSession?.vm ?: return
         key(vm) {
             vm.mediaResolver.ComposeContent()
         }
     }
 
-    /** 只在不看着播放页时提示; 见 [notices]. */
+    /** 只在不看着播放页、且应用还在前台时提示; 见 [notices]. */
     private fun notify(notice: RetainedPlaybackNotice) {
         if (playerPageVisible.value) {
             // 打日志而不是静默丢掉: "该提示的时候没提示"事后完全无法从日志还原,
             // 分不清是压根没走到这里, 还是走到了但被这条规则挡下 (2026-08-11 排查时吃过亏)
             logger.info { "Notice suppressed (player page visible): $notice" }
+            return
+        }
+        if (!appForeground.value) {
+            // 应用整个退到后台 (按 HOME 去别的应用) 也不能发: 这些提示在 Android 上是**系统 Toast**
+            // 加一声满音量的按键音, 会空降在别人的应用/桌面上. 组合不随 Activity 停止而销毁, 后台
+            // 解析完成时这里照样会被调到, 所以必须自己拦.
+            // 只留最后一条回前台再补发, 不是丢掉: 用户回来仍然需要知道"可以看了", 而中间那些状态
+            // (换源过程中一闪而过的失败) 补发出来只会误导.
+            logger.info { "Notice deferred (app in background): $notice" }
+            pendingNotice = notice
             return
         }
         logger.info { "Notice: $notice" }
@@ -253,8 +329,15 @@ class RetainedPlaybackSessionHolder : ViewModel(), ViewModelStoreOwner, Playback
         }
     }
 
+    /** 回到前台: 把后台期间攒下的那条补发一次 (会话已经换掉/结束的话 [pendingNotice] 已被清空). */
+    private fun flushPendingNotice() {
+        val notice = pendingNotice ?: return
+        pendingNotice = null
+        notify(notice)
+    }
+
     /**
-     * 会话在后台期间的四件事. 全部只读 [vm] 暴露的流, 不碰它的内部状态.
+     * 监视当前会话的五件事. 全部只读 [vm] 暴露的流, 不碰它的内部状态.
      */
     private suspend fun guard(vm: EpisodeViewModel) = coroutineScope {
         // 1. 替界面当订阅者, 让流水线在没有界面的时候继续跑.
@@ -375,6 +458,27 @@ class RetainedPlaybackSessionHolder : ViewModel(), ViewModelStoreOwner, Playback
                 .debounce(PROBLEM_SETTLE_DELAY)
                 .collect { problem -> problem?.let { notify(it) } }
         }
+
+        // 5. 会话记着的"在播哪一集"要跟着 VM 走: 播放器内换集是就地 switchEpisode, 不导航,
+        //    没有任何东西会来更新记账 (见 Session.info).
+        //
+        //    episodeId 取自 pageState 而不是 VM 内部的 episodeIdFlow (private + UnsafeEpisodeSessionApi).
+        //    代价是换集后要等条目信息加载出来才更新 —— 在那之前 pageState 是 placeholder
+        //    (episodeId = -1), 这里跳过, 会话暂时还记着上一集. 那段时间用户正在播放页上, 不会
+        //    从入口回来, 影响有限.
+        launch {
+            vm.pageState
+                .map { it?.episodePresentation?.episodeId ?: -1 }
+                .filter { it > 0 }
+                .distinctUntilChanged()
+                .collect { episodeId -> onEpisodeSwitched(vm, episodeId) }
+        }
+    }
+
+    private fun onEpisodeSwitched(vm: EpisodeViewModel, episodeId: Int) {
+        val session = sessions.firstOrNull { it.vm === vm } ?: return
+        if (session.info.episodeId == episodeId) return
+        session.info = session.info.copy(episodeId = episodeId)
     }
 
     private companion object {

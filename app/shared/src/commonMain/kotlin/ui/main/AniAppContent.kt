@@ -45,6 +45,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.CreationExtras
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -87,6 +88,7 @@ import me.him188.ani.app.ui.foundation.animation.NavigationMotionScheme
 import me.him188.ani.app.ui.foundation.animation.ProvideAniMotionCompositionLocals
 import androidx.compose.ui.graphics.Color
 import me.him188.ani.app.ui.foundation.LocalAniUiBehavior
+import me.him188.ani.app.ui.foundation.effects.OnLifecycleEvent
 import me.him188.ani.app.ui.foundation.effects.rememberNoticeSoundPlayer
 import me.him188.ani.app.ui.foundation.playback.LocalPlaybackSessionEntry
 import me.him188.ani.app.ui.foundation.playback.PlaybackSessionEntry
@@ -184,6 +186,16 @@ fun AniAppContent(aniNavigator: AniNavigator) {
         // 自动恢复播放 (ON_START), 否则 holder 会以为还在后台, 刚恢复就又被按下去
         SideEffect {
             playbackSessionHolder.setPlayerPageVisible(onPlayerPage)
+        }
+        // 应用整个退到后台 (按 HOME 去别的应用) 时也不能提示: Android 上这些提示是系统 Toast
+        // 加一声满音量按键音, 会空降在别人的应用/桌面上. Activity 停止只暂停帧时钟, 组合与
+        // holder 的协程照常在跑, 所以必须显式告诉它. 攒下的那条回前台再补发, 见 holder 的 notify.
+        OnLifecycleEvent { event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> playbackSessionHolder.setAppForeground(true)
+                Lifecycle.Event.ON_STOP -> playbackSessionHolder.setAppForeground(false)
+                else -> Unit
+            }
         }
         // 后台会话的状态变化提示一声: 慢的源要十几秒, 用户正是为了不干等才退出去的 —— 就绪了要叫他
         // 回来, 而卡住了 (换源也救不回来/没搜到/等他手选) 更要说, 否则他会一直等一个不会来的就绪提示
@@ -603,23 +615,27 @@ private fun AniAppContentImpl(
                     )
                 }
                 val vm = if (playbackSessionHolder != null) {
-                    // 保留会话形态: VM 挂在应用级 holder 的 store 上, 退出本页不销毁; 同一集
-                    // 再进来按同一个 key 拿回同一个 VM (状态自然接上), 换集则先销毁旧会话.
-                    // prepare 必须在 viewModel(...) 之前: 先销后建, 不让两个播放器同时在场.
-                    remember(playbackSessionHolder, route) {
-                        playbackSessionHolder.prepare(route.subjectId, route.episodeId)
+                    // 保留会话形态: VM 挂在应用级 holder 的会话上, 退出本页不销毁; 回到同一集
+                    // 拿回同一个会话 (状态自然接上), 换集则先销毁旧会话再建新的 —— 先销后建,
+                    // 不让两个播放器同时在场. 这些都在 openSession 里, 见该函数.
+                    //
+                    // 会话必须 remember 住而不是每次重组重新问 holder 要:
+                    // viewModel(viewModelStoreOwner = …) 自己没有 remember, 每次重组都会重新读一遍
+                    // owner 的 store. 本页退场动画期间 holder 的当前会话可能已经是下一集了, 那时
+                    // 重组一次就会在新会话的空 store 里凭空建出第二个 EpisodeViewModel (第二个播放器).
+                    // 一个会话的 store 里恒定只有一个 VM, 所以这里也不需要 key.
+                    val session = remember(playbackSessionHolder, route) {
+                        playbackSessionHolder.openSession(route.subjectId, route.episodeId)
                     }
                     viewModel<EpisodeViewModel>(
-                        viewModelStoreOwner = playbackSessionHolder,
-                        key = route.toString(),
+                        viewModelStoreOwner = session,
                         initializer = initializer,
                     ).also { vm ->
-                        SideEffect { playbackSessionHolder.attach(vm) }
-                        // 上报本页组合的存活: holder 据此决定"被替换掉的那个会话"能不能立刻销毁
-                        // (它的界面还在退场动画里时不能, 见 RetainedPlaybackSessionHolder)
-                        DisposableEffect(vm) {
-                            playbackSessionHolder.onPageComposed(vm)
-                            onDispose { playbackSessionHolder.onPageDisposed(vm) }
+                        // 上报本页组合的存活: holder 据此决定当前会话是哪一个, 以及被替换掉的
+                        // 那个能不能销毁 (它的界面还在退场动画里时不能, 见 RetainedPlaybackSessionHolder)
+                        DisposableEffect(session, vm) {
+                            playbackSessionHolder.onPageComposed(session, vm)
+                            onDispose { playbackSessionHolder.onPageDisposed(session) }
                         }
                     }
                 } else {
