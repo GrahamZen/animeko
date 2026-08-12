@@ -15,23 +15,32 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
+import me.him188.ani.app.data.models.preference.NoticeSoundKind
 import me.him188.ani.utils.logging.logger
 import me.him188.ani.utils.logging.warn
 
 private val logger = logger("NoticeSound")
 
 /**
- * 用哪一颗系统按键音. **换音色只改这一行.**
+ * 各音色落到哪一颗系统按键音.
  *
- * 可选值与 ROM 里的音频文件一一对应 (2026-08-11 真机 `/product/media/audio/ui/`):
- * - [AudioManager.FX_KEYPRESS_RETURN] → `KeypressReturn.ogg`, 回车/确认音, 语义最贴"好了"
- * - [AudioManager.FX_KEYPRESS_STANDARD] → `KeypressStandard.ogg`, 普通按键
- * - [AudioManager.FX_KEYPRESS_INVALID] → `KeypressInvalid.ogg`, 最长最显眼, 但语义是"无效操作"
- * - [AudioManager.FX_KEYPRESS_DELETE] / [AudioManager.FX_KEYPRESS_SPACEBAR] → 对应的键音
- * - [AudioManager.FX_KEY_CLICK] → `Effect_Tick.ogg`. **别用**: 电视系统 UI 的遥控器导航音就是它,
- *   用户在桌面上一直在听, 拿它当提示会被当成背景噪音.
+ * 与 ROM 里的音频文件的对应关系 (2026-08-11 真机 `/product/media/audio/ui/` 一共就这 6 个文件):
+ * `FX_KEYPRESS_RETURN` → `KeypressReturn.ogg`, `FX_KEYPRESS_STANDARD` → `KeypressStandard.ogg`,
+ * `FX_KEYPRESS_INVALID` → `KeypressInvalid.ogg`, `FX_KEYPRESS_DELETE` → `KeypressDelete.ogg`,
+ * `FX_KEYPRESS_SPACEBAR` → `KeypressSpacebar.ogg`, `FX_KEY_CLICK` → `Effect_Tick.ogg`.
+ *
+ * 即"系统有几个音就给几个选项". `FX_FOCUS_NAVIGATION_*` 不单列: AOSP 里那 4 个与 `FX_KEY_CLICK`
+ * 指向同一个 `Effect_Tick.ogg`, 列出来是四个一模一样的选项.
  */
-private const val NOTICE_SOUND_EFFECT = AudioManager.FX_KEYPRESS_RETURN
+private fun NoticeSoundKind.toSoundEffect(): Int? = when (this) {
+    NoticeSoundKind.None -> null
+    NoticeSoundKind.Confirm -> AudioManager.FX_KEYPRESS_RETURN
+    NoticeSoundKind.Standard -> AudioManager.FX_KEYPRESS_STANDARD
+    NoticeSoundKind.Alert -> AudioManager.FX_KEYPRESS_INVALID
+    NoticeSoundKind.Tick -> AudioManager.FX_KEY_CLICK
+    NoticeSoundKind.Delete -> AudioManager.FX_KEYPRESS_DELETE
+    NoticeSoundKind.Space -> AudioManager.FX_KEYPRESS_SPACEBAR
+}
 
 /**
  * 音量给满. 默认那一档 (传 -1 是"音乐音量 -3dB") 在电视喇叭上偏小, 而这声提示的前提就是用户
@@ -56,7 +65,7 @@ private const val NOTICE_SOUND_VOLUME = 1f
  * 这是刻意的, 不再另找退路硬响.
  */
 @Composable
-actual fun rememberNoticeSoundPlayer(): () -> Unit {
+actual fun rememberNoticeSoundPlayer(): (NoticeSoundKind) -> Unit {
     val context = LocalContext.current
     val audioManager = remember(context) { context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager }
 
@@ -72,9 +81,12 @@ actual fun rememberNoticeSoundPlayer(): () -> Unit {
     }
 
     return remember(audioManager) {
-        {
-            runCatching { audioManager?.playSoundEffect(NOTICE_SOUND_EFFECT, NOTICE_SOUND_VOLUME) }
-                .onFailure { logger.warn(it) { "Failed to play notice sound effect" } }
+        { kind ->
+            val effect = kind.toSoundEffect()
+            if (effect != null) {
+                runCatching { audioManager?.playSoundEffect(effect, NOTICE_SOUND_VOLUME) }
+                    .onFailure { logger.warn(it) { "Failed to play notice sound effect for $kind" } }
+            }
         }
     }
 }

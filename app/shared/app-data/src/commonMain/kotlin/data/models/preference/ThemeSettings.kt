@@ -49,6 +49,12 @@ data class ThemeSettings(
      */
     val tvRetainPlaybackSession: Boolean = true,
     /**
+     * TV: [tvRetainPlaybackSession] 的后台提示响哪一声 ([NoticeSoundKind.None] = 只弹 toast 不出声).
+     *
+     * 存在这里而不是 `VideoScaffoldConfig`: 它跟着上面那条开关走, 同一个功能的两个参数放一起.
+     */
+    val tvNoticeSound: NoticeSoundKind = NoticeSoundKind.Default,
+    /**
      * TV: 完整视觉效果 (**默认关**), 即不为低端设备让步的那一档.
      *
      * 一个开关打包全部"好看但费机器"的取舍, 因为需要其中一项的设备通常三项都扛得住:

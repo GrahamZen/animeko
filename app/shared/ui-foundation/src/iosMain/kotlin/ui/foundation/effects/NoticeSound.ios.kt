@@ -11,9 +11,10 @@ package me.him188.ani.app.ui.foundation.effects
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import me.him188.ani.app.data.models.preference.NoticeSoundKind
 
 /**
  * iOS 空实现: 同桌面端, 保留会话只在电视上有入口, 这里不会被调用.
  */
 @Composable
-actual fun rememberNoticeSoundPlayer(): () -> Unit = remember { {} }
+actual fun rememberNoticeSoundPlayer(): (NoticeSoundKind) -> Unit = remember { {} }
