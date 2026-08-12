@@ -47,6 +47,7 @@ import me.him188.ani.utils.logging.warn
 import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.stringResource
 import java.io.File
+import java.io.RandomAccessFile
 
 
 private val logger = logger("LogTab")
@@ -136,11 +137,42 @@ internal actual fun ColumnScope.PlatformLoggingItems(listItemColors: ListItemCol
                 return@clickable
             }
             scope.launch {
-                clipboard.setClipEntryText(logFile.readText())
+                clipboard.setClipEntryText(readLogTailForClipboard(logFile))
             }
         },
         colors = listItemColors,
     )
+}
+
+/**
+ * 剪贴板里最多放这么多日志.
+ *
+ * 日志配的是 root level=TRACE + 只按天滚动 (没有体积上限), 边看 BT 边跑一天的 app.log 到几十 MB 很常见,
+ * 而 `ClipboardManager.setPrimaryClip` 走 Binder, 事务超过约 1MB 会抛 `TransactionTooLargeException`.
+ * 只留尾部: 出问题的那段一定在最后.
+ */
+private const val CLIPBOARD_LOG_MAX_BYTES = 256L * 1024
+
+/**
+ * 读 app.log 的尾部, 最多 [CLIPBOARD_LOG_MAX_BYTES].
+ *
+ * 必须 `withContext(Dispatchers.IO)`: 调用点是 `rememberCoroutineScope().launch`, 它的调度器是主线程,
+ * 直接 `readText()` 等于在主线程上一次性读进几十 MB (低端盒子上就是 ANR).
+ */
+private suspend fun readLogTailForClipboard(logFile: File): String = withContext(Dispatchers.IO) {
+    val length = logFile.length()
+    if (length <= CLIPBOARD_LOG_MAX_BYTES) {
+        return@withContext logFile.readText()
+    }
+    RandomAccessFile(logFile, "r").use { file ->
+        file.seek(length - CLIPBOARD_LOG_MAX_BYTES)
+        val bytes = ByteArray(CLIPBOARD_LOG_MAX_BYTES.toInt())
+        file.readFully(bytes)
+        // 截断点多半落在某一行中间: 从第一个换行之后开始, 顺带丢掉被切成两半的多字节字符
+        val start = bytes.indexOf('\n'.code.toByte()) + 1
+        val header = "(truncated: last ${CLIPBOARD_LOG_MAX_BYTES / 1024} KB of ${length / 1024} KB)\n"
+        header + String(bytes, start, bytes.size - start, Charsets.UTF_8)
+    }
 }
 
 /**
