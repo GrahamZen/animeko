@@ -506,7 +506,11 @@ fun FocusEpisodeCarousel(
             tvAnchorBringIntoViewSpec(with(density) { horizontalPadding.toPx() })
         }
         CompositionLocalProvider(LocalBringIntoViewSpec provides bringIntoViewSpec) {
-            BoxWithConstraints {
+            // 高度锁死在卡片高: 聚焦框是向外探出的 (offset 只挪位置不改上报尺寸, 见
+            // [FocusEpisodeAnchorRing]), 它上报的高度是 cellHeight + 2*FOCUS_RING_GAP, 而框只在
+            // 有卡片持焦时才组合 —— 不锁高度的话本 Box 会跟着焦点进出行在 144/150dp 之间来回跳,
+            // 详情页里整行选集连带下方简介行硬跳 6dp. 锁了之后框照旧画到行外留白里 (父不裁剪).
+            BoxWithConstraints(Modifier.height(cellHeight)) {
                 LazyRow(
                     Modifier
                         .then(rowFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)

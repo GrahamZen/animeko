@@ -56,6 +56,7 @@ import me.him188.ani.app.ui.foundation.avatar.AvatarImage
 import me.him188.ani.app.ui.foundation.focus.FOCUS_BORDER_TEXT_INSET
 import me.him188.ani.app.ui.foundation.focus.TvAnchoredStrip
 import me.him188.ani.app.ui.foundation.focus.focusBorder
+import me.him188.ani.app.ui.foundation.ifThen
 import me.him188.ani.app.ui.foundation.layout.rememberConnectedScrollState
 import me.him188.ani.app.ui.foundation.rememberImageViewerHandler
 import me.him188.ani.app.ui.foundation.widgets.LocalToaster
@@ -299,21 +300,25 @@ internal fun PeopleSubjectCard(
     width: Dp = 96.dp,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
+    // 描边与随之而来的文字内缩都只为遥控器示焦服务, 必须一起跟着形态走: 桌面端焦点本来就由涟漪的
+    // 状态层表示, 再叠一圈描边就是这里想避免的两层特效; 手机端压根不会聚焦, 内缩只会白白把标题挤窄.
+    val focusDriven = LocalAniUiBehavior.current.focusDrivenNavigation
+    val textInset = if (focusDriven) FOCUS_BORDER_TEXT_INSET else 0.dp
     Column(
         modifier
             .width(width)
             // 示焦用主题色描边而不是涟漪的高亮状态层 (压在封面上分辨不出哪张有焦点)
-            .focusBorder(MaterialTheme.shapes.small)
+            .ifThen(focusDriven) { focusBorder(MaterialTheme.shapes.small) }
             .clip(MaterialTheme.shapes.small)
             // 焦点驱动 (TV) 下不要涟漪的焦点状态层: 半透明高亮 + 描边 = 两层特效, 且高亮本身
             // 在封面上分辨不出哪张有焦点 (与 FocusHighlightCard 的取舍一致). 触摸端保留涟漪.
             .clickable(
                 interactionSource = interactionSource,
-                indication = if (LocalAniUiBehavior.current.focusDrivenNavigation) null else LocalIndication.current,
+                indication = if (focusDriven) null else LocalIndication.current,
                 onClick = onClick,
             )
             // 末行文字贴着卡底, 给聚焦描边留出余地 (横向内缩在文字上, 封面仍满宽)
-            .padding(bottom = FOCUS_BORDER_TEXT_INSET),
+            .padding(bottom = textInset),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Box(Modifier.fillMaxWidth().aspectRatio(COVER_WIDTH_TO_HEIGHT_RATIO).clip(MaterialTheme.shapes.small)) {
@@ -321,7 +326,7 @@ internal fun PeopleSubjectCard(
         }
         Text(
             subject.displayName,
-            Modifier.padding(horizontal = FOCUS_BORDER_TEXT_INSET),
+            Modifier.padding(horizontal = textInset),
             style = MaterialTheme.typography.bodySmall,
             fontWeight = FontWeight.Medium,
             maxLines = 1,
@@ -330,7 +335,7 @@ internal fun PeopleSubjectCard(
         if (caption != null) {
             Text(
                 caption,
-                Modifier.padding(horizontal = FOCUS_BORDER_TEXT_INSET),
+                Modifier.padding(horizontal = textInset),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -358,21 +363,24 @@ internal fun PeoplePortraitCard(
     circleCrop: Boolean = false,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
+    // 描边与文字内缩一起跟着形态走, 同 [PeopleSubjectCard]
+    val focusDriven = LocalAniUiBehavior.current.focusDrivenNavigation
+    val textInset = if (focusDriven) FOCUS_BORDER_TEXT_INSET else 0.dp
     Column(
         modifier
             .width(width)
             // 示焦用主题色描边, 同 [PeopleSubjectCard]
-            .focusBorder(MaterialTheme.shapes.small)
+            .ifThen(focusDriven) { focusBorder(MaterialTheme.shapes.small) }
             .clip(MaterialTheme.shapes.small)
             // 焦点驱动 (TV) 下不要涟漪的焦点状态层: 半透明高亮 + 描边 = 两层特效, 且高亮本身
             // 在封面上分辨不出哪张有焦点 (与 FocusHighlightCard 的取舍一致). 触摸端保留涟漪.
             .clickable(
                 interactionSource = interactionSource,
-                indication = if (LocalAniUiBehavior.current.focusDrivenNavigation) null else LocalIndication.current,
+                indication = if (focusDriven) null else LocalIndication.current,
                 onClick = onClick,
             )
             // 末行文字贴着卡底, 给聚焦描边留出余地 (横向内缩在文字上, 头像仍满宽)
-            .padding(bottom = FOCUS_BORDER_TEXT_INSET),
+            .padding(bottom = textInset),
         horizontalAlignment = if (circleCrop) Alignment.CenterHorizontally else Alignment.Start,
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -397,7 +405,7 @@ internal fun PeoplePortraitCard(
         }
         Text(
             name,
-            Modifier.padding(horizontal = FOCUS_BORDER_TEXT_INSET),
+            Modifier.padding(horizontal = textInset),
             style = MaterialTheme.typography.bodySmall,
             fontWeight = FontWeight.Medium,
             maxLines = 1,
@@ -406,7 +414,7 @@ internal fun PeoplePortraitCard(
         if (caption != null) {
             Text(
                 caption,
-                Modifier.padding(horizontal = FOCUS_BORDER_TEXT_INSET),
+                Modifier.padding(horizontal = textInset),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
