@@ -205,10 +205,13 @@ fun AniAppContent(aniNavigator: AniNavigator) {
         // 只给一条会自己消失的 toast 等于没提示. 只有这一组提示配声音, 普通 toast 不配 ——
         // 错误提示全应用到处都有, 每条都响会很吵
         val playNoticeSound = rememberNoticeSoundPlayer()
+        // 音色跟着设置走 (可以选到"无声音"). 用 rememberUpdatedState 而不是把它做成 LaunchedEffect
+        // 的 key: notices 是无 replay 的 SharedFlow, 重启收集者会在重启的空档里漏掉一次提示
+        val noticeSound = rememberUpdatedState(LocalThemeSettings.current.tvNoticeSound)
         LaunchedEffect(playbackSessionHolder, toaster, noticeTexts, playNoticeSound) {
             playbackSessionHolder.notices.collect {
                 toaster.toast(noticeTexts.textOf(it))
-                playNoticeSound()
+                playNoticeSound(noticeSound.value)
             }
         }
         // 会话在后台也要有个组合挂载点 (WEB 源解析的 WebView 宿主), 详见该函数的注释

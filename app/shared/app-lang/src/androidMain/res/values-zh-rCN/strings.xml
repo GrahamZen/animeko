@@ -284,6 +284,15 @@
     <string name="settings_player_fullscreen_button_description">总是显示播放器右下角的切换全屏按钮，方便切换</string>
     <string name="settings_player_frame_preview">显示进度条画面预览</string>
     <string name="settings_player_frame_preview_description">悬停或拖动进度条时，显示目标位置的视频画面</string>
+    <string name="settings_player_notice_sound">后台就绪提示音</string>
+    <string name="settings_player_notice_sound_description">退出播放页后继续加载的会话，就绪或出问题时响一声。用的是系统界面音效，选中即试听</string>
+    <string name="settings_player_notice_sound_none">无声音</string>
+    <string name="settings_player_notice_sound_confirm">确认音</string>
+    <string name="settings_player_notice_sound_standard">按键音</string>
+    <string name="settings_player_notice_sound_alert">提醒音</string>
+    <string name="settings_player_notice_sound_delete">删除音</string>
+    <string name="settings_player_notice_sound_space">空格音</string>
+    <string name="settings_player_notice_sound_tick">轻点音</string>
     <string name="settings_player_enable_regex_filter">启用正则弹幕过滤器</string>
     <string name="settings_player_pause_on_edit_danmaku">发送弹幕时自动暂停播放</string>
     <string name="settings_player_auto_mark_done">观看 90% 后自动标记为看过</string>

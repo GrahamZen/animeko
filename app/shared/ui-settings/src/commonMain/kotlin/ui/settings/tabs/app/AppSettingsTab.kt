@@ -43,6 +43,7 @@ import me.him188.ani.app.data.models.preference.EpisodeListProgressTheme
 import me.him188.ani.app.data.models.preference.FullscreenSwitchMode
 import me.him188.ani.app.data.models.preference.NsfwMode
 import me.him188.ani.app.data.models.preference.SkipOpEdMode
+import me.him188.ani.app.data.models.preference.NoticeSoundKind
 import me.him188.ani.app.data.models.preference.ThemeSettings
 import me.him188.ani.app.data.models.preference.UISettings
 import me.him188.ani.app.data.models.preference.UpdateSettings
@@ -54,6 +55,7 @@ import me.him188.ani.app.navigation.getIcon
 import me.him188.ani.app.navigation.getText
 import me.him188.ani.app.platform.currentAniBuildConfig
 import me.him188.ani.app.ui.foundation.LocalAniUiBehavior
+import me.him188.ani.app.ui.foundation.effects.rememberNoticeSoundPlayer
 import me.him188.ani.app.ui.foundation.LocalPlatform
 import me.him188.ani.app.ui.foundation.SteppedSlider
 import me.him188.ani.app.ui.foundation.animation.AniAnimatedVisibility
@@ -103,6 +105,15 @@ import me.him188.ani.app.ui.lang.settings_player_fullscreen_only_in_controller
 import me.him188.ani.app.ui.lang.settings_player_hide_selector_on_select
 import me.him188.ani.app.ui.lang.settings_player_long_press_fast_forward_speed
 import me.him188.ani.app.ui.lang.settings_player_long_press_fast_forward_speed_description
+import me.him188.ani.app.ui.lang.settings_player_notice_sound
+import me.him188.ani.app.ui.lang.settings_player_notice_sound_alert
+import me.him188.ani.app.ui.lang.settings_player_notice_sound_confirm
+import me.him188.ani.app.ui.lang.settings_player_notice_sound_delete
+import me.him188.ani.app.ui.lang.settings_player_notice_sound_description
+import me.him188.ani.app.ui.lang.settings_player_notice_sound_none
+import me.him188.ani.app.ui.lang.settings_player_notice_sound_space
+import me.him188.ani.app.ui.lang.settings_player_notice_sound_standard
+import me.him188.ani.app.ui.lang.settings_player_notice_sound_tick
 import me.him188.ani.app.ui.lang.settings_player_op_ed_skip_duration
 import me.him188.ani.app.ui.lang.settings_player_skip_op_ed_auto
 import me.him188.ani.app.ui.lang.settings_player_skip_op_ed_manual
@@ -699,6 +710,40 @@ fun SettingsScope.PlayerGroup(
         HorizontalDividerItem()
         PlaybackSpeedItems(config, videoScaffoldConfig)
         PlayerGroupPlatform(videoScaffoldConfig)
+        // 「后台就绪提示音」与上面那条"保留播放状态"是同一个功能的两个参数: 没有回到会话的入口就
+        // 不会有后台提示, 这条也就无从谈起. 所以用同一个门控.
+        if (LocalAniUiBehavior.current.retainPlaybackSession) {
+            val themeConfig by themeSettings
+            val playNoticeSound = rememberNoticeSoundPlayer()
+            HorizontalDividerItem()
+            DropdownItem(
+                selected = { themeConfig.tvNoticeSound },
+                values = { NoticeSoundKind.entries },
+                itemText = {
+                    Text(
+                        stringResource(
+                            when (it) {
+                                NoticeSoundKind.None -> Lang.settings_player_notice_sound_none
+                                NoticeSoundKind.Confirm -> Lang.settings_player_notice_sound_confirm
+                                NoticeSoundKind.Standard -> Lang.settings_player_notice_sound_standard
+                                NoticeSoundKind.Alert -> Lang.settings_player_notice_sound_alert
+                                NoticeSoundKind.Tick -> Lang.settings_player_notice_sound_tick
+                                NoticeSoundKind.Delete -> Lang.settings_player_notice_sound_delete
+                                NoticeSoundKind.Space -> Lang.settings_player_notice_sound_space
+                            },
+                        ),
+                    )
+                },
+                onSelect = { kind ->
+                    themeSettings.update(themeConfig.copy(tvNoticeSound = kind))
+                    // 选完立刻响一次: 这些都是系统按键音, 光看名字听不出是什么, 不试听没法选.
+                    // 传新值而不是等设置写回去再读 —— 写回是异步的, 那时候响的还是旧音色.
+                    playNoticeSound(kind)
+                },
+                title = { Text(stringResource(Lang.settings_player_notice_sound)) },
+                description = { Text(stringResource(Lang.settings_player_notice_sound_description)) },
+            )
+        }
     }
 }
 

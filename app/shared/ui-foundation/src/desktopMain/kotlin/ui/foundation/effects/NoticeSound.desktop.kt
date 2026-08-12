@@ -11,10 +11,11 @@ package me.him188.ani.app.ui.foundation.effects
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import me.him188.ani.app.data.models.preference.NoticeSoundKind
 
 /**
  * 桌面端空实现: 唯一的调用方是后台会话提示, 而保留会话只在电视上有入口
  * (`AniUiBehavior.retainPlaybackSession`), 桌面端根本不会走到这里.
  */
 @Composable
-actual fun rememberNoticeSoundPlayer(): () -> Unit = remember { {} }
+actual fun rememberNoticeSoundPlayer(): (NoticeSoundKind) -> Unit = remember { {} }

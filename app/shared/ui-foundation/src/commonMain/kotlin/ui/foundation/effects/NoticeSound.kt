@@ -10,9 +10,13 @@
 package me.him188.ani.app.ui.foundation.effects
 
 import androidx.compose.runtime.Composable
+import me.him188.ani.app.data.models.preference.NoticeSoundKind
 
 /**
- * 返回一个"响一声系统提示音"的函数.
+ * 返回一个"响一声系统提示音"的函数, 参数决定响哪一声 ([NoticeSoundKind.None] 则不响).
+ *
+ * 音色由调用方传入而不是由本函数读设置: 设置界面要能在用户选中某一项时**立刻试听那一项**,
+ * 而那一刻新值还没写回设置.
  *
  * 用途很窄, 目前只给后台会话的提示用 (见 `RetainedPlaybackNotice`): 那些提示的前提就是
  * 用户不在看着屏幕 —— 退出播放页去翻别的、或者干脆没在看电视, 等着后台把数据源加载好.
@@ -23,4 +27,4 @@ import androidx.compose.runtime.Composable
  * 平台不支持 (桌面 / iOS) 时返回空实现. 具体音色与静音策略见各平台 actual.
  */
 @Composable
-expect fun rememberNoticeSoundPlayer(): () -> Unit
+expect fun rememberNoticeSoundPlayer(): (NoticeSoundKind) -> Unit
