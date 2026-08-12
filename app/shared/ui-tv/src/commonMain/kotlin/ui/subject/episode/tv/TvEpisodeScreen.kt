@@ -61,6 +61,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.LocalPlatformContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
@@ -91,6 +92,8 @@ import me.him188.ani.app.videoplayer.ui.progress.rememberMediaProgressSliderStat
 import me.him188.ani.app.videoplayer.ui.rememberPlayerStatsState
 import me.him188.ani.app.videoplayer.ui.rememberVideoSideSheetsController
 import me.him188.ani.danmaku.ui.DanmakuHostState
+import me.him188.ani.utils.logging.info
+import me.him188.ani.utils.logging.logger
 import org.openani.mediamp.MediampPlayer
 import org.openani.mediamp.features.PlaybackSpeed
 import org.openani.mediamp.togglePlayWhenReady
@@ -385,6 +388,8 @@ fun TvEpisodeScreenContent(
     var confirmKeyHoldTick by remember { mutableIntStateOf(0) }
     // 长按倍速生效中: 抬起时据此判断"这是长按, 不要切换播放"
     var fastForwarding by remember { mutableStateOf(false) }
+    // 长按结束后待补发的原速 (null = 无待办), 见下方"倍速还原补发"协程
+    var pendingSpeedRestore by remember { mutableStateOf<Float?>(null) }
     // 确认键的这一次**按下**是落在 OP/ED 提示按钮上的吗. 按下与抬起必须成对, 否则会吃到残余:
     // 提交拖拽预览就是这样 —— 按下那一下在进度条上 (收起控制层 + 把焦点交给提示按钮), 抬起时
     // 焦点已经在按钮上了, 不记账的话这一下抬起会把按钮也按掉, 顺带还让控制层再没机会回来
@@ -978,7 +983,41 @@ fun TvEpisodeScreenContent(
                 // 取消 (离屏/重启一轮) 也要还原, 所以放在 finally 而不是挂起之后
                 playbackSpeed.set(originalSpeed)
                 fastForwarding = false
+                // 这一发有可能没落到播放器上 (见下方补发协程), 挂个待办.
+                // isPlaying 一并记下来: false 就是那条会丢还原的路, 与下面那条补发日志的时间差
+                // 即"丢了多久才被补上" —— 判断有没有真的复现到那条路, 只能靠这一对日志
+                logger.info {
+                    "Fast forward ended, restoring speed to $originalSpeed " +
+                            "(isPlaying=${vm.player.state.value.isPlaying})"
+                }
+                pendingSpeedRestore = originalSpeed
             }
+        }
+    }
+    // 倍速还原补发: 等播放器真的在播了, 再把原速发一遍.
+    //
+    // **mediamp 0.3.0 的 `PlaybackSpeed.set` 只在 `isPlaying` 为真时才下发速率**
+    // (AbstractMediampPlayer.machinePlaybackSpeed): `flow.value` 与 `desiredRate` 无条件更新,
+    // 但 `setRateImpl` 外面套着 `if (_state.value.isPlaying)`. 而两处"恢复播放时补发速率"的分支
+    // 又都写着 `desiredRate != 1f` 才补 —— **1f 被当成了"不用管"**.
+    //
+    // 于是"长按倍速 → 撞上缓冲 → 松手"这条路上还原会整个丢掉: 松手那一刻 isPlaying 是 false
+    // (正在缓冲), set(1f) 只改了显示与 desiredRate; 缓冲结束恢复播放时, 补发又因为 desiredRate
+    // 正好是 1f 而跳过. 结果是播放器一直停在长按时的 2.5x, 而界面上倍速按钮显示的是原速
+    // (它只在 speed == 1.0f 时不带数字) —— 用户手动去滑块上改一次才能解开.
+    //
+    // 补发放在独立协程而不是上面的 finally 里: finally 不能挂起, 而那一轮随时可能被取消.
+    // 等 `!fastForwarding` 是防止补发跑去覆盖用户新起的一轮长按.
+    LaunchedEffect(Unit) {
+        snapshotFlow { pendingSpeedRestore }.collectLatest { target ->
+            if (target == null) return@collectLatest
+            val playbackSpeed = vm.player.features[PlaybackSpeed] ?: return@collectLatest
+            combine(vm.player.state, snapshotFlow { fastForwarding }) { state, forwarding ->
+                state.isPlaying && !forwarding
+            }.first { it }
+            logger.info { "Re-applying playback speed $target after fast forward" }
+            playbackSpeed.set(target)
+            pendingSpeedRestore = null
         }
     }
     // 自动隐藏 (Prime 行为): 播放中且无面板/侧 sheet/下拉/输入态, 5 秒无按键收起.
@@ -1378,3 +1417,5 @@ private const val TV_PAUSE_FLASH_HOLD_MS = 120
 
 /** 暂停反馈投影不透明度. */
 private const val TV_PAUSE_FLASH_SHADOW_ALPHA = 0.55f
+
+private val logger = logger("TvEpisodeScreen")

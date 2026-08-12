@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import me.him188.ani.app.domain.episode.EpisodeSession
+import me.him188.ani.utils.logging.info
+import me.him188.ani.utils.logging.logger
 import org.koin.core.Koin
 import org.openani.mediamp.features.PlaybackSpeed
 import kotlin.coroutines.CoroutineContext
@@ -60,10 +62,13 @@ class PlaybackSpeedExtension(
                 // 要的是**严格** isPlaying (时钟真的在走 = 音频管线已就绪), 不是 playWhenReady ——
                 // 后者在管线还没建起来时就已经是 true, 那时补发等于没补
                 context.player.state.first { it.isPlaying }
-                val speed = playbackSpeedFlow.first()
-                if (speed != 1f) {
-                    applySpeed(speed, force = true)
-                }
+                // 1f 也要补: 它同样是一个需要下发的目标, 不是"不用管".
+                //
+                // 原来这里写着 `if (speed != 1f)`, 与 mediamp 0.3.0 里两处补发分支
+                // (`desiredRate != 1f`) 犯的是同一个错. 后果见 TV 播放页"倍速还原补发"那段注释:
+                // 长按倍速撞上缓冲时, 还原成 1f 的那一发会被整条链路一致地忽略掉, 播放器就一直
+                // 停在长按时的倍速上, 而界面显示的是原速.
+                applySpeed(playbackSpeedFlow.first(), force = true)
             }
         }
     }
@@ -83,9 +88,13 @@ class PlaybackSpeedExtension(
             val playbackSpeed = context.player.features[PlaybackSpeed] ?: return@withContext
             if (force && playbackSpeed.value == speed) {
                 // ExoPlayer 对"设成当前值"直接返回, 音频管线就收不到这次变更 (这正是补发时的处境:
-                // 播放器层面早就是这个值了). 先回 1x 再设回去, 逼它把变更下发下去.
-                playbackSpeed.set(1f)
+                // 播放器层面早就是这个值了). 先设一个别的值再设回去, 逼它把变更下发下去.
+                //
+                // 中转值必须与目标**不同**: 原来固定用 1f, 于是目标本身是 1f 时等于没中转 ——
+                // 恰好就是"长按倍速没还原干净"那条路上最需要它的场景.
+                playbackSpeed.set(if (speed == 1f) FORCE_NUDGE_SPEED else 1f)
             }
+            logger.info { "Applying playback speed $speed (force=$force)" }
             playbackSpeed.set(speed)
         }
     }
@@ -96,5 +105,12 @@ class PlaybackSpeedExtension(
         override fun create(context: PlayerExtensionContext, koin: Koin): PlaybackSpeedExtension {
             return PlaybackSpeedExtension(context, playbackSpeedFlow)
         }
+    }
+
+    private companion object {
+        private val logger = logger<PlaybackSpeedExtension>()
+
+        /** 目标是 1x 时的中转值: 只为让播放器认出"这是一次变更", 同一轮命令内就被目标值覆盖. */
+        private const val FORCE_NUDGE_SPEED = 1.01f
     }
 }
