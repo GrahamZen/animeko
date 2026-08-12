@@ -25,14 +25,12 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.him188.ani.app.tools.HtmlColor
-import me.him188.ani.app.ui.comment.BangumiCommentSticker
 import me.him188.ani.app.ui.comment.BangumiStickers
 import me.him188.ani.utils.bbcode.BBCode
 import me.him188.ani.utils.bbcode.RichElement
 import me.him188.ani.utils.bbcode.RichText
 import me.him188.ani.utils.logging.logger
 import me.him188.ani.utils.logging.warn
-import org.jetbrains.compose.resources.DrawableResource
 import kotlin.coroutines.CoroutineContext
 
 @Composable
@@ -213,7 +211,7 @@ private fun RichElement.Text.toUIAnnotated(overrideTextSize: Float?): List<UIRic
         var consumed = 0
         tokens.forEach { token ->
             if (token.range.first > consumed) add(text(value.substring(consumed, token.range.first)))
-            add(stickerOf(token.value, resource = null, jumpUrl = jumpUrl))
+            add(uiStickerOf(token.value, jumpUrl = jumpUrl))
             consumed = token.range.last + 1
         }
         if (consumed < value.length) add(text(value.substring(consumed)))
@@ -226,27 +224,31 @@ private fun RichElement.Text.toUIAnnotated(overrideTextSize: Float?): List<UIRic
  * 不然 [UIRichElement.Annotated.Sticker] 会渲染成一块看不见的空白, 等于整条表情凭空消失.
  */
 private fun RichElement.BangumiSticker.toUISticker(textSize: Float): UIRichElement.Annotated =
-    stickerOf("(bgm$id)", resource = BangumiCommentSticker[id], jumpUrl = jumpUrl, textSize = textSize)
+    uiStickerOf("(bgm$id)", jumpUrl = jumpUrl, textSize = textSize)
 
 /** 颜文字 (`(=A=)` 这类) -> 行内表情. 与 [RichElement.BangumiSticker.toUISticker] 同理. */
 private fun RichElement.Kanmoji.toUISticker(textSize: Float): UIRichElement.Annotated =
-    stickerOf(id, resource = null, jumpUrl = jumpUrl, textSize = textSize)
+    uiStickerOf(id, jumpUrl = jumpUrl, textSize = textSize)
 
-/** 表情代码 -> 行内表情; 随包没图、地址也拼不出来的, 退化成原文本. */
-private fun stickerOf(
+/**
+ * 表情代码 -> 行内表情; 随包没图、地址也拼不出来的, 退化成原文本.
+ *
+ * 随包图查找与"认不出"的判定都交给 [BangumiStickers.stickerOf] —— 回应条上那份也走同一个入口,
+ * 两处对同一枚新表情的表现才不会不一致. 这里只剩"画成什么"这一层.
+ */
+private fun uiStickerOf(
     token: String,
-    resource: DrawableResource?,
     jumpUrl: String?,
     textSize: Float = RichTextDefaults.FontSize,
 ): UIRichElement.Annotated {
-    val imageUrl = BangumiStickers.imageUrlOf(token)
-    if (resource == null && imageUrl == null) {
-        return UIRichElement.Annotated.Text(content = token, size = textSize, url = jumpUrl)
+    val sticker = BangumiStickers.stickerOf(token)
+    if (!sticker.hasImage) {
+        return UIRichElement.Annotated.Text(content = sticker.token, size = textSize, url = jumpUrl)
     }
     return UIRichElement.Annotated.Sticker(
-        id = token,
-        resource = resource,
-        imageUrl = imageUrl,
+        id = sticker.token,
+        resource = sticker.resource,
+        imageUrl = sticker.imageUrl,
         url = jumpUrl,
     )
 }

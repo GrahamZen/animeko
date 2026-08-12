@@ -9,6 +9,8 @@
 
 package me.him188.ani.app.ui.comment
 
+import org.jetbrains.compose.resources.DrawableResource
+
 /**
  * Bangumi 表情的图片地址表.
  *
@@ -126,6 +128,41 @@ object BangumiStickers {
 
     /** 这段代码是不是表情. */
     operator fun contains(token: String): Boolean = token in PATH_BY_TOKEN
+
+    /**
+     * 一枚表情的取图方式: 随包图 ([resource]) 是离线快路径, 网络地址 ([imageUrl]) 是通路,
+     * 两者都没有就说明这个代码**不认识** ([hasImage] 为 false), 调用方必须退化成显示 [token] 原文本
+     * —— 画成空白等于整枚表情凭空消失, 换个不相干的占位图标 (比如 Face) 更糟: 用户连它本来是什么都看不出来.
+     *
+     * 只说"图从哪来", 不说"画成什么": 正文里是行内富文本元素, 回应条上是个 24dp 小图标,
+     * 两处渲染差得远, 强行统一反而把渲染绑死在这里.
+     */
+    class Sticker internal constructor(
+        /** 完整的表情代码, 如 `"(bgm38)"`. [hasImage] 为 false 时调用方原样显示它. */
+        val token: String,
+        val imageUrl: String?,
+        val resource: DrawableResource?,
+    ) {
+        val hasImage: Boolean get() = imageUrl != null || resource != null
+    }
+
+    /**
+     * 表情代码 (完整形态) -> 取图方式. **token -> 表情的唯一入口**: 随包图查找与"认不出"的判定
+     * 都在这里, 各处自己拼一遍就会出现同一枚表情在正文里退化成 `(bgm600)`、在回应条上却变成
+     * 一个看不出是什么的图标这种不一致.
+     */
+    fun stickerOf(token: String): Sticker = Sticker(
+        token = token,
+        imageUrl = imageUrlOf(token),
+        resource = token.bundledResource(),
+    )
+
+    /** 随包的那 125 张只覆盖 `(bgm1)`~`(bgm125)`; 别的包 (颜文字 / 娘) 一律现拉. */
+    private fun String.bundledResource(): DrawableResource? {
+        val unwrapped = unwrap()
+        if (!unwrapped.startsWith("bgm")) return null
+        return BangumiCommentSticker[unwrapped.removePrefix("bgm").toIntOrNull() ?: return null]
+    }
 
     /**
      * Bangumi「回应」(给别人的评论贴表情) 的编号 -> 表情代码.
