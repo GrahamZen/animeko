@@ -240,7 +240,7 @@ fun SubjectDetailsTvLoadingPlaceholder(
 
     val pad = layoutParams.contentHorizontalPadding
     val scrollState = rememberScrollState()
-    Box(modifier) {
+    Box(modifier.fillMaxSize()) {
         MultiColumnScaffold(
             layoutParams.copy(
                 contentHorizontalPadding = 0.dp,

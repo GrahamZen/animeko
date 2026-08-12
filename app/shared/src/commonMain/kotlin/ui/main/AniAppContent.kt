@@ -139,6 +139,7 @@ import me.him188.ani.app.ui.watchtogether.WatchTogetherPlayerController
 import me.him188.ani.app.ui.watchtogether.WatchTogetherViewModel
 import me.him188.ani.datasources.api.source.FactoryId
 import kotlin.reflect.typeOf
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * UI 入口点. 包含所有子页面, 以及组合这些子页面的方式 (navigation).
@@ -236,6 +237,14 @@ fun AniAppContent(aniNavigator: AniNavigator) {
     }
 }
 
+/**
+ * 全局焦点兜底在开抢之前给页面留的余地: 覆盖"页面刚组合、自己的焦点锚点还没发出请求"的那几帧.
+ *
+ * 取值只需盖住组合与锚点解析起手的时序 (详情页是 `scrollTo(0)` + 一帧 + 解析器首次尝试),
+ * 不必也不该盖住整个转场 —— 页面真的没有可聚焦内容时, 这就是方向键失灵到恢复的延迟.
+ */
+private val FOCUS_FALLBACK_GRACE = 250.milliseconds
+
 @Composable
 private fun AniAppContentImpl(
     aniNavigator: AniNavigator,
@@ -271,6 +280,13 @@ private fun AniAppContentImpl(
             snapshotFlow { hasFocusInside to windowInfo.isWindowFocused }
                 .collectLatest { (focused, windowFocused) ->
                     if (focused || !windowFocused) return@collectLatest
+                    // 先让位一小会儿: 页面自己的焦点锚点要跨几帧才发得出请求 (详情页还要先把
+                    // 滚动归零再等一帧). 在这个空窗期抢焦点, requestFocus 会按 Enter 方向进入
+                    // 页面**最左**的可聚焦子树 —— 有侧边栏的页面上那就是侧边栏, 于是进详情页
+                    // 时侧边栏被展开一瞬 (按钮文字闪一下) 再被页面锚点拉走. 真正需要兜底的
+                    // 场景 (页面就是没有可聚焦内容) 晚这么一下毫无影响, 而焦点一旦落定,
+                    // collectLatest 立刻取消本次等待, 这段延迟根本不会走完.
+                    delay(FOCUS_FALLBACK_GRACE)
                     // 持续重试 (状态一变 collectLatest 即取消): 转场动画期间请求可能落在
                     // 将被移除的旧页面上, 旧页面销毁后焦点再次丢失会自动再触发
                     while (true) {
