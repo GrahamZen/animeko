@@ -96,6 +96,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import me.him188.ani.app.data.models.player.EpisodeHistory
 import me.him188.ani.app.data.models.recommend.RecommendedSubjectInfo
 import me.him188.ani.app.data.models.subject.ContinueWatchingStatus
@@ -135,6 +136,8 @@ import me.him188.ani.app.ui.foundation.tv.TV_BACKDROP_CROSSFADE_MILLIS
 import me.him188.ani.app.ui.foundation.tv.TV_BACKDROP_LEFT_FADE_END
 import me.him188.ani.app.ui.foundation.tv.TV_BACKDROP_LEFT_FADE_START
 import me.him188.ani.app.ui.foundation.tv.TV_HERO_MEDIA_DEBOUNCE_MILLIS
+import me.him188.ani.app.ui.foundation.tv.TV_NAV_LOCK_MILLIS
+import me.him188.ani.app.ui.foundation.tv.TV_NAV_READY_BUDGET
 import me.him188.ani.app.ui.foundation.tv.TV_HERO_SUMMARY_WIDTH_FRACTION
 import me.him188.ani.app.ui.foundation.tv.TV_HERO_TEXT_FADE_MILLIS
 import me.him188.ani.app.ui.foundation.tv.TV_HERO_TITLE_WIDTH_FRACTION
@@ -296,9 +299,14 @@ fun TvExplorationPage(
                             TvNextEpisodeMedia(nextEpisodeId, media?.stillUrl, media?.overview)
                     }
                 }
-                // 整部 backdrop: 单集剧照缺失时的兜底 (以及非继续观看行的主图), 拿到剧照就不再拉
-                val hasEpisodeStill = target.fromFollowed && episodeStillCache[target.subjectId]?.stillUrl != null
-                if (!hasEpisodeStill && target.subjectId !in backdropCache) {
+                // 整部 backdrop: 单集剧照缺失时的兜底 (以及非继续观看行的主图).
+                //
+                // **有剧照也照拉**: 详情页 Hero 用的一律是整部 backdrop (剧照只在本页的"继续观看"
+                // 行当主图), 早年这里"拿到剧照就不再拉"省下的那次请求, 代价是继续观看行的条目进
+                // 详情页时背景图必然冷启. 现在它同时是详情页的预取 ([navigateToSubject] 的门控条件),
+                // 不能跳过. 正缓存永久有效, 每个条目全生命周期只会真的请求一次.
+                // 放在剧照之后: 本页 hero 要用的图先到, 这条不抢它的身位.
+                if (target.subjectId !in backdropCache) {
                     runCatching {
                         // 官方主背景图 (与详情页 hero 同源, 进详情零跳变); 屏保轮播才用全量列表.
                         // 传最新已播集日期: 新番刚播时 TMDB 往往还没有 backdrop, 负缓存据此限期失效
@@ -341,16 +349,56 @@ fun TvExplorationPage(
             if (seed != null && (fromFollowed || subjectId !in infoCache)) infoCache[subjectId] = seed
             heroTarget = TvHeroTarget(subjectId, title, fromFollowed)
         }
+    // 进详情页: 先等目标页首屏的材料备齐再跳, 备不齐则最多等 [TV_NAV_READY_BUDGET].
+    //
+    // 这是 Android 官方 postponeEnterTransition 的思路 —— 把等待挪到**跳转之前**.
+    // 原先点下即跳, 于是详情页拿 Placeholder 状态开局 (10-foot 变体的占位就是一个居中转圈的
+    // 空页), 等 SubjectDetailsStateLoader 首次发射才整页换成真布局, backdrop 再单独淡进来:
+    // 一次点击看到三段先后到达的画面, 每段长度还随磁盘/网络抖动. 用户的原话是"总是在急着等加载,
+    // 每次等待时间都很短但不一样长".
+    //
+    // 门控条件就是本页聚焦时那套预取的产物 (卡片聚焦即开拉, 见上面的 hero 加载 effect):
+    // - infoCache: 条目信息已进仓库缓存 -> 详情页那次 create() 首帧就能本地命中, 转圈窗口缩到
+    //   一两帧, 恰好落在入场淡入 alpha≈0 的那几帧里, 看不见;
+    // - backdropCache: 背景图 URL 已解析 -> 详情页 peekBackdropUrl 同步拿到, Hero 首帧即有图.
+    // 常见情形 (焦点在卡上停过一下) 两者早就齐了, 门是 0ms, 手感与从前一致.
+    //
+    // 预算故意压在 500ms 以内: 这段时间页面上没有任何反馈 (卡片仍是聚焦态), 再长就会被读成
+    // "遥控器没响应". 超预算即按老路跳转, 不比从前差.
+    // **闸门要一直关到本页离开屏幕为止, 不是只关到导航发出为止**: 导航发出后本页还要在
+    // 转场动画里活 [CROSSFADE_DURATION] 那么久, 期间它仍在组合、仍在收按键 —— 只锁到
+    // 导航发出的话, 常见情形 (预取已就绪, 门是 0ms) 下第二次确认键正好落在这段窗口里,
+    // 于是连进两层, 返回要按两下. [TV_NAV_LOCK_MILLIS] 就是覆盖这段窗口的.
+    //
+    // 用定时解锁而不是"永不解锁": 本页正常会随导航退出组合, remember 一并丢弃, 返回时是
+    // 全新的一份; 万一没退出 (导航被拒等), 定时解锁能自愈, 不至于整页再也点不动.
+    var navLocked by remember { mutableStateOf(false) }
+    fun lockNavigationForTransition() {
+        navLocked = true
+        scope.launch {
+            delay(TV_NAV_LOCK_MILLIS)
+            navLocked = false
+        }
+    }
     val navigateToSubject: (subjectId: Int, name: String, cover: String, source: String) -> Unit =
         { subjectId, name, cover, source ->
-            Analytics.recordEvent(SubjectEnter) {
-                put("source", source)
-                put("subject_id", subjectId)
+            if (!navLocked) {
+                Analytics.recordEvent(SubjectEnter) {
+                    put("source", source)
+                    put("subject_id", subjectId)
+                }
+                lockNavigationForTransition()
+                scope.launch {
+                    withTimeoutOrNull(TV_NAV_READY_BUDGET) {
+                        snapshotFlow { infoCache[subjectId] != null && subjectId in backdropCache }
+                            .first { it }
+                    }
+                    navigator.navigateSubjectDetails(
+                        subjectId = subjectId,
+                        placeholder = SubjectDetailPlaceholder(id = subjectId, name = name, coverUrl = cover),
+                    )
+                }
             }
-            navigator.navigateSubjectDetails(
-                subjectId = subjectId,
-                placeholder = SubjectDetailPlaceholder(id = subjectId, name = name, coverUrl = cover),
-            )
         }
     // 立即观看: 直接进播放页 —— 有观看进度接着播下一集, 没有则从第一集开始;
     // 分集信息尚未加载到 (聚焦后异步拉取中) 时退化为进详情页, 保证点击总有响应
@@ -360,11 +408,15 @@ fun TvExplorationPage(
             val episodeId = info?.progressInfo?.nextEpisodeIdToPlay
                 ?: info?.episodes?.firstOrNull()?.episodeId
             if (episodeId != null) {
-                Analytics.recordEvent(SubjectEnter) {
-                    put("source", source)
-                    put("subject_id", subjectId)
+                // 同 navigateToSubject: 转场期间本页还在收按键, 不锁就会连进两层
+                if (!navLocked) {
+                    Analytics.recordEvent(SubjectEnter) {
+                        put("source", source)
+                        put("subject_id", subjectId)
+                    }
+                    lockNavigationForTransition()
+                    navigator.navigateEpisodeDetails(subjectId, episodeId)
                 }
-                navigator.navigateEpisodeDetails(subjectId, episodeId)
             } else {
                 navigateToSubject(subjectId, name, cover, source)
             }

@@ -142,7 +142,9 @@ import kotlinx.collections.immutable.toImmutableList
 import me.him188.ani.app.data.models.subject.SubjectCollectionStats
 import me.him188.ani.app.data.models.subject.SubjectInfo
 import me.him188.ani.app.data.models.subject.Tag
+import me.him188.ani.app.data.network.TmdbImageService
 import me.him188.ani.app.domain.episode.SetEpisodeCollectionTypeRequest
+import me.him188.ani.app.domain.usecase.GlobalKoin
 import me.him188.ani.app.navigation.LocalNavigator
 import me.him188.ani.app.tools.ColorUtils
 import me.him188.ani.app.ui.foundation.AsyncImage
@@ -277,8 +279,17 @@ fun SubjectDetailsTvPage(
     // TMDB 横版背景图, 三态: 结果未出时 Hero 不放任何图并按"有图"样式排版 (等待,
     // 常见情形图直接淡入零跳变); 确认无图才回退到竖版封面. 若直接用 null 当加载中,
     // 每次进页都会先闪一下回退布局再切到有图, 视觉上像页面跳变.
-    var backdropResolved by remember(state) { mutableStateOf(false) }
-    var tmdbBackdropUrl by remember(state) { mutableStateOf<String?>(null) }
+    //
+    // 首帧初值取进程内热缓存 (TmdbImageService.peekBackdropUrl): 上一个页面 (探索/搜索/
+    // 时间表) 聚焦这张卡时就已经查过同一条目, 结果同步可读. 拿到就等于**首帧即有图** ——
+    // 那张图还在 Coil 内存缓存里, Hero 一进场就是满的; 下面的 flow 仍照常收, 只是从
+    // "决定首屏长什么样"退化成"后台校正". 热缓存没有 (冷启/别处进来) 时行为与从前一致.
+    val tmdbImageService = remember { GlobalKoin.get<TmdbImageService>() }
+    val warmBackdrop = remember(state) {
+        if (videoBackground) null else tmdbImageService.peekBackdropUrl(state.subjectId)
+    }
+    var backdropResolved by remember(state) { mutableStateOf(warmBackdrop != null) }
+    var tmdbBackdropUrl by remember(state) { mutableStateOf(warmBackdrop?.takeIf { it.isNotEmpty() }) }
     LaunchedEffect(state) {
         // 视频背景模式不放背景图, 不必发起 TMDB 请求
         if (videoBackground) return@LaunchedEffect

@@ -41,6 +41,7 @@ import me.him188.ani.utils.logging.info
 import me.him188.ani.utils.logging.logger
 import me.him188.ani.utils.logging.warn
 import me.him188.ani.utils.platform.currentTimeMillis
+import kotlin.concurrent.Volatile
 import kotlin.coroutines.CoroutineContext
 import kotlin.time.Clock
 import kotlin.time.Duration
@@ -119,6 +120,34 @@ class TmdbImageService(
     }
 
     /**
+     * 本进程内已解析出结果的 backdrop (subjectId -> URL, `""` = 已确认无图).
+     *
+     * 存在的意义是**同步可读** (见 [peekBackdropUrl]): [getBackdropUrl] 即使全部命中持久缓存,
+     * 也要走一次 `withContext(ioDispatcher)` + DataStore 读盘, 耗时随磁盘/GC 抖动 ——
+     * 详情页首帧等不到它, 只能先按"加载中"渲染, 之后再把图淡进来.
+     *
+     * 写入是 copy-on-write 的整表替换 (读方永远看到一个完整的不可变 map); 并发写最坏是丢一条,
+     * 表现为该条目这次没命中热缓存, 无副作用.
+     */
+    @Volatile
+    private var resolvedBackdropUrls: Map<Int, String> = emptyMap()
+
+    /**
+     * 同步读取本进程**已经解析过**的 backdrop 结果, 不发请求也不读盘.
+     *
+     * 给"上一个页面早就查过同一条目"的场景做首帧初值用 (TV 探索/搜索/时间表页聚焦时会预取
+     * 背景图, 点进详情页时结果就在这张表里). 首帧直接拿到 URL 意味着图还在 Coil 内存缓存里,
+     * 详情页 Hero 一进场就是满的, 没有"先空着再淡入"那一下.
+     *
+     * @return URL; `""` = 已确认无图 (调用方应走无图回退); `null` = 本进程还没解析过, 按加载中处理.
+     */
+    fun peekBackdropUrl(subjectId: Int): String? = resolvedBackdropUrls[subjectId]
+
+    private fun rememberResolvedBackdrop(subjectId: Int, url: String) {
+        resolvedBackdropUrls = resolvedBackdropUrls + (subjectId to url)
+    }
+
+    /**
      * 获取条目横版背景图 URL (w1280). [originalName] 为日文原名 (SubjectInfo.name).
      * 找不到或未配置 token 时返回 null.
      *
@@ -134,11 +163,18 @@ class TmdbImageService(
 
         val cache = readCache()
         cache.backdropUrls[subjectId]?.let { cached ->
-            if (cached.isNotEmpty()) return@withContext cached // 正缓存永久有效: URL 拿到就不会变
+            if (cached.isNotEmpty()) {
+                // 正缓存永久有效: URL 拿到就不会变
+                rememberResolvedBackdrop(subjectId, cached)
+                return@withContext cached
+            }
             // 负缓存: 过期才重取, 且闸门保证进程内每条目只放行一次 ——
             // TMDB 侧确实没图时, 反复进出详情页不会反复空拉
             val stale = negativeCacheStale(cache.backdropMissAt[subjectId], activeAsOfDate)
-            if (!backdropRefreshGate.shouldRefresh(subjectId) { stale }) return@withContext null
+            if (!backdropRefreshGate.shouldRefresh(subjectId) { stale }) {
+                rememberResolvedBackdrop(subjectId, "")
+                return@withContext null
+            }
             logger.info { "Retrying TMDB backdrop for subject $subjectId (negative cache expired)" }
         }
 
@@ -166,6 +202,7 @@ class TmdbImageService(
                 },
             )
         }
+        rememberResolvedBackdrop(subjectId, url ?: "")
         url
     }
 
