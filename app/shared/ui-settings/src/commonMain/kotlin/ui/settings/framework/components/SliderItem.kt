@@ -43,6 +43,7 @@ import me.him188.ani.app.ui.foundation.rememberHoverExitFilteredInteractionSourc
 /**
  * 遥控器上 slider 聚焦时把返回键改成"向左移焦点": 左键被 slider 当成调值吃掉,
  * 返回键代替它退出 slider (向左进入左侧导航列表时经其 focusGroup 的 onEnter 跳回选中项).
+ * 只在向左真有落点时才改写 —— 窄窗口的单栏布局里左侧列表不在组合中, 返回键仍是页面返回.
  *
  * 默认关闭: slider 也出现在播放器面板等场景, 那里返回键有各自的语义, 只有设置页打开.
  */
@@ -61,6 +62,9 @@ fun SettingsScope.SliderItem(
     val focusDriven = LocalAniUiBehavior.current.focusDrivenNavigation
     val backKeyExitsLeft = LocalSliderBackKeyExitsLeft.current
     val focusManager = LocalFocusManager.current
+    // 返回键那一下的处理结论: KeyDown 时算出来, KeyUp 沿用同一结论, 不能一半消费一半放行.
+    // 用普通数组而不是 State: 这里每按一次返回键都会写, 变成可观察状态就是白白多一次重组.
+    val backConsumed = remember { booleanArrayOf(false) }
     val effectiveModifier = if (focusDriven) {
         modifier.onPreviewKeyEvent { keyEvent ->
             when (keyEvent.key) {
@@ -73,12 +77,18 @@ fun SettingsScope.SliderItem(
                     } else false
                 }
 
-                // 返回键不退出页面, 把焦点向左送出 slider; KeyDown/KeyUp 都消费, 否则
-                // 焦点移走后残余的 KeyUp 会漏给系统触发整页返回
+                // 返回键不退出页面, 把焦点向左送出 slider —— 但只有真的移出去了才消费.
+                // 窄窗口下设置页是单栏 (左侧导航列表根本不在组合里), 向左没有候选, moveFocus 返回
+                // false; 此时若照样消费, 事件就到不了根部那个把 Back 转成页面返回的处理器
+                // (AniApp 的 onKeyEvent 在冒泡阶段, 而这里是预览阶段), 返回键彻底失灵.
+                // 移成功时两个事件一起消费: 焦点已经走了, 之后的 KeyUp 也不会再经过这条链, 而根部
+                // 对没配对 KeyDown 的孤儿 KeyUp 本来就忽略.
                 Key.Back, Key.Escape -> {
                     if (!backKeyExitsLeft) return@onPreviewKeyEvent false
-                    if (keyEvent.type == KeyEventType.KeyUp) focusManager.moveFocus(FocusDirection.Left)
-                    true
+                    if (keyEvent.type == KeyEventType.KeyDown) {
+                        backConsumed[0] = focusManager.moveFocus(FocusDirection.Left)
+                    }
+                    backConsumed[0]
                 }
 
                 else -> false
