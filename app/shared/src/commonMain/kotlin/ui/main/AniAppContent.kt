@@ -38,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -57,6 +58,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.withTimeoutOrNull
 import androidx.navigation.toRoute
 import androidx.window.core.layout.WindowSizeClass
 import me.him188.ani.app.data.models.subject.SubjectInfo
@@ -141,7 +143,7 @@ import me.him188.ani.app.ui.watchtogether.WatchTogetherPlayerController
 import me.him188.ani.app.ui.watchtogether.WatchTogetherViewModel
 import me.him188.ani.datasources.api.source.FactoryId
 import kotlin.reflect.typeOf
-import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * UI 入口点. 包含所有子页面, 以及组合这些子页面的方式 (navigation).
@@ -250,12 +252,23 @@ fun AniAppContent(aniNavigator: AniNavigator) {
 }
 
 /**
- * 全局焦点兜底在开抢之前给页面留的余地: 覆盖"页面刚组合、自己的焦点锚点还没发出请求"的那几帧.
+ * 全局焦点兜底在开抢之前给页面留的余地, 按**帧**计.
  *
- * 取值只需盖住组合与锚点解析起手的时序 (详情页是 `scrollTo(0)` + 一帧 + 解析器首次尝试),
- * 不必也不该盖住整个转场 —— 页面真的没有可聚焦内容时, 这就是方向键失灵到恢复的延迟.
+ * 覆盖的是"页面刚组合、自己的焦点锚点还没发出请求"的那几帧 (详情页是 `scrollTo(0)` + 一帧 +
+ * 解析器首次尝试). 页面锚点是按帧推进的 ([resolveFocusRepeatedly] 每轮等一帧再加 30ms),
+ * 所以让位也按帧计 —— 设备一卡帧就变长, 让位跟着变长, 两者始终同步.
+ *
+ * 原来这里是固定 250ms 墙钟: 流畅时够用, 一卡就抢在锚点前面, 表现为进详情页侧边栏闪一下
+ * (兜底的 requestFocus 落在 focusGroup 上会按 Enter 方向进入页面**最左**的可聚焦子树) 再被
+ * 页面锚点拉回观看按钮. 墙钟不随设备快慢伸缩, 这类"猜一个时长"的兜底必然在慢设备上漏.
  */
-private val FOCUS_FALLBACK_GRACE = 250.milliseconds
+private const val FOCUS_FALLBACK_GRACE_FRAMES = 15
+
+/**
+ * 让位的墙钟上限: 页面完全静止 (没有可聚焦内容, 也就没有动画) 时不产帧,
+ * [FOCUS_FALLBACK_GRACE_FRAMES] 会一直等不到 —— 而那恰恰是最需要兜底的场景.
+ */
+private val FOCUS_FALLBACK_GRACE_CEILING = 1.seconds
 
 @Composable
 private fun AniAppContentImpl(
@@ -292,13 +305,17 @@ private fun AniAppContentImpl(
             snapshotFlow { hasFocusInside to windowInfo.isWindowFocused }
                 .collectLatest { (focused, windowFocused) ->
                     if (focused || !windowFocused) return@collectLatest
-                    // 先让位一小会儿: 页面自己的焦点锚点要跨几帧才发得出请求 (详情页还要先把
-                    // 滚动归零再等一帧). 在这个空窗期抢焦点, requestFocus 会按 Enter 方向进入
-                    // 页面**最左**的可聚焦子树 —— 有侧边栏的页面上那就是侧边栏, 于是进详情页
-                    // 时侧边栏被展开一瞬 (按钮文字闪一下) 再被页面锚点拉走. 真正需要兜底的
-                    // 场景 (页面就是没有可聚焦内容) 晚这么一下毫无影响, 而焦点一旦落定,
-                    // collectLatest 立刻取消本次等待, 这段延迟根本不会走完.
-                    delay(FOCUS_FALLBACK_GRACE)
+                    // 先让位: 页面自己的焦点锚点要跨几帧才发得出请求 (详情页还要先把滚动归零
+                    // 再等一帧). 在这个空窗期抢焦点, requestFocus 会按 Enter 方向进入页面
+                    // **最左**的可聚焦子树 —— 有侧边栏的页面上那就是侧边栏, 于是进详情页时
+                    // 侧边栏被展开一瞬 (按钮文字闪一下) 再被页面锚点拉走.
+                    //
+                    // 按帧让位而不是按墙钟, 理由见 [FOCUS_FALLBACK_GRACE_FRAMES]; 上限兜住
+                    // "静止页面不产帧"那条路, 见 [FOCUS_FALLBACK_GRACE_CEILING].
+                    // 焦点一旦落定 collectLatest 立刻取消本次等待, 这段让位根本不会走完.
+                    withTimeoutOrNull(FOCUS_FALLBACK_GRACE_CEILING) {
+                        repeat(FOCUS_FALLBACK_GRACE_FRAMES) { withFrameNanos { } }
+                    }
                     // 持续重试 (状态一变 collectLatest 即取消): 转场动画期间请求可能落在
                     // 将被移除的旧页面上, 旧页面销毁后焦点再次丢失会自动再触发
                     while (true) {
