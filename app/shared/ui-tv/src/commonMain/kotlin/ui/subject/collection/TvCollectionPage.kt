@@ -286,9 +286,15 @@ fun TvCollectionPage(
                         TvCollectionNextEpisodeMedia(nextEpisodeId, media?.stillUrl, media?.overview)
                 }
             }
-            // 整部 backdrop: 单集剧照缺失时的兜底 (以及未在看条目的主图), 拿到剧照就不再拉
-            val hasStill = nextEpisodeId != null && episodeStillCache[info.subjectId]?.stillUrl != null
-            if (!hasStill && info.subjectId !in backdropCache) {
+            // 整部 backdrop: 单集剧照缺失时的兜底 (以及未在看条目的主图).
+            //
+            // **有剧照也照拉** (与探索页同一判断): 详情页 Hero 用的一律是整部 backdrop,
+            // 剧照只在本页当 hero 背景. 原先"拿到剧照就不再拉"省下的那次请求, 代价是本页
+            // 观看中的条目 (恰恰是最常按进去的那批) 进详情页时 peekBackdropUrl 必然落空,
+            // 首帧空白等解析 —— 同一部从探索页进有图、从这里进没图.
+            // 正缓存永久有效, 每个条目全生命周期只真的请求一次.
+            // 放在剧照之后: 本页 hero 要用的图先到, 这条不抢它的身位.
+            if (info.subjectId !in backdropCache) {
                 runCatching {
                     // 官方主背景图 (与详情页 hero 同源, 进详情零跳变); 屏保轮播才用全量列表.
                     // 传最新已播集日期: 新番刚播时 TMDB 往往还没有 backdrop, 负缓存据此限期失效

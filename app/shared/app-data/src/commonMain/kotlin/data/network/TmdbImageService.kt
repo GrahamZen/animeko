@@ -125,6 +125,8 @@ class TmdbImageService(
      * 存在的意义是**同步可读** (见 [peekBackdropUrl]): [getBackdropUrl] 即使全部命中持久缓存,
      * 也要走一次 `withContext(ioDispatcher)` + DataStore 读盘, 耗时随磁盘/GC 抖动 ——
      * 详情页首帧等不到它, 只能先按"加载中"渲染, 之后再把图淡进来.
+     * 它同时是 [getBackdropUrl] 自己的第一道查表 (只短路正缓存, 原因见那里), 页面级薄映射
+     * 被清空后重新问过来的条目不必再读一次盘.
      *
      * 写入是 copy-on-write 的整表替换 (读方永远看到一个完整的不可变 map); 并发写最坏是丢一条,
      * 表现为该条目这次没命中热缓存, 无副作用.
@@ -158,6 +160,23 @@ class TmdbImageService(
         subjectId: Int,
         originalName: String,
         activeAsOfDate: String? = null,
+    ): String? {
+        // 本进程已解析出 URL 的直接给结果, 连 withContext 与读盘都省掉 (正缓存永久有效, 读盘只会
+        // 拿到同一个 URL). 页面级的薄映射 (如 TvHeroMediaCache.backdrops) 超量时是整表清空的,
+        // 清空后成批条目会重新走到这里 —— 少了这道短路, 早就解析过的卡要等一次 DataStore 读盘
+        // 才拿回图, hero 背景当场空一下再淡回来.
+        //
+        // 负缓存 ("") 故意不在这里短路: 它该不该重取取决于 activeAsOfDate 与重取闸门, 而这张表
+        // 只记结果不记时间, 短路会把"传了更近播出日期本该重取一次"的条目钉死到进程结束.
+        resolvedBackdropUrls[subjectId]?.takeIf { it.isNotEmpty() }?.let { return it }
+        return resolveBackdropUrl(subjectId, originalName, activeAsOfDate)
+    }
+
+    /** 读盘 / 走网络的慢路径, 仅由 [getBackdropUrl] 在进程内热缓存未命中时调用. */
+    private suspend fun resolveBackdropUrl(
+        subjectId: Int,
+        originalName: String,
+        activeAsOfDate: String?,
     ): String? = withContext(ioDispatcher) {
         if (currentAniBuildConfig.tmdbApiToken.isBlank() || originalName.isBlank()) return@withContext null
 

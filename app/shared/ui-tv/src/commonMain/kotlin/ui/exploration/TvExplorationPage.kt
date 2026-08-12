@@ -347,7 +347,11 @@ fun TvExplorationPage(
         (if (target.fromFollowed) {
             episodeStillCache[target.subjectId]?.stillUrl?.let { tmdbStillHeroSizeUrl(it, fullVisualEffects) }
         } else null)
+            // backdropCache 缺项不等于"没解析过": 它超量会整表清空 (见 TvHeroMediaCache 的容量
+            // 说明), 于是浏览过 300+ 条目后按回一张早解析过的卡, 背景会当场空白再重新淡入.
+            // 服务层那张进程内热表没有上限, 同步问它一次即可 ("" = 已确认无图, 走无图兜底排版).
             ?: backdropCache[target.subjectId]
+            ?: tmdb.peekBackdropUrl(target.subjectId)?.takeIf { it.isNotEmpty() }
     }
 
     val onFocusItem: (subjectId: Int, title: String, seed: SubjectCollectionInfo?, fromFollowed: Boolean) -> Unit =
@@ -406,8 +410,13 @@ fun TvExplorationPage(
                 lockNavigationForTransition()
                 scope.launch {
                     withTimeoutOrNull(TV_NAV_READY_BUDGET) {
-                        snapshotFlow { infoCache[subjectId] != null && subjectId in backdropCache }
-                            .first { it }
+                        // peekBackdropUrl 同上面 backdropUrl 的兜底: backdropCache 整表清空后这条
+                        // 门控会把"其实早解析好了"的条目按未就绪对待, 白等满 TV_NAV_READY_BUDGET.
+                        // 它不是 snapshot 状态, 只在这里当"已就绪"的快速通道, 落空时行为同以前.
+                        snapshotFlow {
+                            infoCache[subjectId] != null &&
+                                (subjectId in backdropCache || tmdb.peekBackdropUrl(subjectId) != null)
+                        }.first { it }
                     }
                     navigator.navigateSubjectDetails(
                         subjectId = subjectId,
