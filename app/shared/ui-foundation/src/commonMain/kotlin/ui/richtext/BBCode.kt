@@ -200,6 +200,12 @@ private fun RichElement.Text.toUIAnnotated(overrideTextSize: Float?): List<UIRic
         url = jumpUrl,
     )
 
+    // 剧透遮罩里不切表情: [UIRichElement.Annotated.Sticker] 没有 mask 字段, 切出来的那枚图会
+    // 直接露在遮罩外面; 更糟的是 [RichTextDefaults.AnnotatedMaskState] 按"上一片是不是带 mask
+    // 的 Text"分块, 中间插一枚 Sticker 就把一段 [mask] 裂成前后两个互不相干的遮罩块, 要点两下
+    // 才揭得开. 遮罩里本来也不该出图, 整段留作一片文本 (与改动前一致)
+    if (mask) return listOf(text(value))
+
     val tokens = BangumiStickers.findTokens(value)
     if (tokens.isEmpty()) return listOf(text(value))
 
