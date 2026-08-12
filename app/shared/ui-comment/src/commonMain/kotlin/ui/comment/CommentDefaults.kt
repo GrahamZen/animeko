@@ -53,6 +53,7 @@ import me.him188.ani.app.ui.lang.comment_reply
 import me.him188.ani.app.ui.lang.comment_view_more_replies
 import me.him188.ani.app.ui.richtext.RichText
 import me.him188.ani.app.ui.richtext.RichTextDefaults
+import me.him188.ani.app.ui.richtext.StickerImage
 import me.him188.ani.app.ui.richtext.UIRichElement
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
@@ -94,18 +95,33 @@ object CommentDefaults {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 val previewing = LocalIsPreviewing.current
-                val reactionDrawableRes = reaction.value.bangumiReactionIdOrNull()
-                    ?.let { BangumiCommentSticker[it] }
+                // 预览环境不出图, 按"没有表情"处理
+                val sticker = if (previewing) null else reaction.value.bangumiReactionSticker()
 
-                if (previewing || reactionDrawableRes == null) Icon(
-                    imageVector = Icons.Rounded.Face,
-                    modifier = Modifier.padding(end = 4.dp).size(24.dp),
-                    contentDescription = null,
-                ) else Image(
-                    painter = painterResource(reactionDrawableRes),
-                    modifier = Modifier.padding(end = 4.dp).size(24.dp),
-                    contentDescription = null,
-                )
+                when {
+                    // 回应值根本不是 `bgmN`, 连表情代码都换算不出来, 没有原文本可退化, 只能给个占位图标
+                    sticker == null -> Icon(
+                        imageVector = Icons.Rounded.Face,
+                        modifier = Modifier.padding(end = 4.dp).size(24.dp),
+                        contentDescription = null,
+                    )
+                    // 代码不认识 (Bangumi 上新表情而 BangumiStickers 没跟上) 时显示代码原文,
+                    // 与正文里的退化一致; 换成 Face 图标的话用户连这条回应本来贴的是哪枚表情都看不出来
+                    !sticker.hasImage -> Text(
+                        text = sticker.token,
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.padding(end = 4.dp),
+                    )
+
+                    else -> StickerImage(
+                        sticker = UIRichElement.Annotated.Sticker(
+                            id = sticker.token,
+                            resource = sticker.resource,
+                            imageUrl = sticker.imageUrl,
+                        ),
+                        modifier = Modifier.padding(end = 4.dp).size(24.dp),
+                    )
+                }
 
                 Text(
                     text = reaction.count.toString(),
@@ -311,8 +327,16 @@ object CommentDefaults {
         UIRichText(it)
     }
 
-    private fun String.bangumiReactionIdOrNull(): Int? {
-        if (!startsWith("bgm")) return null
-        return removePrefix("bgm").toIntOrNull()
-    }
+    /**
+     * 回应值 -> 表情的取图方式; 只有拿不到表情代码 (值不是 `bgmN`) 才是 null.
+     *
+     * `bgm` 后面那个数字是**回应编号**而不是表情代码, 两者差 16 —— 以前直接当代码用, 所以一直
+     * 显示的是错的那一枚表情 (`bgm54` 的回应画成了 `(bgm54)`, 实际该是 `(bgm38)`).
+     * 见 [BangumiStickers.reactionStickerToken].
+     *
+     * 拿到代码之后一律走 [BangumiStickers.stickerOf], 不要在这里自己拆 id 找随包图: 那份逻辑与正文里
+     * 的一分为二, 同一枚不认识的表情就会在正文里退化成可读的代码、在这里变成一个不相干的图标.
+     */
+    private fun String.bangumiReactionSticker(): BangumiStickers.Sticker? =
+        BangumiStickers.reactionStickerTokenOf(this)?.let { BangumiStickers.stickerOf(it) }
 }
