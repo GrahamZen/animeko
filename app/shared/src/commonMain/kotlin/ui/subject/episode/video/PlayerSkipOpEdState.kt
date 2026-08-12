@@ -119,6 +119,11 @@ class PlayerSkipOpEdState(
     fun skipOpEd() {
         val chapter = insideChapter?.chapter ?: return
         onSkip(chapter.offsetMillis + chapter.durationMillis)
+        // 按下就当场熄灭, 不等下一次 update() 重算:
+        // 一是 seek 之后人已经不在这一段里了, 留着按钮会多亮最多一秒 (位置每秒才采样一次);
+        // 二是 update() 未必还会再来 —— 驱动方在"关闭"档下是直接不调它的 (见 EpisodeViewModel 的
+        // collectLatest), 手动档下亮着的这颗按钮会就此冻在画面上, 那时按它是唯一的熄灭手段.
+        insideChapter = null
     }
 
 
