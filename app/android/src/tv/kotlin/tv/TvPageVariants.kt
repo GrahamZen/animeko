@@ -9,8 +9,15 @@
 
 package me.him188.ani.android.tv
 
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Modifier
+import coil3.compose.AsyncImagePainter
+import com.kmpalette.palette.graphics.Palette
+import me.him188.ani.app.data.models.subject.SubjectInfo
+import me.him188.ani.app.data.models.subject.Tag
+import me.him188.ani.app.domain.episode.SetEpisodeCollectionTypeRequest
 import me.him188.ani.app.ui.exploration.ExplorationPageVariant
 import me.him188.ani.app.ui.exploration.LocalExplorationPageVariant
 import me.him188.ani.app.ui.exploration.TvExplorationPage
@@ -28,10 +35,14 @@ import me.him188.ani.app.ui.subject.collection.LocalCollectionPageVariant
 import me.him188.ani.app.ui.subject.collection.TvCollectionPage
 import me.him188.ani.app.ui.subject.details.LocalSubjectDetailsPageVariant
 import me.him188.ani.app.ui.subject.details.SubjectDetailsPageVariant
+import me.him188.ani.app.ui.subject.details.layout.SubjectDetailsLayoutParams
+import me.him188.ani.app.ui.subject.details.layout.SubjectDetailsTvLoadingPlaceholder
 import me.him188.ani.app.ui.subject.details.layout.SubjectDetailsTvPage
+import me.him188.ani.app.ui.subject.details.state.SubjectDetailsState
 import me.him188.ani.app.ui.subject.episode.EpisodeScreenVariant
 import me.him188.ani.app.ui.subject.episode.LocalEpisodeScreenVariant
 import me.him188.ani.app.ui.subject.episode.tv.TvEpisodeScreenContent
+import me.him188.ani.app.ui.user.SelfInfoUiState
 
 /**
  * TV 页面变体装配: 把遥控器形态的页面实现注入各共享页面的变体插槽.
@@ -78,32 +89,65 @@ fun InstallTvPageVariants(content: @Composable () -> Unit) {
         LocalCollectionPageVariant provides CollectionPageVariant { state, modifier ->
             TvCollectionPage(state, modifier)
         },
-        LocalSubjectDetailsPageVariant provides SubjectDetailsPageVariant {
-                state, selfInfo, layoutParams, onPlay, onClickTag, onClickLogin, onShowComments,
-                modifier, onEpisodeCollectionUpdate, showTopBar, windowInsets, backgroundPalette,
-                onClickOpenExternal, onCoverImageSuccess, onClickCache,
-                videoBackground, onVideoBackgroundExitUp,
-            ->
-            SubjectDetailsTvPage(
-                state = state,
-                selfInfo = selfInfo,
-                layoutParams = layoutParams,
-                onPlay = onPlay,
-                onClickTag = onClickTag,
-                onClickLogin = onClickLogin,
-                onShowComments = onShowComments,
-                modifier = modifier,
-                onEpisodeCollectionUpdate = onEpisodeCollectionUpdate,
-                showTopBar = showTopBar,
-                windowInsets = windowInsets,
-                backgroundPalette = backgroundPalette,
-                onClickOpenExternal = onClickOpenExternal,
-                onCoverImageSuccess = onCoverImageSuccess,
-                onClickCache = onClickCache,
-                videoBackground = videoBackground,
-                onVideoBackgroundExitUp = onVideoBackgroundExitUp,
-            )
-        },
+        // 这个变体有两个方法 (页面 + 首屏占位), 不能用 SAM lambda 写法
+        LocalSubjectDetailsPageVariant provides TvSubjectDetailsPageVariant,
         content = content,
     )
+}
+
+/**
+ * 条目详情页的 TV 变体. 与其他插槽不同, 它有两个方法 (页面本体 + 首屏占位),
+ * 不能用 SAM lambda 写法.
+ */
+private object TvSubjectDetailsPageVariant : SubjectDetailsPageVariant {
+    @Composable
+    override fun Page(
+        state: SubjectDetailsState,
+        selfInfo: SelfInfoUiState,
+        layoutParams: SubjectDetailsLayoutParams,
+        onPlay: (episodeId: Int) -> Unit,
+        onClickTag: (Tag) -> Unit,
+        onClickLogin: () -> Unit,
+        onShowComments: () -> Unit,
+        modifier: Modifier,
+        onEpisodeCollectionUpdate: (SetEpisodeCollectionTypeRequest) -> Unit,
+        showTopBar: Boolean,
+        windowInsets: WindowInsets,
+        backgroundPalette: Palette?,
+        onClickOpenExternal: () -> Unit,
+        onCoverImageSuccess: (AsyncImagePainter.State.Success) -> Unit,
+        onClickCache: (() -> Unit)?,
+        videoBackground: Boolean,
+        onVideoBackgroundExitUp: (() -> Unit)?,
+    ) {
+        SubjectDetailsTvPage(
+            state = state,
+            selfInfo = selfInfo,
+            layoutParams = layoutParams,
+            onPlay = onPlay,
+            onClickTag = onClickTag,
+            onClickLogin = onClickLogin,
+            onShowComments = onShowComments,
+            modifier = modifier,
+            onEpisodeCollectionUpdate = onEpisodeCollectionUpdate,
+            showTopBar = showTopBar,
+            windowInsets = windowInsets,
+            backgroundPalette = backgroundPalette,
+            onClickOpenExternal = onClickOpenExternal,
+            onCoverImageSuccess = onCoverImageSuccess,
+            onClickCache = onClickCache,
+            videoBackground = videoBackground,
+            onVideoBackgroundExitUp = onVideoBackgroundExitUp,
+        )
+    }
+
+    @Composable
+    override fun LoadingPlaceholder(
+        subjectInfo: SubjectInfo?,
+        layoutParams: SubjectDetailsLayoutParams,
+        modifier: Modifier,
+        windowInsets: WindowInsets,
+    ) {
+        SubjectDetailsTvLoadingPlaceholder(subjectInfo, layoutParams, modifier, windowInsets)
+    }
 }

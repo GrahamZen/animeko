@@ -9,13 +9,18 @@
 
 package me.him188.ani.app.ui.subject.details
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import coil3.compose.AsyncImagePainter
 import com.kmpalette.palette.graphics.Palette
 import me.him188.ani.app.domain.episode.SetEpisodeCollectionTypeRequest
+import me.him188.ani.app.data.models.subject.SubjectInfo
 import me.him188.ani.app.data.models.subject.Tag
 import me.him188.ani.app.ui.user.SelfInfoUiState
 import me.him188.ani.app.ui.subject.details.layout.SubjectDetailsLayoutParams
@@ -56,6 +61,29 @@ fun interface SubjectDetailsPageVariant {
         /** 内嵌变体介绍页顶部按上键的回调 (回到播放器选集条); null 不处理. */
         onVideoBackgroundExitUp: (() -> Unit)?,
     )
+
+    /**
+     * [SubjectDetailsState] 还没构造出来时的首屏占位 (加载器先发 `Placeholder` 状态,
+     * 首次发射到达才有 state).
+     *
+     * 这一段过去是**居中转圈的空白页**, 于是点一张卡要看三段先后到达的画面: 转圈 ->
+     * 整页换成真布局 -> 背景图再淡进来. 变体自绘的意义是让这一帧**已经长得像目标页**:
+     * 手上有的东西 (导航带来的标题 + 进程内已解析的背景图) 先按目标页的版式画出来,
+     * 真布局到达时这些部分原地不动, 只有其余内容补上去.
+     *
+     * @param subjectInfo 导航占位信息 (标题/封面), 可能为 null (刚进页、还没有任何数据).
+     */
+    @Composable
+    fun LoadingPlaceholder(
+        subjectInfo: SubjectInfo?,
+        layoutParams: SubjectDetailsLayoutParams,
+        modifier: Modifier,
+        windowInsets: WindowInsets,
+    ) {
+        Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+    }
 }
 
 val LocalSubjectDetailsPageVariant = staticCompositionLocalOf<SubjectDetailsPageVariant?> { null }

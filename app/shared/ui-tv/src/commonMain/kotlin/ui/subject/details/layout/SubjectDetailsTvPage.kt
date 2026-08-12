@@ -133,6 +133,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+import kotlin.time.Duration.Companion.milliseconds
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItemsWithLifecycle
 import coil3.compose.AsyncImagePainter
@@ -201,11 +202,103 @@ import me.him188.ani.datasources.api.topic.UnifiedCollectionType
 import org.jetbrains.compose.resources.stringResource
 
 /**
+ * [SubjectDetailsTvPage] 的首屏占位: 详情数据还在路上时, 先用**手上已有的东西**按目标页的
+ * 版式画出 Hero —— 背景图取自进程内热缓存 ([TmdbImageService.peekBackdropUrl], 上一个页面
+ * 聚焦这张卡时就查过), 标题取自导航占位.
+ *
+ * 目的是消掉"点一张卡看三段画面"里的第一段. 原先这里是居中转圈的空白页, 于是依次看到:
+ * 转圈 -> 整页换成真布局 -> 背景图再淡进来. 现在落地即有大图和标题, 且**位置与真布局完全一致**
+ * (共用 [MultiColumnScaffold] + 同一套留白/字号/阴影), 真布局到达时 Hero 区域原地不动,
+ * 只有信息带与下方区块补上来.
+ *
+ * 背景图的三态判定与 [SubjectDetailsTvPage] 逐字对应 (有图 / 确认无图回退竖版封面 / 未解析
+ * 则不放图), 否则两边会在切换的一瞬互相跳变.
+ *
+ * 冷启 (热缓存里没有) 时只有标题, 没有转圈 —— 短等待放个转圈反而更显慢; 真的久等
+ * ([SLOW_LOAD_SPINNER_DELAY] 之后) 才把转圈补出来, 免得慢网络下看着像卡死.
+ */
+@Composable
+fun SubjectDetailsTvLoadingPlaceholder(
+    subjectInfo: SubjectInfo?,
+    layoutParams: SubjectDetailsLayoutParams,
+    modifier: Modifier = Modifier,
+    windowInsets: WindowInsets = TopAppBarDefaults.windowInsets,
+) {
+    val tmdbImageService = remember { GlobalKoin.get<TmdbImageService>() }
+    // "" = 已确认无图, null = 本进程还没解析过 —— 与详情页的 backdropResolved 同义
+    val warmBackdrop = remember(subjectInfo?.subjectId) {
+        subjectInfo?.subjectId?.let { tmdbImageService.peekBackdropUrl(it) }
+    }
+    val heroBackdropUrl = warmBackdrop?.takeIf { it.isNotEmpty() }
+        ?: subjectInfo?.imageLarge?.takeIf { warmBackdrop != null && it.isNotBlank() }
+
+    var slowLoad by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(SLOW_LOAD_SPINNER_DELAY)
+        slowLoad = true
+    }
+
+    val pad = layoutParams.contentHorizontalPadding
+    val scrollState = rememberScrollState()
+    Box(modifier) {
+        MultiColumnScaffold(
+            layoutParams.copy(
+                contentHorizontalPadding = 0.dp,
+                contentTopPadding = (pad - TV_HERO_TITLE_TOP_TRIM).coerceAtLeast(0.dp),
+            ),
+            Modifier,
+            showTopBar = false,
+            windowInsets,
+            scrollState = scrollState,
+            backgroundOverlay = {
+                heroBackdropUrl?.let { TvHeroBackdrop(it, scrollState, onSuccess = {}) }
+            },
+        ) {
+            Column(Modifier.weight(1f).fillMaxWidth().padding(start = pad)) {
+                // 与 TvHeroBlock 的标题列逐项对齐 (top 8dp / headlineLarge / 白字 + 柔和黑影 /
+                // 两行截断), 真布局到达时标题不位移
+                val titleShadow = with(LocalDensity.current) {
+                    Shadow(
+                        color = Color.Black.copy(alpha = 0.6f),
+                        offset = Offset(0f, 1.dp.toPx()),
+                        blurRadius = 6.dp.toPx(),
+                    )
+                }
+                Column(
+                    Modifier.padding(top = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        subjectInfo?.displayName.orEmpty(),
+                        style = MaterialTheme.typography.headlineLarge.copy(shadow = titleShadow),
+                        color = Color.White,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (slowLoad) {
+                        CircularProgressIndicator(
+                            Modifier.padding(top = 16.dp).size(28.dp),
+                            color = Color.White,
+                            strokeWidth = 3.dp,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 首屏占位里补出加载转圈的等待阈值: 短等待放转圈反而更显慢. */
+private val SLOW_LOAD_SPINNER_DELAY = 800.milliseconds
+
+/**
  * TV (10-foot UI) 条目详情页: 单列信息流, 参考主流 TV 流媒体应用的结构 —
  * Hero 首屏 (背景封面 + 标题/元数据/简介/主操作) + 各内容区块顺序下排.
  *
  * 与 [SubjectDetailsMultiColumnPage] 内容一致, 仅重排:
  * 原侧栏的作品信息表 / 收藏统计 / 标签下沉到"关联作品"之后的"作品信息"块.
+ *
+ * 首屏数据未到时的占位见 [SubjectDetailsTvLoadingPlaceholder].
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable

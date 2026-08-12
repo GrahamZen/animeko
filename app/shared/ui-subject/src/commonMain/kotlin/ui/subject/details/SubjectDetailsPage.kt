@@ -596,12 +596,11 @@ private fun PlaceholderSubjectDetailsPage(
     navigationIcon: @Composable () -> Unit = {},
     onClickOpenExternal: () -> Unit = {},
 ) {
-    if (LocalSubjectDetailsPageVariant.current != null && LocalThemeSettings.current.tvImmersiveDetails) {
-        // 沉浸式变体: 与变体的 info 加载占位一致 (居中转圈), 避免先闪
-        // 多栏骨架再整页切换到变体布局. 关闭沉浸式时走下方通用多栏骨架.
-        Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator()
-        }
+    val variant = LocalSubjectDetailsPageVariant.current
+    if (variant != null && LocalThemeSettings.current.tvImmersiveDetails) {
+        // 沉浸式变体自绘首屏占位, 避免先闪多栏骨架再整页切换到变体布局.
+        // 关闭沉浸式时走下方通用多栏骨架.
+        variant.LoadingPlaceholder(subjectInfo, layoutParams, modifier, windowInsets)
         return
     }
 
