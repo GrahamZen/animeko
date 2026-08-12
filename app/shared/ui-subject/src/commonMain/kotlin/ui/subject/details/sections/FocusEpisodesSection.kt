@@ -225,10 +225,16 @@ fun FocusEpisodeCarousel(
     // 实时聚焦的卡片 (失焦即清空), 区别于 focusedEpisodeId (记录"最后聚焦", 不清空):
     // 焦点断言必须用实时值 —— 用最后聚焦值会在"目标恰好是上次聚焦的卡"时误判已完成
     var activeFocusEpisodeId by remember { mutableStateOf<Int?>(null) }
-    // 实时聚焦卡的下标 (与 activeFocusEpisodeId 同步簿记, 焦点离行清 -1): 供"聚焦卡左侧
-    // 压暗"的每卡判断用 —— 直接记下标, 不经 episodes 映射 (映射 lambda 会被 item 的
-    // remember 缓存住旧实例, 见 [FocusEpisodeAnchorRing] 的教训)
-    var activeFocusIndex by remember { mutableIntStateOf(-1) }
+    // 压暗的分界线下标: 它左边的卡片是"已经滑过去的", 见 [EPISODE_PAST_CARD_DIM_ALPHA].
+    //
+    // **焦点离开本行时刻意不清空**, 与 activeFocusEpisodeId 相反: 分界线表达的是行**停在哪儿**
+    // (哪张卡卡在停靠线左边露出切边), 而行不会因为焦点挪到「显示更多」就滚回去. 清成 -1 的话
+    // 整行会在焦点离行的一瞬全部变亮、焦点回来又暗下去, 而压暗的两条理由 (左边是已过去的内容、
+    // 盖住卡片穿过聚焦框轮廓的圆角错位) 在焦点不在行上时一条都没失效.
+    //
+    // 直接记下标而不经 episodes 映射: 映射 lambda 会被 item 的 remember 缓存住旧实例,
+    // 见 [FocusEpisodeAnchorRing] 的教训.
+    var dimPivotIndex by remember { mutableIntStateOf(-1) }
     // 聚焦卡是否正被按住 (长按确认键): 固定聚焦框读它跟着缩放
     var pressingCard by remember { mutableStateOf(false) }
 
@@ -546,7 +552,7 @@ fun FocusEpisodeCarousel(
                         // 即自然变暗, 穿过聚焦框轮廓的圆角错位也被压得看不出.
                         // 状态读在 graphicsLayer 的 lambda 里, 渐变过程只失效图层不重组
                         val dimmedPast by remember(index) {
-                            derivedStateOf { activeFocusIndex > index }
+                            derivedStateOf { dimPivotIndex > index }
                         }
                         val dimAlpha = animateFloatAsState(
                             if (dimmedPast) EPISODE_PAST_CARD_DIM_ALPHA else 1f,
@@ -588,11 +594,11 @@ fun FocusEpisodeCarousel(
                                         if (it.isFocused) {
                                             focusedEpisodeId = item.episodeId
                                             activeFocusEpisodeId = item.episodeId
-                                            activeFocusIndex = index
+                                            dimPivotIndex = index
                                         } else if (activeFocusEpisodeId == item.episodeId) {
-                                            // 焦点离开整行时熄灭外圈; 行内移动会先聚焦新卡再走到这里, 不受影响
+                                            // 焦点离开整行时熄灭外圈; 行内移动会先聚焦新卡再走到这里, 不受影响.
+                                            // dimPivotIndex 刻意不动: 行没滚回去, 压暗的分界线就还在原处 (见其声明)
                                             activeFocusEpisodeId = null
-                                            activeFocusIndex = -1
                                         }
                                     },
                                 height = cellHeight,
