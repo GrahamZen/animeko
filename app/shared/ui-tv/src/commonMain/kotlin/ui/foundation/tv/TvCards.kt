@@ -187,8 +187,9 @@ fun TvPortraitCard(
                             ),
                     )
                 }
-                // 集数观看进度条: 与详情页选集卡 (FocusEpisodeProgressBar) 同款悬浮胶囊条 —
-                // 左右内缩避开圆角, 离底边一点空隙, 圆头, 白 30% 轨道 + 主题色填充
+                // 集数观看进度条: 与详情页选集卡 (FocusEpisodeProgressBar) 同款悬浮胶囊条 ——
+                // 圆头、白 30% 轨道 + 主题色填充, 条厚同值, 左右内缩按同一条"等于卡片圆角半径"
+                // 的规则算 (条长 = 底边直线段, 见 TV_CARD_PROGRESS_BAR_INSET); 离底空隙各调各的
                 if (progress != null && progress > 0f) {
                     Box(
                         Modifier
@@ -654,27 +655,52 @@ const val TV_PORTRAIT_CARD_COVER_RATIO = 0.72f
 /** 卡片圆角. */
 private val TV_PORTRAIT_CARD_CORNER = 8.dp
 
-/** 聚焦外圈描边宽度 (主题主色). */
-private val TV_CARD_FOCUS_RING_WIDTH = 2.5.dp
+/**
+ * 聚焦外圈描边宽度 (主题主色).
+ *
+ * 与详情页/播放器选集卡的 `FOCUS_RING_WIDTH` 同值 —— 都是从 Prime Video 4K 截图量的 1.75dp
+ * (7px). 一次会话里两种卡会连着看到, 描边粗细必须一档; 改一边就改另一边.
+ */
+private val TV_CARD_FOCUS_RING_WIDTH = 1.75.dp
 
 /**
  * 聚焦外圈与封面之间的空隙 (卡片内容常驻内缩此值, 聚焦时空隙处露出底色形成"色圈+留白").
+ *
+ * 描边从框盒边界**向内**画, 所以肉眼看到的空隙 = 本值 − [TV_CARD_FOCUS_RING_WIDTH] = 0.25dp,
+ * 与选集卡的 `FOCUS_RING_GAP` 同一套 (Prime 的描边几乎贴着卡片内容). 调它要连描边宽一起算,
+ * 否则空隙变负数 = 描边压到封面上.
  *
  * public 是因为**它同时是卡片外框与焦点目标之间的偏差**: 可聚焦节点是内缩后的封面, 而
  * [TvPortraitCardFocusRing] 画在外框上. 于是"把聚焦项滚到锚位"的 pivot 式
  * `BringIntoViewSpec` (拿到的是焦点目标矩形) 必须把锚加上本值, 否则框与卡片差这一点点
  * 对不齐 —— 真机肉眼可见 (2026-08-10 探索页踩到).
  */
-val TV_CARD_FOCUS_GAP = 3.dp
+val TV_CARD_FOCUS_GAP = 2.dp
 
-/** 继续观看卡片底部集数进度条 (样式对齐详情页 FocusEpisodeProgressBar): 条厚. */
-private val TV_CARD_PROGRESS_BAR_HEIGHT = 2.5.dp
+/** 继续观看卡片底部集数进度条 (样式对齐详情页 FocusEpisodeProgressBar): 条厚, 同选集卡 3dp. */
+private val TV_CARD_PROGRESS_BAR_HEIGHT = 3.dp
 
-/** 进度条左右内缩 (避开卡片圆角). */
-private val TV_CARD_PROGRESS_BAR_INSET = 10.dp
+/**
+ * 进度条左右内缩 = **卡片圆角半径**, 于是条长恰好等于底边的**直线段**长度 (两端落在圆角的
+ * 切点上, 封面 108dp − 2×8dp = 92dp).
+ *
+ * 这条规则同时解决了另外两件事, 别改回绝对值或百分比:
+ * - **不可能被圆角啃到**. 圆角在距底 d 处的横向内切量是 `r − sqrt(r² − (r−d)²)`, d=0 时取到
+ *   最大值恰为 r —— 内缩取 r 就等于把条卡在最坏情况的边界上, 于是条想贴多低都不会缺角,
+ *   [TV_CARD_PROGRESS_BAR_BOTTOM_GAP] 可以纯按观感调.
+ * - **在宽度差一倍的两种卡上都成立**. 选集卡 (240dp 宽、圆角 6dp) 现在的内缩正好也是 6dp,
+ *   两边同一条规则. 早先两边各写死绝对值 (10dp / 6dp), 竖版卡封面才 108dp, 条只占 81%,
+ *   比选集卡的 95% 明显短一截.
+ */
+private val TV_CARD_PROGRESS_BAR_INSET = TV_PORTRAIT_CARD_CORNER
 
-/** 进度条与卡片底边的空隙. */
-private val TV_CARD_PROGRESS_BAR_BOTTOM_GAP = 4.dp
+/**
+ * 进度条与卡片底边的空隙 —— 纯观感值, 没有几何下限 (见 [TV_CARD_PROGRESS_BAR_INSET]).
+ *
+ * 竖版卡上取 2dp: 5dp (选集卡那档) 用户实测"太高", Prime 的条也基本贴底 (0~1dp).
+ * 选集卡不跟改 —— 它那 5dp 是为了不与聚焦描边糊在一起调出来的, 两者卡高与描边观感不同.
+ */
+private val TV_CARD_PROGRESS_BAR_BOTTOM_GAP = 2.dp
 
 /** 进度条轨道 (未看部分) 的白色不透明度. */
 private const val TV_CARD_PROGRESS_TRACK_ALPHA = 0.3f
