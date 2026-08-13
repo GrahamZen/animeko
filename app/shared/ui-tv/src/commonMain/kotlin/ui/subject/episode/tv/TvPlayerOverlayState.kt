@@ -13,6 +13,8 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.setValue
 
 /**
@@ -118,12 +120,17 @@ enum class TvPlayerFocusTarget {
  * (布局层用 AnimatedVisibility 的 lambda / 子组件内读取), 避免按键一次整层重组.
  */
 @Stable
-class TvPlayerOverlayState {
-    var layer: TvPlayerLayer by mutableStateOf(TvPlayerLayer.HIDDEN)
+class TvPlayerOverlayState(
+    /** 见 [Saver]: 跨导航恢复用, 正常构造不要传. */
+    initialLayer: TvPlayerLayer = TvPlayerLayer.HIDDEN,
+    /** 见 [Saver]. */
+    initialPanel: TvPlayerPanel? = null,
+) {
+    var layer: TvPlayerLayer by mutableStateOf(initialLayer)
         private set
 
     /** 当前浮出的面板; null = 无面板. 由胶囊按钮聚焦时设置, 焦点移到进度条/图标行时清除. */
-    var activePanel: TvPlayerPanel? by mutableStateOf(null)
+    var activePanel: TvPlayerPanel? by mutableStateOf(initialPanel)
 
     var focusRegion: TvPlayerFocusRegion by mutableStateOf(TvPlayerFocusRegion.NONE)
 
@@ -185,9 +192,16 @@ class TvPlayerOverlayState {
      * 仍会继续 requestFocus 一秒多, 把焦点抢回去. 现在解析器用 collectLatest
      * 收本字段, 新请求一到旧解析立即取消, 不存在互抢窗口.
      *
-     * 初始即请求 ROOT (进入页面根节点收焦, 纯视频态直接收按键).
+     * 初始即请求 ROOT (进入页面根节点收焦, 纯视频态直接收按键); 跨导航恢复出控制层/面板时
+     * 初始落点改成对应位置 —— 控制层带着面板出现而焦点留在根节点上, 方向键会被根路由全吞掉.
      */
-    var pendingFocus: Pair<TvPlayerFocusTarget, Int> by mutableStateOf(TvPlayerFocusTarget.ROOT to 0)
+    var pendingFocus: Pair<TvPlayerFocusTarget, Int> by mutableStateOf(
+        when {
+            initialPanel != null -> TvPlayerFocusTarget.PANEL
+            initialLayer == TvPlayerLayer.CONTROLS -> TvPlayerFocusTarget.PROGRESS
+            else -> TvPlayerFocusTarget.ROOT
+        } to 0,
+    )
         private set
 
     private fun requestFocus(target: TvPlayerFocusTarget) {
@@ -346,5 +360,28 @@ class TvPlayerOverlayState {
     /** 把焦点送回进度条行 (面板内按返回等). */
     fun focusProgress() {
         requestFocus(TvPlayerFocusTarget.PROGRESS)
+    }
+
+    companion object {
+        /**
+         * 跨导航保留"覆盖层开着哪一层 / 浮出哪个面板".
+         *
+         * 从面板里点开的人物预览会继续导航到全屏的条目详情页, 那一下播放页被 NavHost 销毁;
+         * 用 `remember` 记状态机的话返回时整层复位成 HIDDEN —— 用户报的"按返回直接回了播放器
+         * (组件全隐藏) 而不是列表展开的状态"就是这一条.
+         *
+         * **只存这两个字段**: 其余全是瞬时态 (焦点区域 / 输入框展开 / 弹层计数 / 回复目标 /
+         * 拖拽与解析簿记), 跨页恢复它们只会让状态机与真实的焦点/窗口情况打架. 面板的滚动位置
+         * 与条目焦点也刻意不存 —— 面板每次浮出都复位到第一项是既定设计 (见 TvPlayerPanelHost).
+         */
+        val Saver: Saver<TvPlayerOverlayState, Any> = listSaver(
+            save = { listOf(it.layer.ordinal, it.activePanel?.ordinal ?: -1) },
+            restore = { saved ->
+                val layer = saved.getOrNull(0)?.let { TvPlayerLayer.entries.getOrNull(it) }
+                    ?: return@listSaver null
+                val panel = saved.getOrNull(1)?.let { TvPlayerPanel.entries.getOrNull(it) }
+                TvPlayerOverlayState(initialLayer = layer, initialPanel = panel)
+            },
+        )
     }
 }

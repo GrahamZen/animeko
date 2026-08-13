@@ -41,6 +41,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.withFrameNanos
@@ -81,6 +84,37 @@ sealed class PeoplePreviewTarget {
  */
 val LocalPeoplePreviewHandler = staticCompositionLocalOf<((PeoplePreviewTarget) -> Unit)?> { null }
 
+/**
+ * 跨导航保留预览目标 ([PeoplePreviewHost] 用).
+ *
+ * 预览里的作品/角色卡片会导航到全屏的条目详情页, 那一下宿主页面被 NavHost 销毁; 用 `remember`
+ * 记目标的话返回时预览不见了, 焦点也只能落回页面默认位置 —— 用户报过"点开弹窗按理说应该回到弹窗".
+ * 头部「打开完整页面」是另一回事: 它先 `onDismissImmediately()` 清掉目标再导航, 返回时不会重开.
+ *
+ * 存的是 (类型, id) 两个 Int: commonMain 里 `rememberSaveable` 只保证基元类型可存.
+ */
+private val PeoplePreviewTargetSaver: Saver<PeoplePreviewTarget?, Any> = listSaver(
+    save = { target ->
+        when (target) {
+            null -> emptyList()
+            is PeoplePreviewTarget.Person -> listOf(PREVIEW_KIND_PERSON, target.personId)
+            is PeoplePreviewTarget.Character -> listOf(PREVIEW_KIND_CHARACTER, target.characterId)
+        }
+    },
+    restore = { saved ->
+        val kind = saved.getOrNull(0)
+        val id = saved.getOrNull(1)
+        when {
+            kind == null || id == null -> null // 无保存值: 交回初值 null (预览本来就没开)
+            kind == PREVIEW_KIND_PERSON -> PeoplePreviewTarget.Person(id)
+            else -> PeoplePreviewTarget.Character(id)
+        }
+    },
+)
+
+private const val PREVIEW_KIND_PERSON = 0
+private const val PREVIEW_KIND_CHARACTER = 1
+
 /** 统一的人物/角色点击行为: 有预览环境则开侧边预览, 否则导航到全页. */
 @Composable
 fun rememberPeopleClickHandler(): (PeoplePreviewTarget) -> Unit {
@@ -110,7 +144,10 @@ fun PeoplePreviewHost(
     onPreviewOpenChanged: ((Boolean) -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
-    var target by remember { mutableStateOf<PeoplePreviewTarget?>(null) }
+    // 跨导航保留: 见 [PeoplePreviewTargetSaver]
+    var target by rememberSaveable(stateSaver = PeoplePreviewTargetSaver) {
+        mutableStateOf<PeoplePreviewTarget?>(null)
+    }
     if (target != null && onPreviewOpenChanged != null) {
         DisposableEffect(Unit) {
             onPreviewOpenChanged(true)
