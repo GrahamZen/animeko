@@ -41,6 +41,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -206,7 +207,9 @@ fun TvEpisodeScreenContent(
     pauseOnPlaying: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val overlay = remember { TvPlayerOverlayState() }
+    // rememberSaveable: 从面板点开人物预览、再从预览跳到条目详情页时本页被销毁, 返回要回到
+    // 离开前那一层 (控制层/面板) 而不是复位成纯视频. 存哪些字段与为什么见 [TvPlayerOverlayState.Saver]
+    val overlay = rememberSaveable(saver = TvPlayerOverlayState.Saver) { TvPlayerOverlayState() }
     val seekFlash = remember { TvSeekFlashState() }
     val sheetsController = rememberVideoSideSheetsController<EpisodeVideoSideSheetPage>()
     val anySheetVisible by sheetsController.hasPageAsState()

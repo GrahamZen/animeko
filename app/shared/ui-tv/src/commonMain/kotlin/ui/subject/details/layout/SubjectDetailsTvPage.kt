@@ -74,6 +74,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -433,6 +434,17 @@ fun SubjectDetailsTvPage(
     var focusedTagIndex by rememberSaveable { mutableStateOf(-1) }
     var tagsRestorePending by rememberSaveable { mutableStateOf(false) }
 
+    // 最后一个真正持有过焦点的区块 (各区块 onFocused 上报). 两个用途: 返回键三级分层 (见下方
+    // BackHandler 处的长注释) + **跨页返回时的落点恢复** (见下方进页 effect).
+    // rememberSaveable 存 ordinal: 跳到全屏页时本页被 NavHost 销毁, 枚举本体在 commonMain 里
+    // 没有默认 Saver.
+    var backLevelOrdinal by rememberSaveable { mutableIntStateOf(TvDetailsSection.HERO.ordinal) }
+    // 进页那一刻的快照: 非 HERO = 这是"返回本页"且离开前焦点在海报页以外的区块.
+    // null = 新进本页 (或离开前就在海报页), 走原来的"落在海报页"路径
+    val restoreSection = remember {
+        TvDetailsSection.entries[backLevelOrdinal].takeIf { it != TvDetailsSection.HERO }
+    }
+
     // 统一焦点锚点调度器 (见 [TvDetailsFocusAnchors]): 进页初始焦点 / 返回键分层 /
     // 侧边栏退出 / 选集网格关闭 / 标签菜单关闭 / 标签墙跨页恢复, 全部只是 send 不同锚点.
     val anchors = remember { TvDetailsFocusAnchors() }
@@ -446,6 +458,13 @@ fun SubjectDetailsTvPage(
         if (videoBackground) anchors.episodesSummary else anchors.heroPlay,
     )
     sectionNav.register(TvDetailsSection.EPISODES, anchors.episodesCarousel)
+    // 这三个区块原来只有 sectionNav 自己的请求器 (方向键路由用). 跨页返回要把焦点送回它们,
+    // 而"送焦点"必须走带轮询与到位确认的锚点调度器 (返回时分页数据可能还没到, 区块那几帧
+    // 不存在, 单发 requestFocus 会静默失败, 见 [[project-tv-focus-resolver]]) —— 于是两边
+    // 共用同一枚请求器: 这里注册, 区块容器照旧挂 sectionNav.entry(...)
+    sectionNav.register(TvDetailsSection.CHARACTERS, anchors.charactersSection)
+    sectionNav.register(TvDetailsSection.STAFF, anchors.staffSection)
+    sectionNav.register(TvDetailsSection.BELOW, anchors.belowSection)
     sectionNav.setPresent(TvDetailsSection.HERO, true)
     sectionNav.setPresent(TvDetailsSection.EPISODES, !videoBackground)
     // 角色/制作人员区块自身在空数据时不渲染 (Section 内部 early return), 存在性同步该条件
@@ -471,26 +490,42 @@ fun SubjectDetailsTvPage(
     // 过去初始焦点由左上角返回按钮提供, 该按钮在 TV 上已移除.
     // 例外: 从标签跳转的搜索页返回时, 恢复到离开前聚焦的标签.
     LaunchedEffect(Unit) {
-        // 返回本页 (关联条目跳转返回/播放页退出) 时滚动位置会恢复到离开时的区块,
-        // 与"初始焦点在海报页"不一致 —— 先显示旧位置再跳回, 有一次可见的回跳运动.
-        // 统一为"重新进入直接落在海报页": 无动画瞬时归零, 首帧即海报页.
-        scrollState.scrollTo(0)
-        withFrameNanos { }
-        when {
-            // 标签菜单开着离开的: 菜单重新展开后自理初始焦点 (Popup 独立焦点域)
-            tagsRestorePending && tagsBrowseMode -> {}
+        // 标签菜单开着离开的: 菜单重新展开后自理初始焦点 (Popup 独立焦点域)
+        if (tagsRestorePending && tagsBrowseMode) return@LaunchedEffect
+        val target = when {
+            tagRestoreIndex >= 0 -> TvDetailsFocusAnchor.TAG_WALL
 
-            tagRestoreIndex >= 0 -> {
-                anchors.send(TvDetailsFocusAnchor.TAG_WALL)
-                tagsRestorePending = false
+            // 返回本页且离开前在海报页以外的区块: 焦点回那个区块.
+            // 区块入口请求器与 sectionNav 共用 (见上方 register), 送焦点走锚点调度器的轮询 ——
+            // 返回时区块的存在性还取决于分页数据 (那几帧可能还没 present 出来), 单发 requestFocus
+            // 会静默失败
+            restoreSection != null -> when (restoreSection) {
+                // 选集页: 有轮播就回轮播 (行内 focusRestorer 落到上次那张卡), 否则回简介块
+                TvDetailsSection.EPISODES ->
+                    if (videoBackground || episodes.isEmpty()) TvDetailsFocusAnchor.EPISODES_SUMMARY
+                    else TvDetailsFocusAnchor.EPISODES_CAROUSEL
+
+                TvDetailsSection.CHARACTERS -> TvDetailsFocusAnchor.CHARACTERS_SECTION
+                TvDetailsSection.STAFF -> TvDetailsFocusAnchor.STAFF_SECTION
+                TvDetailsSection.BELOW -> TvDetailsFocusAnchor.BELOW_SECTION
+                TvDetailsSection.HERO -> TvDetailsFocusAnchor.HERO_PLAY // takeIf 已排除, 仅穷举
             }
 
             // 播放器内嵌变体: 首屏是介绍页 (选集条已移入播放器控制层, 不在本页),
             // 进入焦点给简介块 ("暂无信息"兜底保证恒可聚焦)
-            videoBackground -> anchors.send(TvDetailsFocusAnchor.EPISODES_SUMMARY)
+            videoBackground -> TvDetailsFocusAnchor.EPISODES_SUMMARY
 
-            else -> anchors.send(TvDetailsFocusAnchor.HERO_PLAY)
+            else -> TvDetailsFocusAnchor.HERO_PLAY
         }
+        // 新进本页才把滚动归零: 返回本页时 rememberScrollState 恢复的正是离开时的位置, 而焦点
+        // 也回同一个区块 —— 两头一致, 全程没有可见位移.
+        //
+        // (原先无条件归零是为了消掉另一种回跳: 位置恢复到旧区块、焦点却给海报页, 于是先显示
+        //  旧位置再滑回顶部. 现在焦点跟着位置一起恢复, 这个理由不成立了.)
+        if (restoreSection == null) scrollState.scrollTo(0)
+        withFrameNanos { }
+        anchors.send(target)
+        if (tagRestoreIndex >= 0) tagsRestorePending = false
     }
 
     // 返回键分层, 三级: 选集页之下的区域 (角色/制作人员/关联条目...)
@@ -505,7 +540,8 @@ fun SubjectDetailsTvPage(
     //    下方", 于是把用户往下送回卡片, 白吃一次按键;
     //  - 滚动是动画量, 一次返回按下后仍 > 0 好几百毫秒, 而焦点已经落到上一层, 期间再按返回
     //    就会读到"层级在下方"这种不存在的组合, 表现为连按两次又回到原地.
-    var backLevel by remember { mutableStateOf(TvDetailsSection.HERO) }
+    // (簿记本体 backLevelOrdinal 声明在页面顶部, 进页 effect 要读它)
+    val backLevel = TvDetailsSection.entries[backLevelOrdinal]
     // 选集整页的简介是否渲染了展开按钮 (即简介被截断了): 决定卡片上键要不要指向它
     var summaryExpandPresent by remember { mutableStateOf(false) }
     BackHandler(enabled = backLevel != TvDetailsSection.HERO) {
@@ -743,7 +779,7 @@ fun SubjectDetailsTvPage(
                     // (滚动仅由焦点元素的 BringIntoView 驱动, 而标题不可聚焦)
                     .onFocusChanged {
                         if (it.hasFocus) {
-                            backLevel = TvDetailsSection.HERO
+                            backLevelOrdinal = TvDetailsSection.HERO.ordinal
                             scope.launch { scrollState.animateScrollTo(0) }
                         }
                     },
@@ -763,7 +799,7 @@ fun SubjectDetailsTvPage(
                     scrollState,
                     layoutParams.sectionSpacing,
                     // 内嵌变体的介绍页就是本页最顶层 (对应独立页的海报页)
-                    onFocused = { backLevel = TvDetailsSection.HERO },
+                    onFocused = { backLevelOrdinal = TvDetailsSection.HERO.ordinal },
                 ) {
                     TvEmbeddedHeroPage(
                         state = state,
@@ -794,7 +830,7 @@ fun SubjectDetailsTvPage(
             } else SnapOnFocusSection(
                 scrollState,
                 EPISODES_PAGE_VERTICAL_MARGIN,
-                onFocused = { backLevel = TvDetailsSection.EPISODES },
+                onFocused = { backLevelOrdinal = TvDetailsSection.EPISODES.ordinal },
             ) {
             // 选集整页: 上半 = 完整标题 + 简介 (截断, 占满剩余高度) + 右侧竖版封面,
             // 下半 = 选集轮播; 合起来正好一屏 (上下留 EPISODES_PAGE_VERTICAL_MARGIN).
@@ -945,7 +981,7 @@ fun SubjectDetailsTvPage(
                 SnapOnFocusSection(
                     scrollState,
                     layoutParams.sectionSpacing,
-                    onFocused = { backLevel = TvDetailsSection.CHARACTERS },
+                    onFocused = { backLevelOrdinal = TvDetailsSection.CHARACTERS.ordinal },
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(layoutParams.sectionSpacing)) {
                         CharactersSection(
@@ -953,6 +989,18 @@ fun SubjectDetailsTvPage(
                             modifier = Modifier
                                 // 区块进入落点 (上方选集卡片下键经路由落到第一个头像)
                                 .focusRequester(sectionNav.entry(TvDetailsSection.CHARACTERS))
+                                // 跨页返回恢复的到位确认 (焦点落进本区块子树即算到位) + 区块记账.
+                                // 角色行与制作人员共用一个吸附区块 (那层 onFocused 只报得出
+                                // CHARACTERS), 两行各自再报一次才能恢复到"离开前那一行"
+                                .onFocusChanged {
+                                    anchors.onAnchorFocusChanged(
+                                        TvDetailsFocusAnchor.CHARACTERS_SECTION,
+                                        it.hasFocus,
+                                    )
+                                    if (it.hasFocus) {
+                                        backLevelOrdinal = TvDetailsSection.CHARACTERS.ordinal
+                                    }
+                                }
                                 .focusGroup(),
                             // 水平留白走行内 contentPadding 而**不是**外层 padding: 卡片行要
                             // 保持全宽出血, 外层 padding 会把行的左边界一起右移, 于是向左滑过
@@ -965,6 +1013,15 @@ fun SubjectDetailsTvPage(
                         Box(
                             Modifier
                                 .focusRequester(sectionNav.entry(TvDetailsSection.STAFF))
+                                .onFocusChanged {
+                                    anchors.onAnchorFocusChanged(
+                                        TvDetailsFocusAnchor.STAFF_SECTION,
+                                        it.hasFocus,
+                                    )
+                                    if (it.hasFocus) {
+                                        backLevelOrdinal = TvDetailsSection.STAFF.ordinal
+                                    }
+                                }
                                 .focusGroup()
                                 .padding(horizontal = pad),
                         ) {
@@ -987,13 +1044,19 @@ fun SubjectDetailsTvPage(
                 SnapOnFocusSection(
                     scrollState,
                     layoutParams.sectionSpacing,
-                    onFocused = { backLevel = TvDetailsSection.BELOW },
+                    onFocused = { backLevelOrdinal = TvDetailsSection.BELOW.ordinal },
                 ) {
                     Column(
                         // 区块进入落点挂在根焦点组上: requestFocus 经 enter 落到
                         // 第一个可聚焦子项 (关联卡片; 无关联时是评价区), 不必按内容分情况挂
                         Modifier
                             .focusRequester(sectionNav.entry(TvDetailsSection.BELOW))
+                            .onFocusChanged {
+                                anchors.onAnchorFocusChanged(
+                                    TvDetailsFocusAnchor.BELOW_SECTION,
+                                    it.hasFocus,
+                                )
+                            }
                             .focusGroup(),
                         verticalArrangement = Arrangement.spacedBy(layoutParams.sectionSpacing),
                     ) {
@@ -1794,6 +1857,15 @@ private enum class TvDetailsFocusAnchor {
     /** 选集快速跳转网格的入口圆钮 (网格菜单关闭后焦点归还). */
     EPISODE_GRID_ENTRY,
 
+    /** 角色区块 (跨页返回恢复; 请求器与 [TvDetailsSectionNav] 的区块进入落点共用). */
+    CHARACTERS_SECTION,
+
+    /** 制作人员区块 (同上). */
+    STAFF_SECTION,
+
+    /** 关联条目/评价区块 (同上). */
+    BELOW_SECTION,
+
     /** 标签墙上的恢复目标标签 (点标签进搜索页返回时). */
     TAG_WALL,
 
@@ -1817,6 +1889,9 @@ private class TvDetailsFocusAnchors {
     val episodesCarousel = FocusRequester()
     val episodesSummary = FocusRequester()
     val episodeGridEntry = FocusRequester()
+    val charactersSection = FocusRequester()
+    val staffSection = FocusRequester()
+    val belowSection = FocusRequester()
     val tagWall = FocusRequester()
     val tagShowMore = FocusRequester()
 
@@ -1858,6 +1933,9 @@ private class TvDetailsFocusAnchors {
             TvDetailsFocusAnchor.EPISODES_CAROUSEL -> episodesCarousel
             TvDetailsFocusAnchor.EPISODES_SUMMARY -> episodesSummary
             TvDetailsFocusAnchor.EPISODE_GRID_ENTRY -> episodeGridEntry
+            TvDetailsFocusAnchor.CHARACTERS_SECTION -> charactersSection
+            TvDetailsFocusAnchor.STAFF_SECTION -> staffSection
+            TvDetailsFocusAnchor.BELOW_SECTION -> belowSection
             TvDetailsFocusAnchor.TAG_WALL -> tagWall
             TvDetailsFocusAnchor.TAG_SHOW_MORE -> tagShowMore
         }
