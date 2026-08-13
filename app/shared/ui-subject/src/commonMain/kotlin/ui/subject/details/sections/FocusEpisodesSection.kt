@@ -734,11 +734,26 @@ private val FOCUS_RING_WIDTH = 1.75.dp
 //  - **字压到条上** → 文字盒底与条顶只差 [EPISODE_TEXT_TO_BAR_GAP], 而 CJK 字形几乎填满字盒
 //    (下沉部留白比拉丁字母小得多), 几何 1dp 在电视上就已经看着贴住 → 调大它.
 
+/**
+ * 详情页选集卡片的圆角半径 (网格卡 / TV 卡片本体 / TV 聚焦外圈描边共用, 三者必须一致).
+ * 调小让卡片棱角更硬朗, 调大更圆润.
+ *
+ * 声明必须在进度条那几个常量**之前**: 顶层 val 的初始化器不能前向引用 (编译期报
+ * "must be initialized"), 而 [EPISODE_PROGRESS_BAR_SIDE_INSET] 就是按它算的.
+ */
+internal val EPISODE_CARD_CORNER = 6.dp
+
 /** 进度条厚度 (Prime 实测 3dp). */
 private val EPISODE_PROGRESS_BAR_HEIGHT = 3.dp
 
-/** 进度条左右内缩 (Prime 实测约 5~7dp → 条宽占卡宽 ~95%; 同时要避开卡片圆角). */
-private val EPISODE_PROGRESS_BAR_SIDE_INSET = 6.dp
+/**
+ * 进度条左右内缩 = **卡片圆角半径** [EPISODE_CARD_CORNER], 于是条长恰好是底边的直线段长度
+ * (两端落在圆角切点上). Prime 实测约 5~7dp、条宽占卡宽 ~95%, 与本规则在这个尺寸上重合.
+ *
+ * 竖版卡 (`TV_CARD_PROGRESS_BAR_INSET`) 用同一条规则 —— 两种卡宽度差一倍, 绝对值不可能同时
+ * 成立, 而"内缩取圆角半径"顺带保证条永远不会被圆角啃掉 (圆角的横向内切量最大值就是半径).
+ */
+private val EPISODE_PROGRESS_BAR_SIDE_INSET = EPISODE_CARD_CORNER
 
 /**
  * 进度条下缘距卡底 —— **整条底部组一起上下移的那个数值**, 文字位置由它推出, 调它就够.
@@ -771,7 +786,8 @@ private val EPISODE_TEXT_TO_BAR_GAP = 0.dp
  * (文字下移到条本来占的位置), 否则底部空着一条的高度、字像浮在半空, 还与有进度的邻卡高低不齐.
  * 分档见 `FocusEpisodeCard` 里的 `textBottomPadding`.
  *
- * 纯文字态那一档 (无图卡) 的内容是**顶对齐**的 Column (12dp 内边距), 不受进度条存亡影响.
+ * 纯文字态那一档 (无图卡) 的内容是**顶对齐**的 Column (竖向 12dp), 不受进度条存亡影响;
+ * 但它的**横向**与本档共用 [EPISODE_IMAGE_TEXT_SIDE_PADDING], 见那里.
  */
 private val EPISODE_IMAGE_TEXT_BOTTOM_PADDING =
     EPISODE_PROGRESS_BOTTOM_INSET + EPISODE_PROGRESS_BAR_HEIGHT + EPISODE_TEXT_TO_BAR_GAP
@@ -809,10 +825,13 @@ private const val PLAY_ICON_INK_LEFT_FRACTION = 8f / 24f
 private const val PLAYING_ICON_INK_LEFT_FRACTION = 3f / 24f
 
 /**
- * 图片态卡片底部文字行的左右内边距 = 条左端 + [EPISODE_TEXT_LEFT_OFFSET_FROM_BAR].
+ * 卡片文字的左右内边距 = 条左端 + [EPISODE_TEXT_LEFT_OFFSET_FROM_BAR].
  *
  * 从条的内缩推出来、不写死 (原来写死 10dp, 比条左端右 4dp, 观感是文字明显缩进去一块), 免得改
  * 条宽时又对不齐. 左右同值: 右侧也跟着内缩, 集名的省略号/跑马灯边界与条右端对齐.
+ *
+ * **有图态与纯文字态共用**: 同一条轮播里两种卡混排 (有的集有剧照有的没有), 各用一套横向内边距
+ * 就会出现"左缘随卡片跳"; 两者的进度条本来就是同一个组件、左端在同一条线上.
  */
 private val EPISODE_IMAGE_TEXT_SIDE_PADDING =
     EPISODE_PROGRESS_BAR_SIDE_INSET + EPISODE_TEXT_LEFT_OFFSET_FROM_BAR
@@ -854,12 +873,6 @@ private const val GLASS_CARD_PLAYING_ALPHA = 0.55f
  * 收手太早就被它抢回去 (表现为停在旧卡上). 多押几帧, 归还之后还能再抢回来.
  */
 private const val FOCUS_HOLD_FRAMES = 3
-
-/**
- * 详情页选集卡片的圆角半径 (网格卡 / TV 卡片本体 / TV 聚焦外圈描边共用, 三者必须一致).
- * 调小让卡片棱角更硬朗, 调大更圆润.
- */
-internal val EPISODE_CARD_CORNER = 6.dp
 
 /** 剧照宽高比 (TMDB still 均为 16:9), 也是本集详情弹窗的面板比例. */
 private const val EPISODE_STILL_ASPECT_RATIO = 16f / 9f
@@ -1149,12 +1162,23 @@ fun FocusEpisodeCard(
         } else {
             Box(Modifier.fillMaxSize()) {
                 Column(
-                    Modifier.fillMaxSize().padding(12.dp),
+                    // 横向与有图态同一套 (进度条也是同一个组件, 左端在同一条线上): 同一条轮播里
+                    // 有剧照与没剧照的卡混排, 左缘不能一个 3dp 一个 12dp 来回跳.
+                    // 上边距取"看到的左边距"= 墨迹左线 (盒左缘 + 图标内白), 让左上两侧留白等观感;
+                    // 下边距对齐进度条那一档, 文字压不到条上.
+                    Modifier.fillMaxSize()
+                        .padding(horizontal = EPISODE_IMAGE_TEXT_SIDE_PADDING)
+                        .padding(
+                            top = EPISODE_IMAGE_TEXT_SIDE_PADDING + playInkInset,
+                            bottom = EPISODE_IMAGE_TEXT_BOTTOM_PADDING,
+                        ),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                 Row(
+                    // 与有图态同样按行首状态补图标墨迹差, 见 leadingInkInset
+                    Modifier.padding(start = leadingInkInset),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     // 聚焦时文字前显示播放三角; 未聚焦的播放中卡片仍显示声浪图标
                     if (focused) {
@@ -1182,7 +1206,10 @@ fun FocusEpisodeCard(
                 }
                 Text(
                     name,
-                    if (focused) Modifier.basicMarquee(iterations = Int.MAX_VALUE) else Modifier,
+                    // 集名单独一行, 行首恒是文字: 补满一个三角内白才与上一行的墨迹同线
+                    // (上一行行首可能是三角/声浪图标/数字, 已各自补到同一线上)
+                    Modifier.padding(start = playInkInset)
+                        .then(if (focused) Modifier.basicMarquee(iterations = Int.MAX_VALUE) else Modifier),
                     color = nameColor,
                     style = MaterialTheme.typography.bodySmall,
                     maxLines = 1,
