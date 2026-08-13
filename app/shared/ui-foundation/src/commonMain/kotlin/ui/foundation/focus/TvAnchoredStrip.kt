@@ -23,6 +23,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -89,9 +90,16 @@ fun TvAnchoredStrip(
     val bringIntoViewSpec = remember(density, startPadding) {
         tvAnchorBringIntoViewSpec(with(density) { startPadding.toPx() })
     }
-    // 上次聚焦的下标 (进行落点). 热状态: 推导包进 derivedStateOf, 每张卡只订阅"我是不是落点"
-    // 这个布尔 —— 直读的话每次换焦点整条卡都要陪跑重组
-    var lastFocusedIndex by remember { mutableIntStateOf(-1) }
+    // 上次聚焦的下标 (进行落点).
+    //
+    // **必须 rememberSaveable**: 点卡片跳到全屏页 (人物页 / 关联条目的详情页) 再返回时, 承载本行的
+    // 页面已经被 NavHost 销毁重建过, 用 `remember` 记的话落点退回行首 —— 用户报的"返回不回到刚才
+    // 那张卡片的位置"就是这一条. 同一页面里多个行各自是独立的调用点, rememberSaveable 的自动键
+    // 互不冲突.
+    //
+    // 热状态: 推导包进 derivedStateOf, 每张卡只订阅"我是不是落点"这个布尔 —— 直读的话每次换焦点
+    // 整条卡都要陪跑重组
+    var lastFocusedIndex by rememberSaveable { mutableIntStateOf(-1) }
     val enterRequester = remember { FocusRequester() }
     val enterIndexState = remember(itemCount) {
         derivedStateOf {
