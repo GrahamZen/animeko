@@ -35,10 +35,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -61,7 +64,12 @@ import me.him188.ani.app.ui.foundation.AsyncImage
 import me.him188.ani.app.ui.foundation.rememberAsyncImageRetryState
 import me.him188.ani.app.ui.foundation.theme.LocalThemeSettings
 import me.him188.ani.app.ui.foundation.tvLongPressKey
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlin.math.pow
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.TimeMark
+import kotlin.time.TimeSource
 
 /**
  * TV 竖版封面卡片 (探索页 / 追番页共用): 聚焦时主题主色外圈 (外圈与封面之间留一圈空隙,
@@ -304,6 +312,51 @@ fun tvHeroMarqueeIterations(): Int =
 private const val TV_HERO_MARQUEE_REDUCED_ITERATIONS = 3
 
 /**
+ * hero 展示目标的**换挡合并**: [ThemeSettings.tvFullVisualEffects] 关闭时, 连续导航期间不换
+ * hero (背景图 + 文字块), 等按键静默 [TV_HERO_SWAP_SETTLE_MILLIS] 后一次性换到最后聚焦的那个;
+ * 开启时原样直通 (每格键都换).
+ *
+ * **卡片自身的动画完全不受影响** —— 滚动、压暗、淡出、固定聚焦框走的是另一条路 (位置驱动的
+ * graphicsLayer), 这里只推迟"背景图 + hero 文字"这两块整屏级的内容替换.
+ *
+ * ## 为什么值得做 (2026-08-13 索尼 BRAVIA v7a 实测)
+ *
+ * 每换一次 hero 会同时启动 600ms 的 backdrop `Crossfade` 与 500ms 的文字 `AnimatedContent`
+ * 淡入淡出; 两者时长都远长于连发间隔 (250ms), 于是**连续导航时它们永不结束**, 应用被迫连续
+ * 产帧, 且淡入淡出期间新旧两份内容同时存在 (两块约 1.2MP 的图层 + 两棵 CJK 文本树, 默认
+ * `CompositingStrategy.Auto` 还各要一遍离屏缓冲, 见 `tvRowTopFade` 里对规则 9 的说明).
+ *
+ * 12 次方向键的实测帧数: 原样 **98 帧**, 把两处淡入淡出时长改 0 后 **12 帧** —— 也就是每按一格
+ * 键要陪跑约 8 帧 (该机每帧约 20ms), 而这 8 帧画的全是"背景图和文字正在互相淡入淡出".
+ * 合并换挡把这份开销压到"每停一次一份".
+ *
+ * @param target 焦点驱动的真实目标 (每格键都变). 数据预取仍应读它, 不要读返回值 —— 停下来时
+ * 数据已在缓存里, 换挡才不会跟着等网络.
+ */
+@Composable
+fun <T> rememberTvSettledHero(target: T): T {
+    val fullEffects = LocalThemeSettings.current.tvFullVisualEffects
+    // lambda 每次重组换新实例, 必须经 rememberUpdatedState 再进 snapshotFlow, 否则永久留住首帧值
+    val latest = rememberUpdatedState(target)
+    var settled by remember { mutableStateOf(target) }
+    LaunchedEffect(fullEffects) {
+        if (fullEffects) return@LaunchedEffect
+        var lastApplyMark: TimeMark? = null
+        snapshotFlow { latest.value }.collectLatest { value ->
+            // 单击 (距上次换挡已超过静默期) 立即换, 不给正常导航引入延迟; 连发时 collectLatest
+            // 会把这次 delay 取消掉, 于是只有"停下来"那一次真正生效.
+            val mark = lastApplyMark
+            if (mark != null && mark.elapsedNow() < TV_HERO_SWAP_SETTLE_MILLIS.milliseconds) {
+                delay(TV_HERO_SWAP_SETTLE_MILLIS)
+            }
+            settled = value
+            lastApplyMark = TimeSource.Monotonic.markNow()
+        }
+    }
+    return if (fullEffects) target else settled
+}
+
+/**
  * TV hero 区标题/正文文字色 (对齐 Prime 实测): 黑夜 #F1F1F1 —— 亮中性白, 无色相、无投影
  * (实测字形边缘无暗晕, 可读性靠文字够亮 + backdrop 渐隐压暗). M3 的 onSurface/onSurfaceVariant
  * 偏暗且带紫色相, 在深色 backdrop 上显得发糊. 白天用等效中性深灰.
@@ -539,6 +592,14 @@ const val TV_HERO_TEXT_FADE_MILLIS = 500
 
 /** TV hero 媒体 (backdrop/简介等) 请求防抖: 焦点在卡片间快速划过时不发请求. */
 const val TV_HERO_MEDIA_DEBOUNCE_MILLIS = 300L
+
+/**
+ * hero 展示内容 (背景图 + 文字块) 换条目的**按键静默期**: 见 [rememberTvSettledHero].
+ *
+ * 必须长于长按连发的最短间隔 (`tvFocusMoveRateLimit` 横向 4 次/秒 = 250ms), 否则连发期间仍会
+ * 中途换一次.
+ */
+const val TV_HERO_SWAP_SETTLE_MILLIS = 300L
 
 /**
  * 点卡片进详情页前, 等目标页首屏材料备齐的最长时间 (毫秒).

@@ -572,7 +572,7 @@
     <string name="settings_theme_tv_ui_scale">Interface scale</string>
     <string name="settings_theme_tv_ui_scale_description">Scale the whole interface up or down. Use this when your TV or box reports a wrong screen density and everything looks too large or too small. 100% follows the system. The interface reloads once when you leave settings so that dialogs and menus match</string>
     <string name="settings_theme_tv_full_visual_effects">Full visual effects</string>
-    <string name="settings_theme_tv_full_visual_effects_description">Slide transitions between collection categories, animated loading placeholders, endless title marquee, and full-resolution hero stills. Off by default to keep low-end devices smooth; turn on if your device is powerful</string>
+    <string name="settings_theme_tv_full_visual_effects_description">Slide transitions between collection categories, animated loading placeholders, endless title marquee, full-resolution hero stills, and instant backdrop/summary swaps while moving across cards. Off by default to keep low-end devices smooth (card animations are unaffected either way); turn on if your device is powerful</string>
     <string name="settings_theme_tv_retain_playback_session">Keep playback session after leaving</string>
     <string name="settings_theme_tv_retain_playback_session_description">Leaving the player keeps the session alive (player, source search, loaded stream), so you can return instantly from "Now Playing" in the sidebar — focus it and press down for the Close button. A toast tells you when a slow source finishes loading in the background. Off: the session is discarded on exit and every visit searches again</string>
     <string name="settings_theme_palette">Color Palette</string>
