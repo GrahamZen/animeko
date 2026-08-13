@@ -698,8 +698,124 @@ private fun FocusEpisodeAnchorRing(
  */
 private const val EPISODE_CARD_PRESS_SCALE = 0.94f
 
-/** TV 选集聚焦框的描边宽度 (同探索页竖版卡聚焦框). */
-private val FOCUS_RING_WIDTH = 2.5.dp
+/**
+ * TV 选集聚焦框的描边宽度.
+ *
+ * Prime Video 实测 **1.75dp**(4K 截图 7px), 且描边内缘几乎贴着卡片内容(空隙 0.25dp,
+ * 见 [FOCUS_RING_GAP])—— 比我们原来的 2.5dp + 0.5dp 空隙细一档、也更紧.
+ * 探索页竖版卡那套 (`TV_CARD_FOCUS_RING_WIDTH` / `TV_CARD_FOCUS_GAP`) 仍是 2.5dp + 3dp, 未跟改.
+ */
+private val FOCUS_RING_WIDTH = 1.75.dp
+
+// ---- 卡片底部进度条与文字的几何 ----
+//
+// 与 Prime Video 逐像素对标过 (2026-08-13; 两边都是 4K 截图 = 1dp 4px, 卡宽也几乎一样:
+// Prime 238dp / 我们 240dp). Prime 实测: **条厚 3.0dp**(12px)、**左右内缩约 5~7dp**
+// (条宽占卡宽 ~95%)、条基本贴卡底(0~1dp)、**文字底缘在条顶上方约 3dp**.
+//
+// 它的排布是"条贴底当基线, 文字整体抬到条上方留一道缝"; 我们原来是"文字压到最底, 条被挤在
+// 文字与聚焦描边之间" —— 用户报的"进度条跟边框重叠"就是后者.
+//
+// 条厚与条宽占比照 Prime 来了; 竖向位置留给手调, 见下面的旋钮说明.
+//
+// ## 手调指南 (四个旋钮, 其余量全部由它们推导, 不要另外写死)
+//
+// | 想改什么 | 只动这一个 |
+// |---|---|
+// | **整条底部组 (条 + 文字) 一起上下移** | [EPISODE_PROGRESS_BOTTOM_INSET] ← **就是"整个向上的数值"**, 调大=整组上移 |
+// | 字与条挨得太近 / 看着压在一起 | [EPISODE_TEXT_TO_BAR_GAP] 调大 |
+// | 条与文字**一起**左右移 | [EPISODE_PROGRESS_BAR_SIDE_INSET] |
+// | **文字左缘相对条左端**的距离 | [EPISODE_TEXT_LEFT_OFFSET_FROM_BAR] (正=文字更靠右, 负=更靠左) |
+// | 条本身的粗细 | [EPISODE_PROGRESS_BAR_HEIGHT] |
+//
+// 两种"重叠"分别由不同旋钮治, 别调错:
+//  - **条压到聚焦描边上** → 描边内缘在卡片轮廓外 `FOCUS_RING_GAP - FOCUS_RING_WIDTH` = 0.25dp,
+//    条离卡底太近时两者贴在一起 → 调大 [EPISODE_PROGRESS_BOTTOM_INSET];
+//  - **字压到条上** → 文字盒底与条顶只差 [EPISODE_TEXT_TO_BAR_GAP], 而 CJK 字形几乎填满字盒
+//    (下沉部留白比拉丁字母小得多), 几何 1dp 在电视上就已经看着贴住 → 调大它.
+
+/** 进度条厚度 (Prime 实测 3dp). */
+private val EPISODE_PROGRESS_BAR_HEIGHT = 3.dp
+
+/** 进度条左右内缩 (Prime 实测约 5~7dp → 条宽占卡宽 ~95%; 同时要避开卡片圆角). */
+private val EPISODE_PROGRESS_BAR_SIDE_INSET = 6.dp
+
+/**
+ * 进度条下缘距卡底 —— **整条底部组一起上下移的那个数值**, 文字位置由它推出, 调它就够.
+ *
+ * 两条边界值:
+ * - **下限 1.5dp**: 卡片是 [EPISODE_CARD_CORNER] 6dp 圆角的 `Surface`, 会裁剪内容. 圆角在距底 d
+ *   处的横向内切量是 `r - sqrt(r² - (r-d)²)`, d=0 时等于整个 6dp —— 条也正好内缩 6dp
+ *   ([EPISODE_PROGRESS_BAR_SIDE_INSET]), 所以再往下条的左右两端会被圆角啃掉.
+ * - **实测 1.5dp 太贴**: 描边内缘只在卡片轮廓外 0.25dp (见 [FOCUS_RING_GAP]), 真机上条与描边
+ *   看着连成一体. Prime 能贴底是因为它描边更淡、卡片圆角也更大. 现取 5dp (真机调出来的).
+ */
+private val EPISODE_PROGRESS_BOTTOM_INSET = 5.dp
+
+/**
+ * 文字盒底缘到进度条顶缘的**几何**间距 —— "字压在条上"就调大这一个.
+ *
+ * 注意几何值不等于看到的空隙: 拉丁字母的下沉部会在字盒底缘之上留出两三 dp, 但**CJK 字形几乎
+ * 填满字盒**, 留白远小于拉丁 —— 字盒本身已经比墨迹高出一截, 所以这里取 0 (真机调出来的) 也不粘条;
+ * 真出现"字压在条上"再调大它.
+ */
+private val EPISODE_TEXT_TO_BAR_GAP = 0.dp
+
+/**
+ * 图片态卡片底部文字行 (集号 + 集名) 的下内边距 = **条顶 + [EPISODE_TEXT_TO_BAR_GAP]**.
+ *
+ * 由上面三个量推出来、不手写死: 调条厚或条位时文字自动跟着走, 不会再出现"只抬了条、字被顶掉"
+ * 或"抬了字、条又贴上描边"这种半截组合.
+ *
+ * **只在这张卡真有进度条时用本值**: 没有进度条的卡片走 [EPISODE_TEXT_BOTTOM_PADDING_NO_BAR]
+ * (文字下移到条本来占的位置), 否则底部空着一条的高度、字像浮在半空, 还与有进度的邻卡高低不齐.
+ * 分档见 `FocusEpisodeCard` 里的 `textBottomPadding`.
+ *
+ * 纯文字态那一档 (无图卡) 的内容是**顶对齐**的 Column (12dp 内边距), 不受进度条存亡影响.
+ */
+private val EPISODE_IMAGE_TEXT_BOTTOM_PADDING =
+    EPISODE_PROGRESS_BOTTOM_INSET + EPISODE_PROGRESS_BAR_HEIGHT + EPISODE_TEXT_TO_BAR_GAP
+
+/**
+ * 无进度条时文字行的下内边距 = 有条那档**整个减掉条占的一档** (条厚 + 字条间距), 于是文字盒底
+ * 正好落在条本来的下缘 —— 即 [EPISODE_PROGRESS_BOTTOM_INSET] 那一线, 就像这张卡从来没有条.
+ *
+ * 必须写成减法而不是"某几个量相加": 之前写的是 `INSET + BAR_HEIGHT`, 只让出了 [EPISODE_TEXT_TO_BAR_GAP]
+ * 那点空隙, 一旦把该间距手调成 0, 两档就塌成同一个值 —— 表现就是"没进度条的字跟有进度条的一样高".
+ */
+private val EPISODE_TEXT_BOTTOM_PADDING_NO_BAR =
+    EPISODE_IMAGE_TEXT_BOTTOM_PADDING - EPISODE_PROGRESS_BAR_HEIGHT - EPISODE_TEXT_TO_BAR_GAP
+
+/**
+ * **文字盒左缘相对进度条左端的偏移** —— 想让文字比条更靠右就调大, 更靠左给负值 (条的左端由
+ * [EPISODE_PROGRESS_BAR_SIDE_INSET] 定, 两者的绝对位置一起变, 这里只管两者的差).
+ *
+ * 现取 −3dp (真机调出来的): 文字盒左缘比条左端再靠左一点, 这样行首**墨迹**(而不是盒边界) 才与
+ * 条左端对齐 —— 行首的图标盒自带内白, 见 [PLAY_ICON_INK_LEFT_FRACTION]. 三种行首状态的墨迹
+ * 已经被 `leadingInkInset` 拉到同一线上, 所以本值现在的语义是"整行墨迹线相对条左端的偏移".
+ */
+private val EPISODE_TEXT_LEFT_OFFSET_FROM_BAR = -3.dp
+
+/**
+ * Material `PlayArrow` 矢量三角在 24 视口里的左内白比例 (path `M8,5v14l11,-7z`, 图形从 x=8 起).
+ *
+ * [Icon] 的布局盒是整个视口、比画出来的图形宽, 而集号数字几乎顶着字盒左缘 —— 于是"有三角的卡"
+ * 与"没三角的卡", **墨迹左线**差出 17dp × 8/24 ≈ 5.7dp. 整行左移是补不对的 (那会把没三角的
+ * 一起拖左), 只能按状态补差值, 见 `FocusEpisodeCard` 里的 `leadingInkInset`.
+ */
+private const val PLAY_ICON_INK_LEFT_FRACTION = 8f / 24f
+
+/** 同上, `GraphicEq`(正在播放的未聚焦卡) 的图形从 24 视口的 x=3 起. */
+private const val PLAYING_ICON_INK_LEFT_FRACTION = 3f / 24f
+
+/**
+ * 图片态卡片底部文字行的左右内边距 = 条左端 + [EPISODE_TEXT_LEFT_OFFSET_FROM_BAR].
+ *
+ * 从条的内缩推出来、不写死 (原来写死 10dp, 比条左端右 4dp, 观感是文字明显缩进去一块), 免得改
+ * 条宽时又对不齐. 左右同值: 右侧也跟着内缩, 集名的省略号/跑马灯边界与条右端对齐.
+ */
+private val EPISODE_IMAGE_TEXT_SIDE_PADDING =
+    EPISODE_PROGRESS_BAR_SIDE_INSET + EPISODE_TEXT_LEFT_OFFSET_FROM_BAR
 
 /**
  * 聚焦卡左侧卡片的压暗亮度 (Prime Video 逐帧实测约四成亮): 左侧切边是"已经过去的内容",
@@ -710,8 +826,14 @@ private const val EPISODE_PAST_CARD_DIM_ALPHA = 0.45f
 /** 左侧压暗的渐变时长 (与单格滚动 260ms 大致同步, 边滑边暗). */
 private const val EPISODE_DIM_FADE_MILLIS = 200
 
-/** TV 选集聚焦框与卡片轮廓之间的空隙 (框圆角 = 卡片圆角 + 此值, 同探索页竖版卡聚焦框). */
-private val FOCUS_RING_GAP = 3.dp
+/**
+ * TV 选集聚焦框盒相对卡片轮廓向外探出的量 (框圆角 = 卡片圆角 + 此值).
+ *
+ * 描边是从框盒边界**向内**画的, 所以肉眼看到的"描边与卡片之间的空隙" =
+ * 本值 − [FOCUS_RING_WIDTH] = 0.25dp —— 对齐 Prime 实测 (它的描边几乎贴着卡片内容).
+ * 调这个值要连 [FOCUS_RING_WIDTH] 一起算, 否则空隙会变成负数 (描边压到卡片上).
+ */
+private val FOCUS_RING_GAP = 2.dp
 
 /**
  * 玻璃态无图卡片的墨色浓度 (见 [FocusEpisodeCard] 的 `glass`).
@@ -884,6 +1006,15 @@ fun FocusEpisodeCard(
     // 已看的集固定满条 ("看过"由进度条表达, 图不再压暗); 未看完的显示续播点
     val effectiveProgress = if (isWatched) 1f else progress
 
+    // 没有进度条 (没看过 / 无进度记录) 的卡片, 文字要下移到条本来占的位置 —— 否则底部空着一条
+    // 的高度, 观感是字浮在半空 (与有进度的邻卡还高低不齐). 判据与 [FocusEpisodeProgressBar]
+    // 内部的绘制条件一致.
+    val textBottomPadding = if ((effectiveProgress ?: 0f) > 0f) {
+        EPISODE_IMAGE_TEXT_BOTTOM_PADDING
+    } else {
+        EPISODE_TEXT_BOTTOM_PADDING_NO_BAR
+    }
+
     val name = item.nameCn.ifBlank { item.name }
 
     // 图标尺寸用 sp (跟随字体缩放), 并按矢量内部留白补偿, 使可见图形高度 ≈ 集号数字
@@ -891,6 +1022,18 @@ fun FocusEpisodeCard(
     // GraphicEq 占 16/24 (67%) → 15sp
     val playIconSize = with(LocalDensity.current) { 17.sp.toDp() }
     val playingIconSize = with(LocalDensity.current) { 15.sp.toDp() }
+
+    // 首元素的"墨迹左线"对齐: 图标盒比它画出来的图形宽 (见 [PLAY_ICON_INK_LEFT_FRACTION]),
+    // 数字则几乎顶着字盒左缘. 以**聚焦态那个三角的墨迹**为基准线, 其余两态各补差值 —— 于是
+    // 换焦点时首字/三角的左缘不再横跳, 而聚焦态保持现有观感 (整行位置不变).
+    val playInkInset = playIconSize * PLAY_ICON_INK_LEFT_FRACTION
+    val leadingInkInset = when {
+        focused -> 0.dp // 三角自带内白, 就是基准
+        isPlaying -> (playInkInset - playingIconSize * PLAYING_ICON_INK_LEFT_FRACTION)
+            .coerceAtLeast(0.dp)
+
+        else -> playInkInset // 无图标: 补满一个三角内白, 首个数字与三角同线
+    }
 
     // 长按确认键 (同网格方块, 共用实现见 tvLongPressKey): 按住到阈值当场触发, 不等松开.
     // 网格菜单长按跳转把焦点送到本卡时, 那次按住的残余按键不是从本卡起手的手势, 会被它吞掉
@@ -951,9 +1094,12 @@ fun FocusEpisodeCard(
                 Row(
                     Modifier.align(Alignment.BottomStart)
                         .fillMaxWidth()
-                        // 底部留出进度条区域 (空隙 4dp + 条 4dp), 避免文字与进度条重叠
-                        .padding(horizontal = 10.dp)
-                        .padding(top = 8.dp, bottom = 6.dp),
+                        // 左右与进度条两端对齐 (由条的内缩推出, 见 EPISODE_IMAGE_TEXT_SIDE_PADDING)
+                        .padding(horizontal = EPISODE_IMAGE_TEXT_SIDE_PADDING)
+                        // 下内边距按"这张卡有没有进度条"两档, 见 textBottomPadding;
+                        // 左侧再按"首元素是三角还是数字"补墨迹差, 见 leadingInkInset
+                        .padding(start = leadingInkInset)
+                        .padding(top = 8.dp, bottom = textBottomPadding),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
@@ -1082,12 +1228,11 @@ private fun FocusEpisodeProgressBar(
     if (progress == null || progress <= 0f) return
     Box(
         modifier
-            // 尺寸 (960px 卡 = 240dp): 条厚 8px=2dp,
-            // 左右内缩 ~20px=5dp (避开圆角), 离底边一点点空隙
-            .padding(horizontal = 10.dp)
-            .padding(bottom = 4.dp)
+            // 几何全部对齐 Prime 实测, 见 [EPISODE_PROGRESS_BAR_HEIGHT] 上方的对标说明
+            .padding(horizontal = EPISODE_PROGRESS_BAR_SIDE_INSET)
+            .padding(bottom = EPISODE_PROGRESS_BOTTOM_INSET)
             .fillMaxWidth()
-            .height(2.5.dp)
+            .height(EPISODE_PROGRESS_BAR_HEIGHT)
             .clip(CircleShape)
             .background(trackColor),
     ) {
