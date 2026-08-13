@@ -131,8 +131,13 @@ import org.jetbrains.compose.resources.stringResource
 @Stable
 class ExplorationPageState(
     val trendingSubjectInfoPager: LazyPagingItems<TrendingSubjectInfo>,
-    val followedSubjectsPager: Flow<PagingData<FollowedSubjectInfo>>,
-    val recommendationPager: Flow<PagingData<RecommendedItemInfo>>,
+    // 与 trending 一样是**挂在 ViewModel 上**的分页实例, 而不是每次组合现收的 Flow: 现收的话
+    // 每次进页面 (含从详情页返回) 都新建一个 presenter, itemCount 从 0 重新数, 要一百多毫秒
+    // 才把已经缓存好的数据 present 出来. 那段空窗里整行是不存在的, 于是 rememberLazyListState
+    // 存下来的**下标**指向了别的行 —— 电视上表现为返回后"推荐区的卡片先坐在锚位上, 十来帧后
+    // 才换成继续观看" (2026-08-12 真机日志: 空窗 165ms).
+    val followedSubjectsPager: LazyPagingItems<FollowedSubjectInfo>,
+    val recommendationPager: LazyPagingItems<RecommendedItemInfo>,
     val horizontalScrollTipFlow: Flow<Boolean>,
     private val onSetDisableHorizontalScrollTip: () -> Unit,
     private val onRefreshFollowedSubjects: () -> Unit = {},
@@ -276,7 +281,7 @@ fun ExplorationScreen(
         val scope = rememberCoroutineScope()
         val horizontalScrollTip = stringResource(Lang.exploration_horizontal_scroll_tip)
 
-        val recommendationPager = state.recommendationPager.collectAsLazyPagingItemsWithLifecycle()
+        val recommendationPager = state.recommendationPager
         val recommendationPagerLoadError by recommendationPager.rememberLoadErrorState()
         val aniMotionScheme = LocalAniMotionScheme.current
         val layoutParams = RecommendationDefaults.layoutParameters()
@@ -359,8 +364,7 @@ fun ExplorationScreen(
                         title = { Text(stringResource(Lang.exploration_continue_watching), softWrap = false) },
                     )
 
-                    val followedSubjectsPager =
-                        state.followedSubjectsPager.collectAsLazyPagingItemsWithLifecycle()
+                    val followedSubjectsPager = state.followedSubjectsPager
                     val followedSubjectsLayoutParameters =
                         FollowedSubjectsDefaults.layoutParameters(currentWindowAdaptiveInfo1())
 
@@ -453,12 +457,14 @@ private fun PreviewExplorationPage() {
     ProvideCompositionLocalsForPreview {
         val scope = rememberCoroutineScope()
         val trendingSubjectInfoPager = createTestPager(TestTrendingSubjectInfos).collectAsLazyPagingItemsWithLifecycle()
+        val followedPager = createTestPager(TestFollowedSubjectInfos).collectAsLazyPagingItemsWithLifecycle()
+        val recPager = createTestPager(TestRecommendedItemInfos).collectAsLazyPagingItemsWithLifecycle()
         ExplorationScreen(
             remember {
                 ExplorationPageState(
                     trendingSubjectInfoPager,
-                    followedSubjectsPager = createTestPager(TestFollowedSubjectInfos),
-                    recommendationPager = createTestPager(TestRecommendedItemInfos),
+                    followedSubjectsPager = followedPager,
+                    recommendationPager = recPager,
                     horizontalScrollTipFlow = flowOf(false),
                     onSetDisableHorizontalScrollTip = {},
                 )

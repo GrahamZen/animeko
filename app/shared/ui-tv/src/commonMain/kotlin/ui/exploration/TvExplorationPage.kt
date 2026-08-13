@@ -88,7 +88,6 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.paging.compose.collectAsLazyPagingItemsWithLifecycle
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -129,6 +128,7 @@ import me.him188.ani.app.ui.foundation.session.TvNavigationRailDefaults
 import me.him188.ani.app.ui.foundation.stateOf
 import me.him188.ani.app.ui.foundation.theme.AniThemeDefaults
 import me.him188.ani.app.ui.foundation.theme.LocalThemeSettings
+import me.him188.ani.app.ui.foundation.tv.rememberTvSettledHero
 import me.him188.ani.app.ui.foundation.tv.TV_BACKDROP_ASPECT_RATIO
 import me.him188.ani.app.ui.foundation.tv.TV_CARD_FOCUS_GAP
 import me.him188.ani.app.ui.foundation.tv.TV_BACKDROP_BOTTOM_FADE_START
@@ -343,7 +343,11 @@ fun TvExplorationPage(
     // 铺满后经渐隐压暗在 10-foot 距离不可辨), 开了完整视觉效果才用原图. backdrop 那路
     // 服务层已是 w1280 档, 不受影响
     val fullVisualEffects = LocalThemeSettings.current.tvFullVisualEffects
-    val backdropUrl = heroTarget?.let { target ->
+    // 展示用目标: 低端档 (完整视觉效果关闭) 下连发导航期间不换背景图/文字, 停下来才换一次.
+    // 数据预取那条流水线 (上面的 LaunchedEffect) 仍读真实的 heroTarget —— 停下来时数据已在缓存里.
+    // 机理与实测数据见 [rememberTvSettledHero].
+    val heroDisplayTarget = rememberTvSettledHero(heroTarget)
+    val backdropUrl = heroDisplayTarget?.let { target ->
         (if (target.fromFollowed) {
             episodeStillCache[target.subjectId]?.stillUrl?.let { tmdbStillHeroSizeUrl(it, fullVisualEffects) }
         } else null)
@@ -492,8 +496,11 @@ fun TvExplorationPage(
     // ------------------------------------------------------------------
     // 行结构 (数据驱动): 继续观看一行 (若有) + 推荐 N 行. 行号 == LazyColumn item 下标.
     // ------------------------------------------------------------------
-    val followedItems = state.followedSubjectsPager.collectAsLazyPagingItemsWithLifecycle()
-    val recommendations = state.recommendationPager.collectAsLazyPagingItemsWithLifecycle()
+    // 两个分页实例挂在 ViewModel 上 (见 ExplorationPageState), 跨导航活着: 现收的话每次返回都
+    // 要一百多毫秒才把缓存好的数据 present 出来, 那段空窗里"继续观看"整行不存在, 而 listState
+    // 存的是**下标**不是键 —— 下标 1 当场变成推荐区第一行, 卡片就坐在锚位上闪那么十来帧.
+    val followedItems = state.followedSubjectsPager
+    val recommendations = state.recommendationPager
     val hasFollowed = followedItems.itemCount > 0
     val followedRowCount = if (hasFollowed) 1 else 0
     val recRowCount =
@@ -830,7 +837,7 @@ fun TvExplorationPage(
         // 左侧再留 TV_EXPLORATION_START_PAD (外层已让开侧边栏 48dp) —— 总左缘 64dp,
         // 使侧边栏按钮中心 (32dp) 恰好在屏幕左缘与内容左缘的正中间. 下同.
         TvExplorationHeroOverlay(
-            heroTarget = heroTarget,
+            heroTarget = heroDisplayTarget,
             infoCache = infoCache,
             episodeStillCache = episodeStillCache,
             summaryFallbackCache = summaryFallbackCache,

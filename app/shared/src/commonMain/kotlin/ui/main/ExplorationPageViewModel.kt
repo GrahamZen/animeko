@@ -67,9 +67,10 @@ class ExplorationPageViewModel : AbstractViewModel(), KoinComponent {
         ) { nsfwMode, subjects ->
             if (nsfwMode != NsfwMode.HIDE) return@combine subjects
             subjects.filter { !it.subjectInfo.nsfw }
-        }.cachedIn(backgroundScope),
+        }.cachedIn(backgroundScope).launchAsLazyPagingItemsIn(backgroundScope),
         onRefreshFollowedSubjects = { followedSubjectsRestarter.restart() },
-        recommendationPager = recommendationRepository.recommendedSubjectsPager().cachedIn(backgroundScope),
+        recommendationPager = recommendationRepository.recommendedSubjectsPager()
+            .cachedIn(backgroundScope).launchAsLazyPagingItemsIn(backgroundScope),
         horizontalScrollTipFlow = horizontalScrollTipFlow,
         onSetDisableHorizontalScrollTip = {
             backgroundScope.launch {
