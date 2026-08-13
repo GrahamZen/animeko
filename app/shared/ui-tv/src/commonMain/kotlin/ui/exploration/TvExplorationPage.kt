@@ -88,7 +88,6 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.paging.compose.collectAsLazyPagingItemsWithLifecycle
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -492,8 +491,11 @@ fun TvExplorationPage(
     // ------------------------------------------------------------------
     // 行结构 (数据驱动): 继续观看一行 (若有) + 推荐 N 行. 行号 == LazyColumn item 下标.
     // ------------------------------------------------------------------
-    val followedItems = state.followedSubjectsPager.collectAsLazyPagingItemsWithLifecycle()
-    val recommendations = state.recommendationPager.collectAsLazyPagingItemsWithLifecycle()
+    // 两个分页实例挂在 ViewModel 上 (见 ExplorationPageState), 跨导航活着: 现收的话每次返回都
+    // 要一百多毫秒才把缓存好的数据 present 出来, 那段空窗里"继续观看"整行不存在, 而 listState
+    // 存的是**下标**不是键 —— 下标 1 当场变成推荐区第一行, 卡片就坐在锚位上闪那么十来帧.
+    val followedItems = state.followedSubjectsPager
+    val recommendations = state.recommendationPager
     val hasFollowed = followedItems.itemCount > 0
     val followedRowCount = if (hasFollowed) 1 else 0
     val recRowCount =
