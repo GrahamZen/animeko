@@ -9,7 +9,10 @@
 
 package me.him188.ani.app.data.network
 
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.datastore.core.DataStore
+import io.ktor.client.HttpClient
+import io.ktor.client.plugins.ClientRequestException
 import io.ktor.client.plugins.expectSuccess
 import io.ktor.client.plugins.timeout
 import io.ktor.client.request.HttpRequestBuilder
@@ -17,11 +20,20 @@ import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.get
 import io.ktor.client.request.head
 import io.ktor.client.request.parameter
+import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.isSuccess
+import kotlinx.atomicfu.locks.SynchronizedObject
+import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.LocalDate
@@ -34,7 +46,10 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import me.him188.ani.app.domain.foundation.HttpClientProvider
+import me.him188.ani.app.domain.foundation.ServerListFeature
+import me.him188.ani.app.domain.foundation.ServerListFeatureConfig
 import me.him188.ani.app.domain.foundation.get
+import me.him188.ani.app.domain.foundation.withValue
 import me.him188.ani.app.platform.currentAniBuildConfig
 import me.him188.ani.utils.coroutines.IO_
 import me.him188.ani.utils.logging.info
@@ -65,6 +80,17 @@ class TmdbImageService(
     private val ioDispatcher: CoroutineContext = Dispatchers.IO_,
 ) {
     private val client = httpClientProvider.get()
+
+    /**
+     * Ani 的条目关系索引, 用于解析系列主条目名 (见 [resolveLineageViaAni]).
+     *
+     * 单独借一个带 [ServerListFeature] 的客户端: Ani 的接口 baseurl 是占位符, 要靠这个
+     * feature 在可用服务器之间选路, 上面那个裸 client 拿不到.
+     */
+    private val aniRelationsApi = AniApiProvider(
+        httpClientProvider.get(setOf(ServerListFeature.withValue(ServerListFeatureConfig.Default))),
+    ).subjectRelationsApi
+
     private val json = Json { ignoreUnknownKeys = true }
 
     /**
@@ -80,6 +106,122 @@ class TmdbImageService(
     }
 
     /**
+     * 关联回溯兜底专用的超时, 比 [shortConnectTimeout] 更短.
+     *
+     * 那只是"直搜没命中时去 Bangumi 要个根条目名"的兜底, 却卡在 hero 出图的关键路径上;
+     * 而 `api.bgm.tv` 在部分网络下和 TMDB 一样被 DNS 投毒, 5 秒连接超时意味着 IPv4 + IPv6
+     * 各等满 = 10 秒白等 (issue #7 报告者日志实测单次 9.2 秒). 2 秒够通的网络跑完一次
+     * 关联查询, 不通的也早点让路去走削字兜底.
+     */
+    private fun HttpRequestBuilder.lineageTimeout() {
+        timeout {
+            connectTimeoutMillis = 2_000
+            requestTimeoutMillis = 6_000
+        }
+    }
+
+    /**
+     * 当前生效的 API 域名下标 ([API_BASE_URLS]). 回退成功后记住, 免得之后每个请求都先在
+     * 不通的那个上白等一次超时. 只在进程内有效, 冷启动重新从主域名开始试.
+     */
+    private var activeApiBaseIndex = 0
+
+    /**
+     * 用 Ani 的关系索引解析系列主条目名 —— 墙内可直连的那条路.
+     *
+     * 接口一次就返回 `seriesMainSubjectNames`, 既不必像 Bangumi 那条路逐跳回溯, 也不用再
+     * 查一次条目详情拿名字. 上游已把绝大多数请求从 bgm 迁到自家服务器, 这里跟上.
+     *
+     * 代价是拿不到「主线故事」出边, 判不了衍生作, 所以 [BgmLineage.isDerivative] 给 **null
+     * (未知)** 而不是 false —— false 的语义是"确认正传", 会让分集索引把 S0 殿后, 衍生条目
+     * 就此错拿正片数据. 未知则维持原顺序, 与拿不到关系数据时一致.
+     * 拿不到系列主条目 (或主条目就是自己) 时返回 null, 由调用方回落到 Bangumi.
+     */
+    private suspend fun resolveLineageViaAni(subjectId: Int, originalName: String): BgmLineage? = try {
+        val relations = aniRelationsApi { getSubjectRelations(subjectId.toLong()).body() }
+        val rootName = relations.seriesMainSubjectNames
+            .firstOrNull { it.isNotBlank() && it != originalName }
+        if (rootName == null) {
+            null
+        } else {
+            logger.info { "Resolved lineage for $subjectId via Ani: root=$rootName" }
+            BgmLineage(rootName = rootName, isDerivative = null)
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        logger.warn(e) { "Failed to resolve lineage via Ani relations for subject $subjectId" }
+        null
+    }
+
+    /**
+     * 发 TMDB API 请求, 主域名不通时自动换备用域名重试一次. [path] 以 `/` 开头, 不含 base.
+     *
+     * 只对连不上/超时这类异常回退: 4xx 是 token 或参数的问题, 换域名结果一样, 直接抛出.
+     */
+    private suspend fun HttpClient.getApi(
+        path: String,
+        block: HttpRequestBuilder.() -> Unit,
+    ): HttpResponse {
+        val firstIndex = activeApiBaseIndex
+        try {
+            return get("${API_BASE_URLS[firstIndex]}$path", block)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: ClientRequestException) {
+            throw e
+        } catch (e: Exception) {
+            val fallbackIndex = (firstIndex + 1) % API_BASE_URLS.size
+            if (fallbackIndex == firstIndex) throw e
+            logger.warn(e) {
+                "TMDB API ${API_BASE_URLS[firstIndex]} unreachable, retrying on ${API_BASE_URLS[fallbackIndex]}"
+            }
+            val response = get("${API_BASE_URLS[fallbackIndex]}$path", block)
+            // 成功了才记住, 免得一次偶发失败就把后续请求长期赶到备用域名上
+            activeApiBaseIndex = fallbackIndex
+            logger.info { "TMDB API base switched to ${API_BASE_URLS[fallbackIndex]}" }
+            return response
+        }
+    }
+
+    /**
+     * Bangumi 关联接口连续失败的次数, 到 [LINEAGE_FAILURE_LIMIT] 就本次进程不再尝试.
+     *
+     * `api.bgm.tv` 在部分网络下被 DNS 投毒 (解析到无关 IP), 每次请求要 IPv4 + IPv6 各等满
+     * 5 秒连接超时 = 10 秒; 而它卡在 backdrop 解析的关键路径上 (直搜没命中 → 回溯根条目名 →
+     * 拿新名字重搜), 于是**每个**直搜未命中的条目都要白等这 10 秒 (issue #7 报告者日志实测).
+     *
+     * 这种不通是持续状态而不是偶发, 一直重试没有意义. 成功一次就清零 —— 临时抖动不该永久
+     * 关掉这条兜底路径; 冷启动也重新计数, 免得用户换了网络还被上次的判定卡着.
+     */
+    private var lineageFailureStreak = 0
+
+    /**
+     * 在途的 backdrop 解析, **精确按 subjectId 合流** (single-flight).
+     *
+     * hero 的聚焦请求和网格邻居预取几乎同时进来时, 两边都会读到"缓存里还没有"然后各自打一遍
+     * 网络 —— 实测同一条目的 search/alternative_titles 整组请求发了两轮 (issue #7 报告者日志),
+     * 在 2 秒/请求的线路上等于白白翻倍.
+     *
+     * **不能用分桶锁代替** (原来是 `subjectId % 16` 的 16 把锁): 撞桶时前台聚焦请求会排在一条
+     * **无关**条目的后台预取后面, 而这台机器上后台预取挂死 10 秒是常态, 最坏顶到外层 15 秒
+     * 超时 —— 等于把上层 [TvHeroPrefetch] 排好的前台优先级又随机打乱一次. 概率也不低: 网格页
+     * 一步发四个邻居预取, 前台撞上任一个约 1/4.
+     *
+     * 精确合流还多一层收益: 同条目的后来者直接 `await` 同一个结果, 而不是排队再跑一遍缓存检查.
+     * 表不会无限增长 —— 任务完成即摘除, 里面只有此刻真在解析的那几条.
+     */
+    private val backdropInFlight = mutableMapOf<Int, Deferred<String?>>()
+
+    private val backdropInFlightLock = Mutex()
+
+    /**
+     * 承载合流任务的作用域: 任务不能挂在**发起者**的协程上 —— 发起者 (某次聚焦) 被取消时,
+     * 合流到它身上的其他调用方不该跟着一起失败, 而且这条链跑完写进缓存对谁都有用.
+     */
+    private val resolveScope = CoroutineScope(SupervisorJob() + ioDispatcher)
+
+    /**
      * 代理设置页的连通性探测.
      *
      * 接口和图片本体是两个域名 (`api.themoviedb.org` / `image.tmdb.org`), 在墙内各自独立
@@ -91,21 +233,40 @@ class TmdbImageService(
      */
     suspend fun testConnection(): Boolean = withContext(ioDispatcher) {
         val token = currentAniBuildConfig.tmdbApiToken
-        if (token.isBlank()) return@withContext false
-        try {
-            // /configuration 是最轻的鉴权端点, 顺带验证 token 有效 (token 不对是 401)
-            val apiOk = client.use {
-                get("$API_BASE_URL/configuration") {
-                    bearerAuth(token)
-                    shortConnectTimeout()
-                    expectSuccess = false
-                }.status.isSuccess()
+        if (token.isBlank()) {
+            // 不打这条的话, "这个包没配 token" 和 "网络不通" 在日志里长得一模一样 (都是静默失败)
+            logger.warn { "TMDB connection test failed: no API token in this build" }
+            return@withContext false
+        }
+        // 逐个域名试: 主域名在墙内连不上时备用域名往往是通的 (见 [API_BASE_URLS]).
+        // 结果记进 activeApiBaseIndex, 用户点完测试之后取图就直接走通的那个
+        val reachableIndex = API_BASE_URLS.indices.firstOrNull { index ->
+            val base = API_BASE_URLS[index]
+            try {
+                // /configuration 是最轻的鉴权端点, 顺带验证 token 有效 (token 不对是 401)
+                val status = client.use {
+                    get("$base/configuration") {
+                        bearerAuth(token)
+                        shortConnectTimeout()
+                        expectSuccess = false
+                    }.status
+                }
+                if (!status.isSuccess()) logger.warn { "TMDB connection test: $base returned $status" }
+                status.isSuccess()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logger.warn(e) { "TMDB connection test: $base unreachable" }
+                false
             }
-            if (!apiOk) return@withContext false
-            // 图片 CDN 只看能否拿到 HTTP 响应, 不看状态码: 裸目录本身就会返回 4xx,
-            // 那不代表被墙; 被墙的表现是连不上或超时, 会抛到下面的 catch
+        } ?: return@withContext false
+        activeApiBaseIndex = reachableIndex
+
+        try {
+            // 图片 CDN 只看能否拿到 HTTP 响应, 不看状态码 (见 [IMAGE_PROBE_URL]);
+            // 被墙的表现是连不上或超时, 会抛到下面的 catch
             client.use {
-                head(IMAGE_BASE_URL) {
+                head(IMAGE_PROBE_URL) {
                     shortConnectTimeout()
                     expectSuccess = false
                 }
@@ -114,39 +275,65 @@ class TmdbImageService(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            logger.warn(e) { "TMDB connection test failed" }
+            logger.warn(e) { "TMDB connection test: image CDN unreachable" }
             false
         }
     }
 
     /**
-     * 本进程内已解析出结果的 backdrop (subjectId -> URL, `""` = 已确认无图).
+     * 本进程内已解析出结果的 backdrop: subjectId -> URL, **值为 `null` = 已确认无图**,
+     * 键不存在 = 还没解析过. 这是**全应用唯一的一层进程级 backdrop 热缓存**.
      *
-     * 存在的意义是**同步可读** (见 [peekBackdropUrl]): [getBackdropUrl] 即使全部命中持久缓存,
-     * 也要走一次 `withContext(ioDispatcher)` + DataStore 读盘, 耗时随磁盘/GC 抖动 ——
-     * 详情页首帧等不到它, 只能先按"加载中"渲染, 之后再把图淡进来.
-     * 它同时是 [getBackdropUrl] 自己的第一道查表 (只短路正缓存, 原因见那里), 页面级薄映射
-     * 被清空后重新问过来的条目不必再读一次盘.
+     * 存在的意义有两个:
+     *  - **同步可读** (见 [peekBackdropUrl]): [getBackdropUrl] 即使全部命中持久缓存,
+     *    也要走一次 `withContext(ioDispatcher)` + DataStore 读盘, 耗时随磁盘/GC 抖动 ——
+     *    详情页首帧等不到它, 只能先按"加载中"渲染, 之后再把图淡进来.
+     *  - **快照可观察**: TV 各页的 hero 背景直接在组合里读它 (经 `tvHeroBackdropUrl`),
+     *    预取写入后自动重组. 曾经页面层还各自养过薄映射 (最多时四份互不相认), 同一部作品
+     *    从哪个页面进详情页首帧长什么样取决于哪张表恰好有货 —— 现在只有这一张.
      *
-     * 写入是 copy-on-write 的整表替换 (读方永远看到一个完整的不可变 map); 并发写最坏是丢一条,
-     * 表现为该条目这次没命中热缓存, 无副作用.
+     * 有界: 超过 [RESOLVED_HOT_CACHE_MAX] 时**按写入顺序淘汰最老的一批**, 不整表清空
+     * (清空会让长会话里早就解析过的条目成批退化回"先空着再淡入", 还会卡住探索页的跳转门控).
+     * 淘汰只丢热缓存, 持久层还在, 代价是那些条目下次要多一次读盘.
+     *
+     * 写入可能来自多个 IO 线程, 淘汰簿记用 [resolvedLock] 保护; SnapshotStateMap 自身线程安全.
      */
-    @Volatile
-    private var resolvedBackdropUrls: Map<Int, String> = emptyMap()
+    private val resolvedBackdropUrls = mutableStateMapOf<Int, String?>()
+    private val resolvedLock = SynchronizedObject()
+
+    /** 写入顺序簿记, 只在 [resolvedLock] 里碰; 与表一起构成"淘汰最老"而不是"整表清空". */
+    private val resolvedInsertionOrder = ArrayDeque<Int>()
 
     /**
-     * 同步读取本进程**已经解析过**的 backdrop 结果, 不发请求也不读盘.
+     * 同步读取本进程**已经解析过**的 backdrop URL, 不发请求也不读盘.
      *
      * 给"上一个页面早就查过同一条目"的场景做首帧初值用 (TV 探索/搜索/时间表页聚焦时会预取
      * 背景图, 点进详情页时结果就在这张表里). 首帧直接拿到 URL 意味着图还在 Coil 内存缓存里,
      * 详情页 Hero 一进场就是满的, 没有"先空着再淡入"那一下.
      *
-     * @return URL; `""` = 已确认无图 (调用方应走无图回退); `null` = 本进程还没解析过, 按加载中处理.
+     * 在组合里读是**快照订阅**: 结果落表时读方自动重组.
+     *
+     * @return URL; `null` = 没有图 —— 可能是已确认无图, 也可能是还没解析过,
+     *   两者要区分时用 [peekBackdropResolved] (不再用空串混编在返回值里).
      */
     fun peekBackdropUrl(subjectId: Int): String? = resolvedBackdropUrls[subjectId]
 
-    private fun rememberResolvedBackdrop(subjectId: Int, url: String) {
-        resolvedBackdropUrls = resolvedBackdropUrls + (subjectId to url)
+    /** 该条目是否已解析过 (含"已确认无图"). 与 [peekBackdropUrl] 一起构成三态. */
+    fun peekBackdropResolved(subjectId: Int): Boolean = resolvedBackdropUrls.containsKey(subjectId)
+
+    private fun rememberResolvedBackdrop(subjectId: Int, url: String?) {
+        synchronized(resolvedLock) {
+            if (subjectId !in resolvedBackdropUrls) {
+                resolvedInsertionOrder.addLast(subjectId)
+                // 淘汰一批而不是一条: 均摊掉每次写入都要动表的开销
+                if (resolvedInsertionOrder.size > RESOLVED_HOT_CACHE_MAX) {
+                    repeat(RESOLVED_HOT_CACHE_EVICT_BATCH) {
+                        resolvedInsertionOrder.removeFirstOrNull()?.let { resolvedBackdropUrls.remove(it) }
+                    }
+                }
+            }
+            resolvedBackdropUrls[subjectId] = url
+        }
     }
 
     /**
@@ -162,67 +349,80 @@ class TmdbImageService(
         activeAsOfDate: String? = null,
     ): String? {
         // 本进程已解析出 URL 的直接给结果, 连 withContext 与读盘都省掉 (正缓存永久有效, 读盘只会
-        // 拿到同一个 URL). 页面级的薄映射 (如 TvHeroMediaCache.backdrops) 超量时是整表清空的,
-        // 清空后成批条目会重新走到这里 —— 少了这道短路, 早就解析过的卡要等一次 DataStore 读盘
-        // 才拿回图, hero 背景当场空一下再淡回来.
+        // 拿到同一个 URL).
         //
-        // 负缓存 ("") 故意不在这里短路: 它该不该重取取决于 activeAsOfDate 与重取闸门, 而这张表
-        // 只记结果不记时间, 短路会把"传了更近播出日期本该重取一次"的条目钉死到进程结束.
-        resolvedBackdropUrls[subjectId]?.takeIf { it.isNotEmpty() }?.let { return it }
+        // 负缓存 (值为 null) 故意不在这里短路: 它该不该重取取决于 activeAsOfDate 与重取闸门,
+        // 而这张表只记结果不记时间, 短路会把"传了更近播出日期本该重取一次"的条目钉死到进程结束.
+        // `map[id]` 对"值为 null"与"没解析过"都返回 null, 正好只短路正缓存.
+        resolvedBackdropUrls[subjectId]?.let { return it }
         return resolveBackdropUrl(subjectId, originalName, activeAsOfDate)
     }
 
-    /** 读盘 / 走网络的慢路径, 仅由 [getBackdropUrl] 在进程内热缓存未命中时调用. */
+    /**
+     * 读盘 / 走网络的慢路径, 仅由 [getBackdropUrl] 在进程内热缓存未命中时调用.
+     * 同一条目的并发调用合流到同一个任务上, 见 [backdropInFlight].
+     */
     private suspend fun resolveBackdropUrl(
         subjectId: Int,
         originalName: String,
         activeAsOfDate: String?,
+    ): String? {
+        if (currentAniBuildConfig.tmdbApiToken.isBlank() || originalName.isBlank()) return null
+        val task = backdropInFlightLock.withLock {
+            backdropInFlight[subjectId] ?: resolveScope.async {
+                try {
+                    doResolveBackdropUrl(subjectId, originalName, activeAsOfDate)
+                } finally {
+                    backdropInFlightLock.withLock { backdropInFlight.remove(subjectId) }
+                }
+            }.also { backdropInFlight[subjectId] = it }
+        }
+        return task.await()
+    }
+
+    private suspend fun doResolveBackdropUrl(
+        subjectId: Int,
+        originalName: String,
+        activeAsOfDate: String?,
     ): String? = withContext(ioDispatcher) {
-        if (currentAniBuildConfig.tmdbApiToken.isBlank() || originalName.isBlank()) return@withContext null
+        run {
+            // 合流等待期间前一个任务可能已经把这条解析完了, 再看一眼热表, 命中就连读盘都省了
+            resolvedBackdropUrls[subjectId]?.let { return@withContext it }
 
-        val cache = readCache()
-        cache.backdropUrls[subjectId]?.let { cached ->
-            if (cached.isNotEmpty()) {
-                // 正缓存永久有效: URL 拿到就不会变
-                rememberResolvedBackdrop(subjectId, cached)
-                return@withContext cached
+            val cache = readCache()
+            cache.backdropUrls[subjectId]?.let { cached ->
+                if (cached.isNotEmpty()) {
+                    // 正缓存永久有效: URL 拿到就不会变
+                    rememberResolvedBackdrop(subjectId, cached)
+                    return@withContext cached
+                }
+                // 负缓存: 过期才重取, 且闸门保证进程内每条目只放行一次 ——
+                // TMDB 侧确实没图时, 反复进出详情页不会反复空拉
+                val stale = negativeCacheStale(cache.backdropMissAt[subjectId], activeAsOfDate)
+                if (!backdropRefreshGate.shouldRefresh(subjectId) { stale }) {
+                    rememberResolvedBackdrop(subjectId, null)
+                    return@withContext null
+                }
+                logger.info { "Retrying TMDB backdrop for subject $subjectId (negative cache expired)" }
             }
-            // 负缓存: 过期才重取, 且闸门保证进程内每条目只放行一次 ——
-            // TMDB 侧确实没图时, 反复进出详情页不会反复空拉
-            val stale = negativeCacheStale(cache.backdropMissAt[subjectId], activeAsOfDate)
-            if (!backdropRefreshGate.shouldRefresh(subjectId) { stale }) {
-                rememberResolvedBackdrop(subjectId, "")
-                return@withContext null
-            }
-            logger.info { "Retrying TMDB backdrop for subject $subjectId (negative cache expired)" }
-        }
 
-        val path = try {
-            searchLayered(originalName, { resolveLineageOrNull(subjectId, originalName)?.rootName }) { query ->
-                searchBackdropPath(query)
+            val path = try {
+                searchLayered(originalName, { resolveLineageOrNull(subjectId, originalName)?.rootName }) { query ->
+                    searchBackdropPath(query)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logger.warn(e) { "Failed to search TMDB backdrop for subject $subjectId, will retry next time" }
+                return@withContext null // 网络错误不写缓存, 下次进页面重试
             }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            logger.warn(e) { "Failed to search TMDB backdrop for subject $subjectId, will retry next time" }
-            return@withContext null // 网络错误不写缓存, 下次进页面重试
-        }
 
-        val url = path?.let { "$IMAGE_BASE_URL$it" }
-        logger.info { "TMDB backdrop for subject $subjectId: ${url ?: "not found"}" }
-        dataStore.updateData {
-            it.copy(
-                backdropUrls = it.backdropUrls + (subjectId to (url ?: "")),
-                // 拿到图就清掉时间戳, 免得这个 map 随收藏量无限增长
-                backdropMissAt = if (url != null) {
-                    it.backdropMissAt - subjectId
-                } else {
-                    it.backdropMissAt + (subjectId to currentTimeMillis())
-                },
-            )
+            val url = path?.let { "$IMAGE_BASE_URL$it" }
+            logger.info { "TMDB backdrop for subject $subjectId: ${url ?: "not found"}" }
+            dataStore.updateData { it.withBackdropResult(subjectId, url) }
+            rememberResolvedBackdrop(subjectId, url)
+            url
         }
-        rememberResolvedBackdrop(subjectId, url ?: "")
-        url
     }
 
     /**
@@ -288,7 +488,7 @@ class TmdbImageService(
 
     /** `/{type}/{id}/images` 的全部 backdrop 路径 (TMDB 已按投票排序). */
     private suspend fun fetchBackdropPaths(ref: TmdbMediaRef): List<String> = client.use {
-        val body = get("$API_BASE_URL/${ref.type}/${ref.id}/images") {
+        val body = getApi("/${ref.type}/${ref.id}/images") {
             bearerAuth(currentAniBuildConfig.tmdbApiToken)
             shortConnectTimeout()
         }.bodyAsText()
@@ -307,6 +507,10 @@ class TmdbImageService(
      * 用户切换 APP 语言后按新语言重取 (简介是本地化字段).
      * 图片本体由 UI 层 (LazyRow + coil) 惰性加载, 此处只返回 URL.
      *
+     * **返回 null = 这次没拿到** (网络失败且没有可用旧缓存), 与"成功拉取但 TMDB 上确实没有
+     * 剧照"(返回空的 [TmdbEpisodeStills]) 是两回事: 调用方若把前者也当成"确认无图"记进自己的
+     * 缓存, 一次瞬时抖动就会让该条目在整个进程生命周期里再不重试.
+     *
      * @param language TMDB 语言码 (如 `zh-CN`), 决定简介语言.
      * @param newestWantedAirDate 调用方希望缓存覆盖到的最新播出日期 (`YYYY-MM-DD`).
      *   缓存是按条目永久保存的, 连载番早先拉取的缓存不含之后新播的集; 传入此参数后,
@@ -318,7 +522,7 @@ class TmdbImageService(
         originalName: String,
         language: String,
         newestWantedAirDate: String? = null,
-    ): TmdbEpisodeStills =
+    ): TmdbEpisodeStills? =
         withContext(ioDispatcher) {
             if (currentAniBuildConfig.tmdbApiToken.isBlank() || originalName.isBlank()) {
                 return@withContext TmdbEpisodeStills()
@@ -337,8 +541,8 @@ class TmdbImageService(
                 throw e
             } catch (e: Exception) {
                 logger.warn(e) { "Failed to fetch TMDB episode stills for subject $subjectId, will retry next time" }
-                // 网络错误不写缓存; 陈旧重取失败时继续用旧缓存, 首次拉取失败下次进页面重试
-                return@withContext cached ?: TmdbEpisodeStills()
+                // 网络错误不写缓存; 陈旧重取失败时继续用旧缓存, 首次拉取失败返回 null (见 KDoc)
+                return@withContext cached
             }
 
             // 陈旧重取拿到空结果 (如 TMDB 瞬时搜索不中) 时保留旧缓存, 不用坏数据覆盖好数据
@@ -456,7 +660,7 @@ class TmdbImageService(
 
         // language: 顺带取整部剧的本地化简介 (Bangumi 简介为日文原文时整段替换用);
         // TMDB 无该语言翻译时 overview 为空串, 存 null 由 Bangumi 简介兜底
-        val detailBody = get("$API_BASE_URL/tv/$tvId") {
+        val detailBody = getApi("/tv/$tvId") {
             parameter("language", language)
             bearerAuth(token)
             shortConnectTimeout()
@@ -491,7 +695,7 @@ class TmdbImageService(
         for (season in indexedSeasons) {
             // language: 分集简介取该语言的翻译 (无翻译时 overview 为空, 由 Bangumi 简介兜底);
             // still/时长/日期与语言无关.
-            val seasonBody = get("$API_BASE_URL/tv/$tvId/season/${season.seasonNumber}") {
+            val seasonBody = getApi("/tv/$tvId/season/${season.seasonNumber}") {
                 parameter("language", language)
                 bearerAuth(token)
                 shortConnectTimeout()
@@ -522,7 +726,7 @@ class TmdbImageService(
         val byName = mutableMapOf<String, TmdbEpisodeMedia?>()
         if (specialsByNumber.isNotEmpty()) {
             val originalLanguage = detail.originalLanguage?.takeIf { it.isNotBlank() } ?: "ja"
-            val s0Body = get("$API_BASE_URL/tv/$tvId/season/0") {
+            val s0Body = getApi("/tv/$tvId/season/0") {
                 parameter("language", originalLanguage)
                 bearerAuth(token)
                 shortConnectTimeout()
@@ -586,44 +790,58 @@ class TmdbImageService(
      * 直接调 Bangumi v0 公开 API 而非 Ani API: 后者服务端会过滤掉「主线故事」关系
      * (实测 getRelatedSubjects 对 Re:ゼロ休憩時間只返回续集). 失败返回 null, 不影响兜底.
      */
-    private suspend fun resolveLineageOrNull(subjectId: Int, originalName: String): BgmLineage? = try {
-        var currentId = subjectId
-        var rootName: String? = null
-        var sawMainStoryEdge = false
-        val seen = mutableSetOf(subjectId)
-        var hops = 0
-        while (hops < MAX_RELATION_HOPS) {
-            val body = client.use {
-                get("$BANGUMI_API_BASE_URL/v0/subjects/$currentId/subjects") {
-                    shortConnectTimeout()
-                }.bodyAsText()
+    private suspend fun resolveLineageOrNull(subjectId: Int, originalName: String): BgmLineage? {
+        // 先走 Ani 的关系索引: 墙内可直连, 一次请求直接拿到名字 (见 [resolveLineageViaAni]).
+        // 它给不出系列主条目时才回落到下面的 Bangumi 逐跳回溯.
+        resolveLineageViaAni(subjectId, originalName)?.let { return it }
+        if (lineageFailureStreak >= LINEAGE_FAILURE_LIMIT) return null
+        return try {
+            var currentId = subjectId
+            var rootName: String? = null
+            var sawMainStoryEdge = false
+            val seen = mutableSetOf(subjectId)
+            var hops = 0
+            while (hops < MAX_RELATION_HOPS) {
+                val body = client.use {
+                    get("$BANGUMI_API_BASE_URL/v0/subjects/$currentId/subjects") {
+                        lineageTimeout()
+                    }.bodyAsText()
+                }
+                val relations = json.decodeFromString(ListSerializer(BgmRelatedSubject.serializer()), body)
+                    .filter { it.type == BGM_SUBJECT_TYPE_ANIME }
+                val mainStory = relations.firstOrNull { it.relation == "主线故事" }
+                if (mainStory != null) sawMainStoryEdge = true
+                val next = mainStory
+                    ?: relations.firstOrNull { it.relation == "前传" }
+                    ?: break
+                if (!seen.add(next.id)) break
+                currentId = next.id
+                if (next.name.isNotBlank()) rootName = next.name
+                hops++
             }
-            val relations = json.decodeFromString(ListSerializer(BgmRelatedSubject.serializer()), body)
-                .filter { it.type == BGM_SUBJECT_TYPE_ANIME }
-            val mainStory = relations.firstOrNull { it.relation == "主线故事" }
-            if (mainStory != null) sawMainStoryEdge = true
-            val next = mainStory
-                ?: relations.firstOrNull { it.relation == "前传" }
-                ?: break
-            if (!seen.add(next.id)) break
-            currentId = next.id
-            if (next.name.isNotBlank()) rootName = next.name
-            hops++
-        }
-        BgmLineage(
-            rootName = rootName?.takeIf { it != originalName },
-            isDerivative = sawMainStoryEdge,
-        ).also {
-            logger.info {
-                "Resolved lineage for $subjectId: root=${it.rootName ?: "(self)"}, " +
-                    "derivative=${it.isDerivative} ($hops hops)"
+            lineageFailureStreak = 0
+            BgmLineage(
+                rootName = rootName?.takeIf { it != originalName },
+                isDerivative = sawMainStoryEdge,
+            ).also {
+                logger.info {
+                    "Resolved lineage for $subjectId: root=${it.rootName ?: "(self)"}, " +
+                        "derivative=${it.isDerivative} ($hops hops)"
+                }
             }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            lineageFailureStreak++
+            logger.warn(e) {
+                "Failed to resolve lineage via Bangumi relations for subject $subjectId " +
+                    "($lineageFailureStreak/$LINEAGE_FAILURE_LIMIT consecutive failures)"
+            }
+            if (lineageFailureStreak >= LINEAGE_FAILURE_LIMIT) {
+                logger.warn { "Bangumi relation lookups disabled for this session (api.bgm.tv unreachable)" }
+            }
+            null
         }
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        logger.warn(e) { "Failed to resolve lineage via Bangumi relations for subject $subjectId" }
-        null
     }
 
     /**
@@ -656,7 +874,7 @@ class TmdbImageService(
      * 插字/换字则拒绝. 校验失败宁可无结果, 交给下一层候选 (关联回溯/削字).
      */
     private suspend fun searchAnime(query: String, type: String): TmdbAnimeSearchResults = client.use {
-        val body = get("$API_BASE_URL/search/$type") {
+        val body = getApi("/search/$type") {
             parameter("query", query)
             parameter("include_adult", "true")
             bearerAuth(currentAniBuildConfig.tmdbApiToken)
@@ -691,7 +909,7 @@ class TmdbImageService(
     }
 
     private suspend fun fetchAlternativeTitles(id: Int, type: String): List<String> = client.use {
-        val body = get("$API_BASE_URL/$type/$id/alternative_titles") {
+        val body = getApi("/$type/$id/alternative_titles") {
             bearerAuth(currentAniBuildConfig.tmdbApiToken)
             shortConnectTimeout()
         }.bodyAsText()
@@ -783,14 +1001,61 @@ class TmdbImageService(
 
     private companion object {
         private val logger = logger<TmdbImageService>()
-        private const val API_BASE_URL = "https://api.themoviedb.org/3"
+        /**
+         * TMDB API 的两个域名, 按优先级排列, 都是官方的: `api.tmdb.org` 的证书主体是
+         * `CN=*.tmdb.org` (Amazon ACM 签发), 与 `api.themoviedb.org` 同为 CloudFront 后端,
+         * 同一个 token 通用, 响应逐字节一致.
+         *
+         * 主用别名的原因: `api.themoviedb.org` 在中国大陆基本连不上 (TCP 超时, 不是 DNS
+         * 投毒 —— 报告者开了加密 DNS 也救不回来, 家宽和移动流量都一样), 而封锁按 SNI 域名
+         * 粒度做, 换个域名就绕开了. 图床 `image.tmdb.org` 一直是通的, 所以只要 API 能通,
+         * 图就能出来 (issue #7).
+         *
+         * 不删掉 `api.themoviedb.org`: 别名是官方不宣传的历史域名, 可能下线或以后也被墙,
+         * 留作回退. 见 [getApi].
+         */
+        private val API_BASE_URLS = listOf(
+            "https://api.tmdb.org/3",
+            "https://api.themoviedb.org/3",
+        )
         private const val IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w1280"
+
+        /**
+         * 图床连通性探测用的真实图片 (w92 档, 约 9 KB).
+         *
+         * 不探裸目录 `t/p/w1280`: 那个路径边缘不缓存, 每次都回源, 实测要 2.5 秒才吐一个 404,
+         * 还偶发 `Connection reset` —— 一次探测两个请求就占掉 5 秒, 探测本身成了设置页
+         * 那一行慢的主因 (issue #7 报告者日志). 真实图片命中边缘缓存, 快且稳, 顺带验证了
+         * 图片确实下得下来.
+         *
+         * 这张图哪天被换掉也不影响判定: 这里只看能否拿到 HTTP 响应, 不看状态码 —— 404
+         * 同样说明域名是通的, 被墙才会连不上或超时.
+         */
+        private const val IMAGE_PROBE_URL = "https://image.tmdb.org/t/p/w92/rBOnrVlck7BIlGeWVlzYiZeg4l2.jpg"
         private const val GENRE_ANIMATION = 16
         private const val BANGUMI_API_BASE_URL = "https://api.bgm.tv"
         private const val BGM_SUBJECT_TYPE_ANIME = 2
 
         /** 关联回溯跳数上限 (实测常见链 1-2 跳, 上限只是环路/脏数据保险). */
         private const val MAX_RELATION_HOPS = 8
+
+
+        /**
+         * 关联回溯连续失败多少次后本次进程放弃 (见 [lineageFailureStreak]).
+         *
+         * 取 2 而不是 1: 单次失败可能只是抖动, 两次连续失败基本可以断定这条网络到
+         * `api.bgm.tv` 不通. 再大就没意义了 —— 每多试一次就是白等 10 秒.
+         */
+        private const val LINEAGE_FAILURE_LIMIT = 2
+
+        /**
+         * 进程内 backdrop 热表的容量上限. 远高于一次浏览会掠过的条目数 (单条只是一个 URL 字符串);
+         * 超限按写入顺序淘汰最老一批 —— 见 [resolvedBackdropUrls] 处不许整表清空的原因.
+         */
+        private const val RESOLVED_HOT_CACHE_MAX = 600
+
+        /** 超限时一次淘汰的条数 (均摊淘汰开销, 不必每次写入都动表). */
+        private const val RESOLVED_HOT_CACHE_EVICT_BATCH = 100
 
         /** 最新已播集在此天数内 = 还在播或刚完结, 负缓存按 [NEGATIVE_CACHE_TTL_AIRING] 失效. */
         private const val NEGATIVE_CACHE_AIRING_DAYS = 60
@@ -842,6 +1107,53 @@ private fun Char.isCjkOrKana(): Boolean =
     this in '぀'..'ヿ' || // 平假名 + 片假名 (含长音符 ー)
         this in '一'..'鿿' || // CJK 统一汉字
         this == '々' // 々 (叠字符)
+
+/**
+ * 写入一条 backdrop 解析结果, **并把持久表压在上限内**.
+ *
+ * ## 为什么必须有上限
+ *
+ * `dataStore.updateData { it.copy(backdropUrls = map + entry) }` 是**整表复制 + 整个缓存重新
+ * 序列化落盘**, 所以每解析一个新条目的写盘成本是 `O(已缓存条目数)`. 这张表原先没有任何上限
+ * (旁边 [TmdbImageCache.backdropMissAt] 那句"免得随收藏量无限增长"说的是时间戳表, 主表漏了),
+ * 于是成本随使用**单调上升且持久化** —— 重装前不会自愈.
+ *
+ * 从前增长速度是"用户真正聚焦过的条目", 一天几十条还能忍; 加了邻居预取之后每移动一格要解析
+ * 最多四个条目 (聚焦 + 三个邻居), 增速直接翻几倍, 这个上限就成了必需品.
+ *
+ * ## 为什么是写入顺序而不是真 LRU
+ *
+ * 真 LRU 要在**每次读命中**时把条目移到队尾, 而读命中是最热的路径 (每次聚焦都查) —— 那等于
+ * 把"零成本的读"变成"整表重写". 正缓存一旦写下就永久有效、后续全部走进程内热表短路, 所以
+ * 写入顺序≈首次解析顺序, 淘汰最早解析的那批与 LRU 的差别在这里可以忽略.
+ *
+ * 淘汰按批 ([PERSISTED_BACKDROP_EVICT_BATCH]) 而不是每次挤掉一条, 免得到达上限之后每一次
+ * 写入都要重算淘汰集。被淘汰的条目下次聚焦时重新走一次 TMDB, 只是慢一点, 不会出错。
+ */
+internal fun TmdbImageCache.withBackdropResult(subjectId: Int, url: String?): TmdbImageCache {
+    val urls = backdropUrls + (subjectId to (url ?: ""))
+    // 拿到图就清掉时间戳, 免得这个 map 随收藏量无限增长
+    val missAt = if (url != null) {
+        backdropMissAt - subjectId
+    } else {
+        backdropMissAt + (subjectId to currentTimeMillis())
+    }
+    if (urls.size <= PERSISTED_BACKDROP_MAX) {
+        return copy(backdropUrls = urls, backdropMissAt = missAt)
+    }
+    // Map.plus 返回 LinkedHashMap, 反序列化出来的也是 —— keys 的迭代顺序就是写入顺序
+    val dropped = urls.keys.take(urls.size - PERSISTED_BACKDROP_MAX + PERSISTED_BACKDROP_EVICT_BATCH).toSet()
+    return copy(backdropUrls = urls - dropped, backdropMissAt = missAt - dropped)
+}
+
+/**
+ * 持久 backdrop 表的条目上限. 一条约 60 字节 (URL) —— 2000 条约 120KB, 是每次新解析都要
+ * 重新序列化的量, 再大就该换存储结构而不是抬上限了.
+ */
+private const val PERSISTED_BACKDROP_MAX = 2000
+
+/** 到达上限后一次淘汰多少条 (均摊重算淘汰集的开销). */
+private const val PERSISTED_BACKDROP_EVICT_BATCH = 200
 
 @Serializable
 data class TmdbImageCache(
@@ -981,15 +1293,20 @@ private data class TmdbImageFile(
     @SerialName("file_path") val filePath: String? = null,
 )
 
-/** Bangumi 关联条目回溯结果, 见 `resolveLineageOrNull`. */
+/** 条目所属系列的回溯结果, 见 `resolveLineageOrNull`. */
 private class BgmLineage(
     /** 根条目名 (通常是第一季); 与原名相同或没走到别的条目时为 null. */
     val rootName: String?,
     /**
      * 是否衍生/番外条目 (回溯链上出现过「主线故事」出边).
-     * false = 确认正传 (整链只有前传边), 建分集索引时可放心跳过 TMDB season 0 特别篇.
+     * true = 衍生, false = 确认正传 (整链只有前传边), 建分集索引时可放心跳过 TMDB season 0 特别篇.
+     *
+     * **null = 未知**, 必须与 false 区分开: 走 Ani 关系索引那条路时拿不到「主线故事」出边
+     * (见 `resolveLineageViaAni`), 若把未知当成"确认正传", 衍生条目的分集就会因为 S0 被殿后
+     * 而错拿正片数据 —— 正是各处判定注释里警告的那种错序. 三处判定都写成 `== false` /
+     * `== true` 的显式比较, null 自然落到"两边都不成立", 即维持原顺序.
      */
-    val isDerivative: Boolean,
+    val isDerivative: Boolean?,
 )
 
 /** Bangumi v0 `/subjects/{id}/subjects` 关联条目; relation 是中文关系名 ("前传"/"主线故事"...). */

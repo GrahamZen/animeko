@@ -9,6 +9,9 @@
 
 package me.him188.ani.app.data.network
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import me.him188.ani.app.data.models.episode.EpisodeComment
 import me.him188.ani.app.data.models.episode.EpisodeCommentSource
@@ -22,10 +25,16 @@ class BangumiReplyRelationServiceTest {
     private var fetchCount = 0
     private var relations: Map<String, String>? = mapOf("r2" to "r1")
 
-    private fun createService() = BangumiReplyRelationService(
+    /** 每次取要花多久 (虚拟时间); 用来验证"等不到就先把评论发出去". */
+    private var fetchDelayMillis = 0L
+
+    private fun TestScope.createService() = BangumiReplyRelationService(
         nowMillis = { nowMillis },
+        // 用 backgroundScope: 请求的宿主必须独立于调用方, 调用方超时不能把它杀掉
+        scope = backgroundScope,
         fetchRelations = {
             fetchCount++
+            if (fetchDelayMillis > 0) delay(fetchDelayMillis)
             relations
         },
     )
@@ -91,6 +100,63 @@ class BangumiReplyRelationServiceTest {
         service.fillInReplyTargets(1, listOf(bangumiComment()))
         service.fillInReplyTargets(2, listOf(bangumiComment()))
         assertEquals(2, fetchCount)
+    }
+
+    @Test
+    fun `来回切集命中缓存, 不重发`() = runTest {
+        val service = createService()
+        service.fillInReplyTargets(1, listOf(bangumiComment()))
+        service.fillInReplyTargets(2, listOf(bangumiComment()))
+        // 单格缓存时代第 1 集已被第 2 集顶掉, 这里会发第 3 次请求
+        service.fillInReplyTargets(1, listOf(bangumiComment()))
+        service.fillInReplyTargets(2, listOf(bangumiComment()))
+        assertEquals(2, fetchCount)
+    }
+
+    @Test
+    fun `超过容量淘汰最久未用的那集`() = runTest {
+        val service = createService()
+        // 容量 4: 取第 5 集时应淘汰最老的第 1 集
+        (1L..5L).forEach { service.fillInReplyTargets(it, listOf(bangumiComment())) }
+        assertEquals(5, fetchCount)
+        // 第 5 集还在
+        service.fillInReplyTargets(5, listOf(bangumiComment()))
+        assertEquals(5, fetchCount)
+        // 第 1 集已被淘汰, 要重取
+        service.fillInReplyTargets(1, listOf(bangumiComment()))
+        assertEquals(6, fetchCount)
+    }
+
+    @Test
+    fun `取得慢就先把评论发出去, 不等满`() = runTest {
+        fetchDelayMillis = 2_500 // > BLOCKING_BUDGET
+        val service = createService()
+        val result = service.fillInReplyTargets(1, listOf(bangumiComment()))
+        // 没等到关系: 原样返回 (正文引用推断的那份还在, 只是少一行"回复 @某人")
+        assertNull(result[0].replies[1].replyToCommentId)
+        assertEquals(1, fetchCount)
+    }
+
+    @Test
+    fun `没等满的那次请求继续在后台跑完, 下次直接命中`() = runTest {
+        fetchDelayMillis = 2_500
+        val service = createService()
+        service.fillInReplyTargets(1, listOf(bangumiComment()))
+        // 调用方已经放弃等待, 但请求挂在 service 自己的作用域上, 不该被一起取消
+        // 用前台 delay 推进虚拟时间: advanceUntilIdle() 不跑 backgroundScope 里的任务
+        delay(3_000)
+        val result = service.fillInReplyTargets(1, listOf(bangumiComment()))
+        assertEquals("r1", result[0].replies[1].replyToCommentId)
+        assertEquals(1, fetchCount) // 后台那次的结果, 没有重发
+    }
+
+    @Test
+    fun `同一集并发翻页只发一次`() = runTest {
+        fetchDelayMillis = 100
+        val service = createService()
+        val pages = List(3) { async { service.fillInReplyTargets(1, listOf(bangumiComment())) } }
+        pages.forEach { it.await() }
+        assertEquals(1, fetchCount)
     }
 
     private fun bangumiComment(

@@ -10,12 +10,9 @@
 package me.him188.ani.app.ui.subject.episode.tv
 
 import androidx.compose.animation.animateContentSize
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -90,6 +87,11 @@ import me.him188.ani.app.ui.foundation.AsyncImage
 import me.him188.ani.app.ui.foundation.focus.resolveFocusRepeatedly
 import me.him188.ani.app.ui.foundation.focus.restoreFocusAfter
 import me.him188.ani.app.ui.foundation.ifThen
+import me.him188.ani.app.ui.foundation.tv.TvInWindowPanel
+import me.him188.ani.app.ui.foundation.tv.tvFieldBorder
+import me.him188.ani.app.ui.foundation.tv.tvFieldBorderStroke
+import me.him188.ani.app.ui.foundation.tv.tvPageScrollKeys
+import me.him188.ani.app.ui.richtext.CommentAsyncImage
 import me.him188.ani.app.ui.foundation.widgets.AniFocusActionButton
 import me.him188.ani.app.ui.foundation.widgets.centeredPanelColor
 import me.him188.ani.app.ui.lang.Lang
@@ -170,8 +172,8 @@ private const val TV_REPLY_DIALOG_WIDTH_FRACTION = 0.62f
 /** 回复弹窗高度占屏比. */
 private const val TV_REPLY_DIALOG_HEIGHT_FRACTION = 0.78f
 
-/** 引用区一次翻页的比例 (占可视高度): 留一点重叠, 免得漏读一行. */
-private const val TV_REPLY_QUOTE_PAGE_FRACTION = 0.8f
+/** 弹窗内各块 (引用区 / 输入框 / 预览) 的圆角: 裁剪与边框共用, 三块必须一致. */
+private val TV_REPLY_BLOCK_CORNER = 12.dp
 
 /** 图片加载完成前的占位高度. */
 private val TV_REPLY_IMAGE_PLACEHOLDER_HEIGHT = 160.dp
@@ -188,7 +190,8 @@ private val TV_REPLY_REACTION_STICKER_SIZE = 22.dp
  * 别只看这个数: 弹窗开着时控制层与评论面板都留在下面 (见调用处), 它自己的上/下渐变 scrim
  * 还要再叠一层, 屏幕上下缘的实际暗度是 `1-(1-本值)(1-那层)`. 所以这层给得比一般弹窗遮罩松.
  */
-private val TV_REPLY_SCRIM_COLOR = Color.Black.copy(alpha = 0.38f)
+/** 弹窗内容内边距: 比面板默认那档宽一些, 这里内容多且有输入框. */
+private val TV_REPLY_DIALOG_PADDING = 28.dp
 
 /**
  * 弹窗内取色一律走配色表, 与其他弹窗 (更换弹幕、评分等) 同一套语言:
@@ -302,32 +305,29 @@ internal fun TvCommentReplyDialog(
     // 选中的表情包: 记在弹窗这一层, 关掉选择器再开还在原来那一包
     var stickerPackIndex by remember { mutableIntStateOf(0) }
 
-    Box(
-        modifier
-            .fillMaxSize()
-            .background(TV_REPLY_SCRIM_COLOR)
-            // 焦点锁在弹窗内: 不锁的话引用区按上键/按钮按下键会滑到底下仍在场的胶囊行与
-            // 进度条上 (弹窗还挡着, 看不见焦点在哪), 返回键又只会关弹窗
-            .focusProperties { onExit = { cancelFocusChange() } }
-            .focusGroup(),
-        contentAlignment = Alignment.Center,
+    TvInWindowPanel(
+        widthFraction = TV_REPLY_DIALOG_WIDTH_FRACTION,
+        modifier = modifier,
+        // 没有引用区就按内容收高: 撑满屏高的话输入框和发送按钮会吊在一大片空白下面
+        heightFraction = if (quoted != null) TV_REPLY_DIALOG_HEIGHT_FRACTION else null,
+        contentPadding = TV_REPLY_DIALOG_PADDING,
+        overlay = {
+            // 表情选择器: 盖在本弹窗之上 (同一个全屏 Box 里的第二个孩子). 返回键先关它再关本弹窗,
+            // 由根路由处理 (见 TvEpisodeScreen) —— 它在弹窗之上, 但按键仍走那唯一一条路由
+            if (stickerPickerOpen) {
+                TvStickerPicker(
+                    selectedPackIndex = stickerPackIndex,
+                    onSelectPack = { stickerPackIndex = it },
+                    onPick = { token ->
+                        editorState.insertTextAt(token)
+                        // 挑中即关: 见 TvStickerPicker 的注释
+                        editorState.toggleStickerPanelState(false)
+                    },
+                    modifier = Modifier.matchParentSize(),
+                )
+            }
+        },
     ) {
-        Surface(
-            Modifier
-                .fillMaxWidth(TV_REPLY_DIALOG_WIDTH_FRACTION)
-                // 没有引用区就按内容收高: 撑满屏高的话输入框和发送按钮会吊在一大片空白下面
-                .then(if (quoted != null) Modifier.fillMaxHeight(TV_REPLY_DIALOG_HEIGHT_FRACTION) else Modifier),
-            shape = RoundedCornerShape(20.dp),
-            // 与其他弹窗同一个底色与内容色 (见 centeredPanelColor / AniCenteredPanelDialog)
-            color = centeredPanelColor,
-            contentColor = MaterialTheme.colorScheme.onSurface,
-        ) {
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .then(if (quoted != null) Modifier.fillMaxHeight() else Modifier)
-                    .padding(28.dp),
-            ) {
                 Text(
                     stringResource(
                         when {
@@ -358,39 +358,24 @@ internal fun TvCommentReplyDialog(
                     Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        // 翻到底 (canScrollForward = false) 才把下键放行, 由 down 指定落点进输入框;
-                        // 短评论一按即穿透. 上键对称: 翻到顶再往上没有目标, 焦点组会拦住.
-                        //
+                        // 上下键翻页 (与更新弹窗同一份实现): 翻到底 (canScrollForward = false)
+                        // 才把下键放行, 由下面的 down 指定落点进输入框; 短评论一按即穿透.
+                        // 上键对称: 翻到顶再往上没有目标, 焦点组会拦住
+                        .tvPageScrollKeys(scrollState)
                         // 左右键交给 [onNavigate] 换相邻评论: 引用区里左右无处可去, 原本只是被
                         // 焦点组拦住. 恒返回 true (没给回调时也吞掉), 免得焦点飘出弹窗
                         .onPreviewKeyEvent { event ->
                             // 焦点搜索只发生在 KeyDown, 所以 KeyUp 一律放行即可
                             if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                            val page = (scrollState.viewportSize * TV_REPLY_QUOTE_PAGE_FRACTION)
-                                .coerceAtLeast(1f)
-                            // 有草稿就不翻: 调用方换 target 时会按新评论重开编辑态
-                            // ([CommentEditorState.startEdit] 一换 target 就清空输入框),
-                            // 在软键盘上敲了半天的字会无声消失, 翻回来也只是再覆盖一次空串.
-                            // 键仍然吞掉 (下同), 免得焦点飘出弹窗
-                            val draftEmpty = editorState.content.text.isBlank()
-                            when {
-                                event.key == Key.DirectionDown && scrollState.canScrollForward -> {
-                                    scope.launch { scrollState.animateScrollBy(page) }
-                                    true
-                                }
-
-                                event.key == Key.DirectionUp && scrollState.canScrollBackward -> {
-                                    scope.launch { scrollState.animateScrollBy(-page) }
-                                    true
-                                }
-
-                                event.key == Key.DirectionLeft -> {
-                                    if (draftEmpty) onNavigate?.invoke(-1)
-                                    true
-                                }
-
-                                event.key == Key.DirectionRight -> {
-                                    if (draftEmpty) onNavigate?.invoke(1)
+                            when (event.key) {
+                                Key.DirectionLeft, Key.DirectionRight -> {
+                                    // 有草稿就不翻: 调用方换 target 时会按新评论重开编辑态
+                                    // ([CommentEditorState.startEdit] 一换 target 就清空输入框),
+                                    // 在软键盘上敲了半天的字会无声消失, 翻回来也只是再覆盖一次空串.
+                                    // 键仍然吞掉, 免得焦点飘出弹窗
+                                    if (editorState.content.text.isBlank()) {
+                                        onNavigate?.invoke(if (event.key == Key.DirectionLeft) -1 else 1)
+                                    }
                                     true
                                 }
 
@@ -411,14 +396,10 @@ internal fun TvCommentReplyDialog(
                         .focusRequester(quoteFocusRequester)
                         .onFocusChanged { quoteFocused = it.isFocused }
                         .focusable()
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(TV_REPLY_BLOCK_CORNER))
                         .background(quoteContainerColor)
                         // 聚焦即主题色描边 (与更换弹幕等弹窗同一套示焦)
-                        .border(
-                            width = if (quoteFocused) 2.dp else 1.dp,
-                            color = if (quoteFocused) MaterialTheme.colorScheme.primary else idleBorderColor,
-                            shape = RoundedCornerShape(12.dp),
-                        )
+                        .tvFieldBorder(quoteFocused, idleBorderColor, TV_REPLY_BLOCK_CORNER)
                         .padding(16.dp),
                 ) {
                     // 回应行钉在框底 (不随正文滚): 正文可能很长, 跟在末尾就得翻到底才看得见,
@@ -461,7 +442,7 @@ internal fun TvCommentReplyDialog(
 
                 // 只读态到这里就结束: 引用区已经 weight(1f) 撑满剩余高度
                 if (!target.canReply) {
-                    return@Column
+                    return@TvInWindowPanel
                 }
 
                 Spacer(Modifier.height(16.dp))
@@ -470,10 +451,11 @@ internal fun TvCommentReplyDialog(
                 if (previewing) {
                     Surface(
                         Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(TV_REPLY_BLOCK_CORNER),
                         color = fieldContainerColor,
                         contentColor = MaterialTheme.colorScheme.onSurface,
-                        border = BorderStroke(1.dp, idleBorderColor),
+                        // 预览态整块不可聚焦, 恒为未聚焦那一档
+                        border = tvFieldBorderStroke(focused = false, idleColor = idleBorderColor),
                     ) {
                         Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
                             if (previewBlocks == null) {
@@ -501,14 +483,11 @@ internal fun TvCommentReplyDialog(
                     }
                 } else Surface(
                     Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(TV_REPLY_BLOCK_CORNER),
                     color = fieldContainerColor,
                     contentColor = MaterialTheme.colorScheme.onSurface,
                     // 聚焦即主题色描边 (与 M3 输入框聚焦态、更换弹幕弹窗一致)
-                    border = BorderStroke(
-                        width = if (fieldFocused) 2.dp else 1.dp,
-                        color = if (fieldFocused) MaterialTheme.colorScheme.primary else idleBorderColor,
-                    ),
+                    border = tvFieldBorderStroke(fieldFocused, idleBorderColor),
                 ) {
                     BasicTextField(
                         value = editorState.content,
@@ -615,23 +594,6 @@ internal fun TvCommentReplyDialog(
                         upFocusRequester = actionUpFocus,
                     )
                 }
-            }
-        }
-
-        // 表情选择器: 盖在本弹窗之上 (同一个全屏 Box 里的第二个孩子). 返回键先关它再关本弹窗,
-        // 由根路由处理 (见 TvEpisodeScreen) —— 它在弹窗之上, 但按键仍走那唯一一条路由
-        if (stickerPickerOpen) {
-            TvStickerPicker(
-                selectedPackIndex = stickerPackIndex,
-                onSelectPack = { stickerPackIndex = it },
-                onPick = { token ->
-                    editorState.insertTextAt(token)
-                    // 挑中即关: 见 TvStickerPicker 的注释
-                    editorState.toggleStickerPanelState(false)
-                },
-                modifier = Modifier.matchParentSize(),
-            )
-        }
     }
 }
 
@@ -683,48 +645,30 @@ private fun TvCommentReactionRow(reactions: List<TvCommentReaction>, modifier: M
  */
 @Composable
 private fun TvCommentQuoteImage(url: String) {
-    val context = LocalPlatformContext.current
-    // 0: 加载中, 1: 出图了, 2: 失败
-    var state by remember(url) { mutableIntStateOf(0) }
-
-    // 评论里贴的是外部图床, 挂掉/被删是常态 (实测有评论贴的是已经没有 A 记录的域名).
-    // 原来失败后整块塌成 0 高度, 观感是"骨架屏闪一下然后凭空消失", 而卡片上明明写着 [图片];
-    // 退化成一行说明: 交代这里原本有张图且它已经取不回来了, 同时不再让正文高度跳变
-    if (state == 2) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                Icons.Rounded.BrokenImage,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-                tint = hintColor,
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(
-                stringResource(Lang.comment_image_unavailable),
-                style = MaterialTheme.typography.bodyMedium,
-                color = hintColor,
-            )
-        }
-        return
-    }
-
-    AsyncImage(
-        model = remember(url, context) {
-            ImageRequest.Builder(context)
-                .data(url)
-                .crossfade(false)
-                .build()
-        },
-        contentDescription = null,
-        modifier = Modifier
-            .fillMaxWidth()
-            .ifThen(state != 1) { heightIn(min = TV_REPLY_IMAGE_PLACEHOLDER_HEIGHT) }
-            .animateContentSize()
-            .placeholder(state == 0)
-            .clip(RoundedCornerShape(12.dp)),
+    CommentAsyncImage(
+        url,
+        Modifier.fillMaxWidth(),
         contentScale = ContentScale.FillWidth,
-        onSuccess = { state = 1 },
-        onError = { state = 2 },
+        cornerRadius = TV_REPLY_BLOCK_CORNER,
+        unloadedModifier = Modifier.heightIn(min = TV_REPLY_IMAGE_PLACEHOLDER_HEIGHT),
+        // 失败退化成一行说明: 交代这里原本有张图且它已经取不回来了, 同时不再让正文高度跳变.
+        // (共享富文本那边留空框, 因为它在长正文里, 一行字反而更像正文的一部分)
+        errorContent = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Rounded.BrokenImage,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = hintColor,
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    stringResource(Lang.comment_image_unavailable),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = hintColor,
+                )
+            }
+        },
     )
 }
 

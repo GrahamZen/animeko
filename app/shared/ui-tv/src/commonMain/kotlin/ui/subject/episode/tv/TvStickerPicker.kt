@@ -57,7 +57,7 @@ import androidx.compose.ui.unit.dp
 import me.him188.ani.app.ui.comment.BangumiStickers
 import me.him188.ani.app.ui.foundation.focus.resolveFocusRepeatedly
 import me.him188.ani.app.ui.foundation.ifThen
-import me.him188.ani.app.ui.foundation.widgets.centeredPanelColor
+import me.him188.ani.app.ui.foundation.tv.TvInWindowPanel
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.comment_add_emoji
 import me.him188.ani.app.ui.richtext.StickerImage
@@ -78,7 +78,6 @@ private const val TV_STICKER_DIALOG_WIDTH_FRACTION = 0.68f
 private const val TV_STICKER_DIALOG_HEIGHT_FRACTION = 0.7f
 
 /** 与评论弹窗同一层压暗 (它已经盖在评论弹窗上, 再暗一档就成黑屏了). */
-private val TV_STICKER_SCRIM_COLOR = Color.Black.copy(alpha = 0.38f)
 
 /**
  * 表情选择器: 左边选包, 右边选表情, 确定即把表情代码插进输入框.
@@ -122,26 +121,13 @@ internal fun TvStickerPicker(
         gridState.scrollToItem(0)
     }
 
-    Box(
-        modifier
-            .fillMaxSize()
-            .background(TV_STICKER_SCRIM_COLOR)
-            // 焦点锁在选择器内: 不锁的话网格边缘的方向键会滑到底下评论弹窗的按钮上
-            // (选择器还挡着, 看不见焦点在哪), 而返回键只会关选择器.
-            // onExit 要挂在焦点组上才拦得住, 与评论弹窗同一副写法
-            .focusProperties { onExit = { cancelFocusChange() } }
-            .focusGroup(),
-        contentAlignment = Alignment.Center,
+    // 焦点锁在选择器内 (不锁的话网格边缘的方向键会滑到底下评论弹窗的按钮上, 而返回键只会关
+    // 选择器), scrim 与面板几何都在 TvInWindowPanel
+    TvInWindowPanel(
+        widthFraction = TV_STICKER_DIALOG_WIDTH_FRACTION,
+        modifier = modifier,
+        heightFraction = TV_STICKER_DIALOG_HEIGHT_FRACTION,
     ) {
-        Surface(
-            Modifier
-                .fillMaxWidth(TV_STICKER_DIALOG_WIDTH_FRACTION)
-                .fillMaxHeight(TV_STICKER_DIALOG_HEIGHT_FRACTION),
-            shape = RoundedCornerShape(20.dp),
-            color = centeredPanelColor,
-            contentColor = MaterialTheme.colorScheme.onSurface,
-        ) {
-            Column(Modifier.fillMaxSize().padding(24.dp)) {
                 Text(
                     stringResource(Lang.comment_add_emoji),
                     style = MaterialTheme.typography.titleLarge,
@@ -235,8 +221,6 @@ internal fun TvStickerPicker(
                         }
                     }
                 }
-            }
-        }
     }
 }
 

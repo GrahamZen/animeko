@@ -114,6 +114,8 @@ import me.him188.ani.app.ui.danmaku.DanmakuEditorState
 import me.him188.ani.app.ui.foundation.AsyncImage
 import me.him188.ani.app.ui.foundation.avatar.AvatarImage
 import me.him188.ani.app.ui.foundation.focus.resolveFocusRepeatedly
+import me.him188.ani.app.ui.foundation.tv.TV_PILL_ICON_SIZE
+import me.him188.ani.app.ui.foundation.tv.TvPillShell
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.comment_reply_to
 import me.him188.ani.app.ui.lang.episode_send_danmaku
@@ -1362,8 +1364,11 @@ internal fun TvDanmakuSendEntry(
 
     val interactionSource = remember { MutableInteractionSource() }
     val focused by interactionSource.collectIsFocusedAsState()
-    Surface(
+    TvPillShell(
+        // 展开成输入框后即使聚焦也保持深色: 白底上放不下输入光标
+        highlighted = focused && !expanded,
         onClick = { if (!expanded) overlay.danmakuInputExpanded = true },
+        interactionSource = interactionSource,
         modifier = modifier
             .focusRequester(buttonFocusRequester)
             // 本按钮与面板胶囊同在 PILLS 区域, 但它不是面板触发器: 聚焦到它时收起浮出的
@@ -1384,47 +1389,37 @@ internal fun TvDanmakuSendEntry(
                     overlay.danmakuInputExpanded = false
                 }
             },
-        shape = CircleShape,
-        color = if (focused && !expanded) Color.White else Color.White.copy(alpha = 0.14f),
-        contentColor = if (focused && !expanded) Color.Black else Color.White,
-        interactionSource = interactionSource,
     ) {
-        Row(
-            Modifier.padding(horizontal = TV_PILL_PADDING_H, vertical = TV_PILL_PADDING_V),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Rounded.Edit, null, Modifier.size(TV_PILL_ICON_SIZE))
-            if (!expanded) {
-                Text(
-                    stringResource(Lang.episode_send_danmaku),
-                    style = MaterialTheme.typography.labelMedium,
-                    maxLines = 1,
-                )
-            } else {
-                BasicTextField(
-                    value = danmakuEditorState.text,
-                    onValueChange = { danmakuEditorState.text = it },
-                    modifier = Modifier
-                        .width(240.dp)
-                        .focusRequester(fieldFocusRequester)
-                        .onFocusChanged {
-                            fieldFocused = it.isFocused
-                            if (it.isFocused) {
-                                fieldEverFocused = true
-                                overlay.focusRegion = TvPlayerFocusRegion.PILLS
-                            }
-                        },
-                    textStyle = TextStyle(
-                        color = Color.White,
-                        fontSize = MaterialTheme.typography.bodyMedium.fontSize,
-                    ),
-                    cursorBrush = SolidColor(Color.White),
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { send() }),
-                )
-            }
+        Icon(Icons.Rounded.Edit, null, Modifier.size(TV_PILL_ICON_SIZE))
+        if (!expanded) {
+            Text(
+                stringResource(Lang.episode_send_danmaku),
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+            )
+        } else {
+            BasicTextField(
+                value = danmakuEditorState.text,
+                onValueChange = { danmakuEditorState.text = it },
+                modifier = Modifier
+                    .width(240.dp)
+                    .focusRequester(fieldFocusRequester)
+                    .onFocusChanged {
+                        fieldFocused = it.isFocused
+                        if (it.isFocused) {
+                            fieldEverFocused = true
+                            overlay.focusRegion = TvPlayerFocusRegion.PILLS
+                        }
+                    },
+                textStyle = TextStyle(
+                    color = Color.White,
+                    fontSize = MaterialTheme.typography.bodyMedium.fontSize,
+                ),
+                cursorBrush = SolidColor(Color.White),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { send() }),
+            )
         }
     }
 }

@@ -20,6 +20,7 @@ import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -130,13 +131,13 @@ data class TvRailItemAction(
     val onClick: () -> Unit,
 )
 
-/** 头像的关联动作 (编辑资料/播放记录/退出登录): 焦点在头像簇上时浮现于头像上方. */
-@Immutable
-data class TvRailAvatarAction(
-    val icon: ImageVector,
-    val label: String,
-    val onClick: () -> Unit,
-)
+/**
+ * 头像的关联动作 (编辑资料/播放记录/退出登录): 焦点在头像簇上时浮现于头像上方.
+ *
+ * 与 [TvRailItemAction] 是同一个东西 —— 两簇浮出按钮唯一的差别是往上长还是往下长
+ * (见 [TvRailFloatingActionCluster]), 动作本身没有区别, 所以不再各留一个同字段的类.
+ */
+typealias TvRailAvatarAction = TvRailItemAction
 
 /**
  * 组装主页与详情页侧边栏共用的条目列表 (搜索 + 主页各 tab + 设置), 两处只差点击行为
@@ -435,32 +436,8 @@ private fun TvRailAvatar(
         if (avatarFocused) MaterialTheme.colorScheme.primary else Color.Transparent,
     )
     Box(modifier.onFocusChanged { clusterFocused = it.hasFocus }) {
-        // 浮现的动作按钮: 用负偏移置于头像正上方, 不占布局 (不推挤其余条目), 焦点离开头像簇即隐藏.
-        // 按上键从头像即落到最下面那个按钮 (空间焦点搜索, 因其 bounds 在头像上方).
-        if (avatarActions.isNotEmpty()) {
-            AnimatedVisibility(
-                visible = clusterFocused,
-                enter = fadeIn(),
-                exit = fadeOut(),
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    // 测量后向父级上报 0 尺寸 (不占布局): 否则会撑高头像簇, 使垂直居中的整栏
-                    // 重新居中导致头像上移. 内容放到头像正上方 (y = -自身高度).
-                    .layout { measurable, constraints ->
-                        val placeable = measurable.measure(constraints)
-                        layout(0, 0) { placeable.place(0, -placeable.height) }
-                    },
-            ) {
-                Column(
-                    Modifier.padding(bottom = TV_RAIL_FLOATING_ACTION_SPACING),
-                    verticalArrangement = Arrangement.spacedBy(TV_RAIL_FLOATING_ACTION_SPACING),
-                ) {
-                    for (action in avatarActions) {
-                        TvRailFloatingActionButton(action.icon, action.label, action.onClick, onExitFocus)
-                    }
-                }
-            }
-        }
+        // 头像在整列最上, 只能往上长
+        TvRailFloatingActionCluster(clusterFocused, avatarActions, above = true, onExitFocus = onExitFocus)
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -626,31 +603,56 @@ private fun TvRailIconItem(
                 )
             }
         }
-        // 浮现的动作按钮: 置于本条目正下方, 不占布局 (不推挤其余条目), 焦点离开本簇即隐藏.
-        // 按下键从条目即落到第一个按钮 (空间焦点搜索, 因其 bounds 在下方).
-        // 与头像那簇方向相反: 头像在整列最上只能往上长, 带动作的条目排在最下只能往下长.
-        if (floatingActions.isNotEmpty()) {
-            AnimatedVisibility(
-                visible = clusterFocused,
-                enter = fadeIn(),
-                exit = fadeOut(),
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    // 测量后向父级上报 0 尺寸 (不占布局); 对齐到下缘的零尺寸盒子原点就在条目
-                    // 下缘, 所以内容按 y = 0 摆即自下缘往下排
-                    .layout { measurable, constraints ->
-                        val placeable = measurable.measure(constraints)
-                        layout(0, 0) { placeable.place(0, 0) }
-                    },
-            ) {
-                Column(
-                    Modifier.padding(top = TV_RAIL_FLOATING_ACTION_SPACING),
-                    verticalArrangement = Arrangement.spacedBy(TV_RAIL_FLOATING_ACTION_SPACING),
-                ) {
-                    for (action in floatingActions) {
-                        TvRailFloatingActionButton(action.icon, action.label, action.onClick, onExitFocus)
-                    }
-                }
+        // 带动作的条目排在整列最下, 只能往下长
+        TvRailFloatingActionCluster(clusterFocused, floatingActions, above = false, onExitFocus = onExitFocus)
+    }
+}
+
+/**
+ * **一簇浮出按钮**: 焦点进入所属簇时从锚点 (头像 / 条目) 的一侧浮现, 离开即隐藏.
+ *
+ * 头像那簇往上长、条目那簇往下长, 除此之外完全一样 —— 原本是两段各写一遍的
+ * `AnimatedVisibility + layout(0,0) + Column`, 而它们的高度还要与 [floatingActionsStackHeight]
+ * 手工对齐 (那里的 KDoc 写着"改那边要改这里"). 现在排布与高度算法都只有一份, 对不上不再可能.
+ *
+ * ## 为什么要 `layout(0, 0)`
+ *
+ * 按钮**不能占布局**: 占了会撑高所属簇, 让垂直居中的整栏重新居中, 表现为头像莫名上移.
+ * 所以测量后一律向父级上报 0 尺寸, 再把内容摆到锚点外侧 —— 往上长时 `y = -自身高度`,
+ * 往下长时对齐到下缘的零尺寸盒子原点就在锚点下缘, 按 `y = 0` 摆即可.
+ *
+ * @param above true = 长在锚点上方 (头像). false = 下方 (条目).
+ */
+@Composable
+private fun BoxScope.TvRailFloatingActionCluster(
+    visible: Boolean,
+    actions: List<TvRailItemAction>,
+    above: Boolean,
+    onExitFocus: (() -> Unit)?,
+) {
+    if (actions.isEmpty()) return
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(),
+        exit = fadeOut(),
+        modifier = Modifier
+            .align(if (above) Alignment.TopStart else Alignment.BottomStart)
+            .layout { measurable, constraints ->
+                val placeable = measurable.measure(constraints)
+                layout(0, 0) { placeable.place(0, if (above) -placeable.height else 0) }
+            },
+    ) {
+        Column(
+            // 与锚点之间的间距挂在朝向锚点的那一侧
+            if (above) {
+                Modifier.padding(bottom = TV_RAIL_FLOATING_ACTION_SPACING)
+            } else {
+                Modifier.padding(top = TV_RAIL_FLOATING_ACTION_SPACING)
+            },
+            verticalArrangement = Arrangement.spacedBy(TV_RAIL_FLOATING_ACTION_SPACING),
+        ) {
+            for (action in actions) {
+                TvRailFloatingActionButton(action.icon, action.label, action.onClick, onExitFocus)
             }
         }
     }
@@ -659,7 +661,7 @@ private fun TvRailIconItem(
 /**
  * 一簇浮出按钮需要的高度: [count] 颗按钮 + 按钮间距 + 与锚点之间的间距, 末尾再留一点不贴屏幕边.
  *
- * 与 [TvRailAvatar] / [TvRailIconItem] 里那两个 Column 的实际排布保持一致 (改那边要改这里).
+ * 与 [TvRailFloatingActionCluster] 的实际排布一一对应 (那里只有一份了, 改布局就改这里).
  */
 private fun floatingActionsStackHeight(count: Int): Dp =
     TV_RAIL_ITEM_SIZE * count +

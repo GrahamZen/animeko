@@ -50,6 +50,7 @@ import me.him188.ani.app.data.models.subject.SubjectInfo
 import me.him188.ani.app.data.models.subject.SubjectProgressInfo
 import me.him188.ani.app.data.network.BangumiRelatedPeopleService
 import me.him188.ani.app.data.network.BangumiSummaryService
+import me.him188.ani.app.data.network.TmdbEpisodeStills
 import me.him188.ani.app.data.network.TmdbImageService
 import me.him188.ani.app.data.network.matchToEpisodes
 import me.him188.ani.app.data.network.newestAiredDateStringOrNull
@@ -355,10 +356,11 @@ class DefaultSubjectDetailsStateFactory : SubjectDetailsStateFactory, KoinCompon
             .distinctUntilChanged()
         val tmdbEpisodeMediaFlow = combine(subjectCollectionFlow, tmdbLanguageFlow) { collection, language ->
             // 连载番的永久缓存可能不含新播集: 传"最后一集播出日期"触发陈旧重取 (进程内每条目一次)
+            // 拉取失败 (null) 与"确实没有剧照"在这里等价: 本页每次收集都重新请求, 不留负缓存
             val stills = tmdbImageService.getEpisodeStills(
                 subjectId, subjectInfo.name, language,
                 newestWantedAirDate = collection.episodes.newestAiredDateStringOrNull(),
-            )
+            ) ?: TmdbEpisodeStills()
             val stillUrls = mutableMapOf<Int, String>()
             val runtimes = mutableMapOf<Int, Int>()
             val overviews = mutableMapOf<Int, String>()

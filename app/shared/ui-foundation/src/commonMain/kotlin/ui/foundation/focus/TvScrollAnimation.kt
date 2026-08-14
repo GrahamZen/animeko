@@ -124,7 +124,7 @@ class TvScrollAnimator {
  *
  * [anchorPx] = 内容的 rest 位置 (即该轴的 `contentPadding` 起始值) **加上"卡片外框到焦点
  * 目标矩形的偏差"**: bring-into-view 拿到的是焦点目标 (可聚焦节点) 的矩形, 若卡片的可聚焦
- * 节点比卡片外框内缩了一圈 (如探索页竖版卡的封面内缩 `TV_CARD_FOCUS_GAP`), 不补这一段,
+ * 节点比卡片外框内缩了一圈 (如探索页竖版卡的封面内缩 `TvFocusRing.Gap`), 不补这一段,
  * 固定聚焦框与卡片就会差那么多对不齐, 且首项永远停不到 rest 位置.
  *
  * [BringIntoViewSpec.scrollAnimationSpec] 在 Compose 1.10 已标记弃用但仍被 `ContentInViewNode`

@@ -227,12 +227,15 @@ fun SubjectDetailsTvLoadingPlaceholder(
     windowInsets: WindowInsets = TopAppBarDefaults.windowInsets,
 ) {
     val tmdbImageService = remember { GlobalKoin.get<TmdbImageService>() }
-    // "" = 已确认无图, null = 本进程还没解析过 —— 与详情页的 backdropResolved 同义
-    val warmBackdrop = remember(subjectInfo?.subjectId) {
-        subjectInfo?.subjectId?.let { tmdbImageService.peekBackdropUrl(it) }
+    // 三态: resolved=false 还没解析过 (等), resolved=true 且 url=null 确认无图 (回退封面)
+    val heroBackdropUrl = subjectInfo?.let { info ->
+        remember(info.subjectId) {
+            tmdbImageService.peekBackdropUrl(info.subjectId)
+                ?: info.imageLarge.takeIf {
+                    tmdbImageService.peekBackdropResolved(info.subjectId) && it.isNotBlank()
+                }
+        }
     }
-    val heroBackdropUrl = warmBackdrop?.takeIf { it.isNotEmpty() }
-        ?: subjectInfo?.imageLarge?.takeIf { warmBackdrop != null && it.isNotBlank() }
 
     var slowLoad by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
@@ -380,11 +383,12 @@ fun SubjectDetailsTvPage(
     // 那张图还在 Coil 内存缓存里, Hero 一进场就是满的; 下面的 flow 仍照常收, 只是从
     // "决定首屏长什么样"退化成"后台校正". 热缓存没有 (冷启/别处进来) 时行为与从前一致.
     val tmdbImageService = remember { GlobalKoin.get<TmdbImageService>() }
-    val warmBackdrop = remember(state) {
-        if (videoBackground) null else tmdbImageService.peekBackdropUrl(state.subjectId)
+    var backdropResolved by remember(state) {
+        mutableStateOf(!videoBackground && tmdbImageService.peekBackdropResolved(state.subjectId))
     }
-    var backdropResolved by remember(state) { mutableStateOf(warmBackdrop != null) }
-    var tmdbBackdropUrl by remember(state) { mutableStateOf(warmBackdrop?.takeIf { it.isNotEmpty() }) }
+    var tmdbBackdropUrl by remember(state) {
+        mutableStateOf(if (videoBackground) null else tmdbImageService.peekBackdropUrl(state.subjectId))
+    }
     LaunchedEffect(state) {
         // 视频背景模式不放背景图, 不必发起 TMDB 请求
         if (videoBackground) return@LaunchedEffect

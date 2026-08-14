@@ -11,8 +11,9 @@ package me.him188.ani.app.ui.richtext
 
 import androidx.compose.foundation.Image
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.Stable
-import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
@@ -33,8 +34,22 @@ import org.jetbrains.compose.resources.painterResource
  */
 @Stable
 object StickerSizes {
-    /** 原图尺寸 (px), 键是表情代码. 用 snapshot map: 记下来要能触发重排. */
-    private val intrinsicSizes = mutableStateMapOf<String, IntPair>()
+    /**
+     * 原图尺寸 (px), 键是表情代码.
+     *
+     * **按 token 一格 `MutableState`, 不用 `SnapshotStateMap`**: SnapshotStateMap 的 `get` 只把
+     * "整个 map 对象"报给快照系统, 没有按键的订阅粒度 —— 任何一枚表情图加载完成的那次写入,
+     * 都会让**所有**读过表的作用域整体失效. 实测场景: 在回复弹窗里滚 Bangumi 娘那包 (116 枚),
+     * 每张图 onSuccess 一次写入 = 弹窗正文 + 背后所有带表情的评论行全部重排一遍, 正好发生在
+     * 网格滚动最需要流畅的时刻. 外层普通 map + 内层 MutableState 让读方只订阅自己那一枚.
+     *
+     * 外层 map 只增不改 (每个 token 一个恒定的 state 格子), 容量 = 表情目录大小 (几百枚, 有界).
+     * 读写都在主线程 (组合 / Coil 主线程回调), 不需要锁.
+     */
+    private val intrinsicSizes = mutableMapOf<String, MutableState<IntPair?>>()
+
+    private fun sizeStateOf(token: String): MutableState<IntPair?> =
+        intrinsicSizes.getOrPut(token) { mutableStateOf(null) }
 
     /** 上限: 相对基准尺寸的倍率. 动图那套原图很大, 不压一下会在文字里鹤立鸡群. */
     private const val MAX_HEIGHT_FACTOR = 1.4f
@@ -43,7 +58,9 @@ object StickerSizes {
     fun record(token: String, width: Int, height: Int) {
         if (width <= 0 || height <= 0) return
         val size = IntPair(width, height)
-        if (intrinsicSizes[token] != size) intrinsicSizes[token] = size
+        val state = sizeStateOf(token)
+        // 先比后写: 同值写入也会让订阅方失效, 而 Coil 缓存命中时每次组合都会回调一次
+        if (state.value != size) state.value = size
     }
 
     /**
@@ -53,7 +70,8 @@ object StickerSizes {
      * 还没拿到原图时按 [base] 见方 —— 最常见的方图一次也不会跳.
      */
     fun displaySize(token: String, base: Dp): DpSize {
-        val intrinsic = intrinsicSizes[token] ?: return DpSize(base, base)
+        // 在组合里读 = 只订阅这一枚表情的尺寸
+        val intrinsic = sizeStateOf(token).value ?: return DpSize(base, base)
         val width = intrinsic.first.toFloat()
         val height = intrinsic.second.toFloat()
         val scale = minOf(
