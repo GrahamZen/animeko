@@ -371,35 +371,13 @@ object RichTextDefaults {
         modifier: Modifier = Modifier,
         onClick: () -> Unit
     ) {
-        val context = LocalPlatformContext.current
-        var state by rememberSaveable { mutableIntStateOf(0) } // 0: loading, 1: success, 2: failed
-
-        AsyncImage(
-            model = remember(element.imageUrl, context) {
-                ImageRequest.Builder(context)
-                    .data(element.imageUrl)
-                    .crossfade(false)
-                    .build()
-            },
-            contentDescription = null,
-            modifier = modifier
-                .padding(4.dp)
-                .ifThen(state != 1) {
-                    sizeIn(minWidth = 80.dp, minHeight = 80.dp)
-                }
-                .animateContentSize()
-                .placeholder(state == 0)
-                .clip(RoundedCornerShape(8.dp))
-                .then(Modifier.clickable { onClick() }),
-            contentScale = ContentScale.Fit,
-            onSuccess = {
-                if (state != 1) state = 1
-            },
-            // 评论里的图片贴的是外部图床, 挂掉/被删是常态 (失败时占位骨架屏会一直闪, 看起来像永远在加载).
-            // 这里只收掉闪烁, 那个 80dp 的空框留着 —— 原帖确实有张图, 完全塌掉会让人以为解析漏了内容
-            onError = {
-                if (state != 2) state = 2
-            },
+        // 失败不给 errorContent: 那个 80dp 的空框留着 —— 原帖确实有张图, 完全塌掉会让人
+        // 以为解析漏了内容. 三态与防跳位见 CommentAsyncImage
+        CommentAsyncImage(
+            element.imageUrl,
+            modifier.padding(4.dp),
+            unloadedModifier = Modifier.sizeIn(minWidth = 80.dp, minHeight = 80.dp),
+            onClick = onClick,
         )
     }
 

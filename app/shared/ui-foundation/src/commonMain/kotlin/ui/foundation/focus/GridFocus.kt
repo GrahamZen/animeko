@@ -83,11 +83,17 @@ class GridFocusController {
     // 离开网格前聚焦的卡) 会在焦点尚未移动时"假成功"提前退出.
     private var arrived = false
 
-    // 用户按键计数 (由 [gridKeyNavigation] 递增). 解析只在"开始之后用户又按了键"时才让路 ——
-    // 不能拿"焦点落在别的卡上"当介入判据: 页面切换期间焦点系统会自行分配默认焦点, 在
-    // onFocusChanged 里与用户按键长得一模一样, 误判会让进页恢复半途放弃 (表现为退回第一个
-    // tab 的第一张卡), 而拉回系统塞的默认焦点正是本解析器存在的理由之一.
-    private var userKeys = 0
+    /**
+     * 用户按键计数 (由 [gridKeyNavigation] 递增). 解析只在"开始之后用户又按了键"时才让路 ——
+     * 不能拿"焦点落在别的卡上"当介入判据: 页面切换期间焦点系统会自行分配默认焦点, 在
+     * onFocusChanged 里与用户按键长得一模一样, 误判会让进页恢复半途放弃 (表现为退回第一个
+     * tab 的第一张卡), 而拉回系统塞的默认焦点正是本解析器存在的理由之一.
+     *
+     * 公开只读是给网格之外的落点循环取同一个基线用 (如追番页进页聚焦选中标签, 用户一按键就
+     * 停手). **不是快照状态**, 只能在协程轮询里读, 不要在组合里读.
+     */
+    var userNavigations: Int = 0
+        private set
 
     /** 请求聚焦绝对下标 [index] 的卡 (超出数据量时夹到最后一张). */
     fun request(index: Int) {
@@ -106,7 +112,7 @@ class GridFocusController {
 
     /** [gridKeyNavigation] 中调用: 记录用户按了遥控器, 正在解析的落点据此让路. */
     fun onUserNavigation() {
-        userKeys++
+        userNavigations++
     }
 
     /**
@@ -161,12 +167,12 @@ class GridFocusController {
         val target = pending ?: return
         arrived = false
         // 用户按键基线: 之后计数一变就说明用户自己在导航, 立刻放弃本次落点
-        val keysAtStart = userKeys
+        val keysAtStart = userNavigations
         repeat(attempts) {
             withFrameNanos { }
             // 用户已接手导航: 让路. 这是唯一的提前放弃条件 —— 系统自行分配的默认焦点不算,
             // 那种情况要继续重试把焦点拉回目标
-            if (userKeys != keysAtStart) {
+            if (userNavigations != keysAtStart) {
                 pending = null
                 resolvedIndex = -1
                 return

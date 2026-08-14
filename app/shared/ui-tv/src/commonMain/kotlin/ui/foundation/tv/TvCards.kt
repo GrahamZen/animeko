@@ -13,7 +13,6 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
@@ -42,6 +41,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -56,6 +56,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.util.lerp
 import me.him188.ani.app.data.models.preference.ThemeSettings
 import me.him188.ani.app.ui.external.placeholder.PlaceholderHighlight
 import me.him188.ani.app.ui.external.placeholder.fade
@@ -67,6 +68,7 @@ import me.him188.ani.app.ui.foundation.theme.LocalThemeSettings
 import me.him188.ani.app.ui.foundation.tvLongPressKey
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.pow
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeMark
@@ -112,25 +114,15 @@ fun TvPortraitCard(
             onMenuExpandedChange?.invoke(value)
         }
     }
-    // 自绘外圈时才订阅焦点态: 固定框模式下卡片外观不随焦点变, 省掉每次导航进出焦点
-    // 的两张卡重组
-    val ringModifier = if (showFocusRing) {
-        val focused by interactionSource.collectIsFocusedAsState()
-        if (focused) {
-            Modifier.border(
-                TV_CARD_FOCUS_RING_WIDTH,
-                MaterialTheme.colorScheme.primary,
-                RoundedCornerShape(TV_PORTRAIT_CARD_CORNER + TV_CARD_FOCUS_GAP),
-            )
-        } else Modifier
-    } else Modifier
     Box(
         modifier
             .aspectRatio(TV_PORTRAIT_CARD_COVER_RATIO)
-            .then(ringModifier),
+            // 自绘外圈 (焦点态只在绘制阶段读, 不牵动整卡重组, 见 tvFocusRing);
+            // 固定框模式下由行叠放的 TvPortraitCardFocusRing 统一画, 这里整条跳过
+            .tvFocusRing(TV_PORTRAIT_CARD_CORNER + TvFocusRing.Gap, enabled = showFocusRing),
     ) {
         Surface(
-            modifier = Modifier.fillMaxSize().padding(TV_CARD_FOCUS_GAP),
+            modifier = Modifier.fillMaxSize().padding(TvFocusRing.Gap),
             shape = RoundedCornerShape(TV_PORTRAIT_CARD_CORNER),
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
         ) {
@@ -193,15 +185,13 @@ fun TvPortraitCard(
                     )
                 }
                 // 集数观看进度条: 与详情页选集卡 (FocusEpisodeProgressBar) 同款悬浮胶囊条 ——
-                // 圆头、白 30% 轨道 + 主题色填充, 条厚同值, 左右内缩按同一条"等于卡片圆角半径"
-                // 的规则算 (条长 = 底边直线段, 见 TV_CARD_PROGRESS_BAR_INSET); 离底空隙各调各的
+                // 圆头、白 30% 轨道 + 主题色填充, 条厚同值; 长度与离底空隙都是手调常量
                 if (progress != null && progress > 0f) {
                     Box(
                         Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(horizontal = TV_CARD_PROGRESS_BAR_INSET)
+                            .align(Alignment.BottomCenter) // 定宽 + 居中对齐 = 左右自动等距
                             .padding(bottom = TV_CARD_PROGRESS_BAR_BOTTOM_GAP)
-                            .fillMaxWidth()
+                            .width(TV_CARD_PROGRESS_BAR_LENGTH)
                             .height(TV_CARD_PROGRESS_BAR_HEIGHT)
                             .clip(CircleShape)
                             .background(Color.White.copy(alpha = TV_CARD_PROGRESS_TRACK_ALPHA)),
@@ -237,11 +227,7 @@ fun TvPortraitCardFocusRing(modifier: Modifier = Modifier) {
         modifier
             .width(TV_PAGE_CARD_WIDTH)
             .aspectRatio(TV_PORTRAIT_CARD_COVER_RATIO)
-            .border(
-                TV_CARD_FOCUS_RING_WIDTH,
-                MaterialTheme.colorScheme.primary,
-                RoundedCornerShape(TV_PORTRAIT_CARD_CORNER + TV_CARD_FOCUS_GAP),
-            ),
+            .tvFocusRingBorder(TV_PORTRAIT_CARD_CORNER + TvFocusRing.Gap, TvFocusRing.defaultBrush),
     )
 }
 
@@ -318,8 +304,9 @@ fun tvHeroMarqueeIterations(): Int =
 private const val TV_HERO_MARQUEE_REDUCED_ITERATIONS = 3
 
 /**
- * hero 展示目标的**换挡合并**: [ThemeSettings.tvFullVisualEffects] 关闭时, 连续导航期间不换
- * hero (背景图 + 文字块), 等按键静默 [TV_HERO_SWAP_SETTLE_MILLIS] 后一次性换到最后聚焦的那个;
+ * hero 展示目标的**换挡合并**: [ThemeSettings.tvFullVisualEffects] 关闭时, hero (背景图 + 文字块)
+ * 按 [TvNavigationSettle] 的前沿节流换挡 —— 空闲后的单次移动立即换, 连发期间最多每
+ * [TV_HERO_SWAP_SETTLE_MILLIS] 换一次, 停下来时最迟同样时长换到最后聚焦的那个;
  * 开启时原样直通 (每格键都换).
  *
  * **卡片自身的动画完全不受影响** —— 滚动、压暗、淡出、固定聚焦框走的是另一条路 (位置驱动的
@@ -340,26 +327,83 @@ private const val TV_HERO_MARQUEE_REDUCED_ITERATIONS = 3
  * 数据已在缓存里, 换挡才不会跟着等网络.
  */
 @Composable
-fun <T> rememberTvSettledHero(target: T): T {
+fun <T> rememberTvSettledHero(target: T): T = rememberTvSettledHeroProvider { target }.invoke()
+
+/**
+ * 遥控器连发下的**前沿节流**闸门: 只回答"这一拍要不要等一等".
+ *
+ * 规则:
+ * - **空闲之后的第一拍立即放行** —— 一次深思熟虑的单击不该为连发付延迟, 这是它与 `debounce`
+ *   的全部区别 (防抖对单击也要等满);
+ * - 连发期间最多每 [settleMillis] 放行一次, 中间划过去的目标由 `collectLatest` 取消掉;
+ * - 停下来时最迟 [settleMillis] 放行最后那个目标.
+ *
+ * **必须配 `collectLatest`** (或别的会取消上一拍的收集器): [awaitTurn] 靠"被取消"丢掉中间目标,
+ * 自己不做任何去重.
+ *
+ * hero 的展示换挡 ([rememberTvSettledHeroProvider]) 与四个 TV 页的媒体预取共用这一条规则, 是
+ * 故意的: 两边错开的话, 要么预取把带宽花在划过去的卡上, 要么展示已经换到 B 而预取还停在 A ——
+ * 后者正是"停下来还要再等一次网络"的来源.
+ */
+internal class TvNavigationSettle(private val settleMillis: Long) {
+    private var lastPassMark: TimeMark? = null
+
+    /**
+     * @param bypass 这一拍不必合并, 直接放行 (例如屏幕上还什么都没有: 从无到有没有可合并的对象,
+     * 按连发处理的话内容要凭空晚 [settleMillis] 才出现). 仍然记一次放行时刻.
+     */
+    suspend fun awaitTurn(bypass: Boolean = false) {
+        val mark = lastPassMark
+        if (!bypass && mark != null && mark.elapsedNow() < settleMillis.milliseconds) {
+            delay(settleMillis)
+        }
+        lastPassMark = TimeSource.Monotonic.markNow()
+    }
+}
+
+/**
+ * [rememberTvSettledHero] 的 **provider 版本**: 收 `() -> T`、还 `() -> T`, 全程不在调用方的
+ * composable body 里读热状态.
+ *
+ * ## 为什么需要它
+ *
+ * 值版本要求调用方先把 hero 目标读出来 (`val display = rememberTvSettledHero(heroTarget)`),
+ * 那次读记在调用方 body 上 —— 页面级 composable 于是每换一张卡就整体重跑一遍. 而追番/搜索/
+ * 时间表三页的 hero 状态本来就是**只在子组件的 lambda 里读**的 (backdrop 层与 hero 信息块都收
+ * provider, 正是为了让换卡只重组那一小块), 套值版本等于把这份优化推翻.
+ *
+ * 本版本把读取全部关在两个不属于组合的地方: 种子值用 `withoutReadObservation` 读一次, 之后
+ * 由 `snapshotFlow` 在协程里观察. 返回的 lambda 只读一个普通 `MutableState`, 谁调用谁订阅.
+ *
+ * @param target 焦点驱动的真实目标 (每格键都变). 数据预取仍应读它, 不要读返回值 —— 停下来时
+ * 数据已在缓存里, 换挡才不会跟着等网络.
+ */
+@Composable
+fun <T> rememberTvSettledHeroProvider(target: () -> T): () -> T {
     val fullEffects = LocalThemeSettings.current.tvFullVisualEffects
     // lambda 每次重组换新实例, 必须经 rememberUpdatedState 再进 snapshotFlow, 否则永久留住首帧值
     val latest = rememberUpdatedState(target)
-    var settled by remember { mutableStateOf(target) }
+    // 种子值必须"不被观察地"读: 直接 target() 会把热状态的读算到调用方的 body 上, 那正是本函数
+    // 要避免的事
+    val settled = remember { mutableStateOf(Snapshot.withoutReadObservation { target() }) }
     LaunchedEffect(fullEffects) {
-        if (fullEffects) return@LaunchedEffect
-        var lastApplyMark: TimeMark? = null
-        snapshotFlow { latest.value }.collectLatest { value ->
-            // 单击 (距上次换挡已超过静默期) 立即换, 不给正常导航引入延迟; 连发时 collectLatest
-            // 会把这次 delay 取消掉, 于是只有"停下来"那一次真正生效.
-            val mark = lastApplyMark
-            if (mark != null && mark.elapsedNow() < TV_HERO_SWAP_SETTLE_MILLIS.milliseconds) {
-                delay(TV_HERO_SWAP_SETTLE_MILLIS)
-            }
-            settled = value
-            lastApplyMark = TimeSource.Monotonic.markNow()
+        if (fullEffects) {
+            // 完整特效档不合并 (原样直通), 但仍写进同一个 State: 返回的 provider 只有一种读法,
+            // 两档之间不会出现"有时读热状态有时读快照"的分叉
+            snapshotFlow { latest.value.invoke() }.collect { settled.value = it }
+            return@LaunchedEffect
+        }
+        // 与四个 TV 页的媒体预取共用同一条节流规则, 见 [TvNavigationSettle]
+        val settle = TvNavigationSettle(TV_HERO_SWAP_SETTLE_MILLIS)
+        snapshotFlow { latest.value.invoke() }.collectLatest { value ->
+            // 屏幕上**还什么都没有**时不合并: 进页面的头两拍是 null -> 首个条目, 两者间隔远小于
+            // 静默期, 按连发处理的话 hero 要凭空晚一个静默期才出现. 合并是为了不让两份真内容
+            // 来回切, 从无到有没有可合并的对象.
+            settle.awaitTurn(bypass = settled.value == null)
+            settled.value = value
         }
     }
-    return if (fullEffects) target else settled
+    return remember { { settled.value } }
 }
 
 /**
@@ -417,9 +461,9 @@ fun tvBackdropFadeFromBlackStops(
 }
 
 /**
- * TV 页面背景 backdrop 层 (追番页 / 搜索页共用): 16:9 贴右上角, 高度为屏高固定比例
- * ([TV_BACKDROP_HEIGHT_FRACTION]), 顶缘轻度压暗 + 左缘/下缘渐隐入页面背景
- * (恒用探索页"卡片态"渐变). 调用方通常 `Modifier.align(Alignment.TopEnd)`.
+ * TV 页面背景 backdrop 层 (探索 / 追番 / 搜索三页共用): 16:9 贴右上角, 高度为屏高固定比例
+ * ([heightFraction]), 顶缘轻度压暗 + 左缘/下缘渐隐入页面背景. 调用方通常
+ * `Modifier.align(Alignment.TopEnd)`.
  *
  * [fadeColor] 必须传**图层正下方的实际页面底色** (追番页是 shellBackgroundColor, 搜索页是
  * colorScheme.background): 渐隐是直接在图上叠画该色的渐变 (SrcOver). 旧实现用
@@ -429,12 +473,29 @@ fun tvBackdropFadeFromBlackStops(
  *
  * [backdropUrl] 用 lambda 而非值传入: URL 由"聚焦条目"状态推导, 状态读取发生在本组件
  * 内部 —— 遥控器每移一格只重组这一小块, 不连带调用方整个页面作用域重组.
+ *
+ * [cardness] 同理用 lambda: 它是动画值, 读取发生在**绘制** lambda 里 (draw 观察快照读, 值一变
+ * 只重绘不重组), 值传入的话每帧都要重组一次本组件.
+ *
+ * @param heightFraction 图层高度占屏高比例. 探索页因轮播布局单独一档.
+ * @param topScrim 顶缘可读性压暗带. 顶部压着悬浮文字的页面 (追番/搜索) 需要; 探索页顶部是空的.
+ * @param cardness 0 = hero 态 (下缘收得晚、左缘浅), 1 = 卡片态. 只有探索页在两态间插值 (焦点在
+ * hero / 在卡片区), 其余页恒为卡片态, 于是默认 `{ 1f }` 下两处 lerp 恰好退化成常量本身.
  */
 @Composable
 fun TvPageBackdropLayer(
     backdropUrl: () -> String?,
     fadeColor: Color,
     modifier: Modifier = Modifier,
+    heightFraction: Float = TV_BACKDROP_HEIGHT_FRACTION,
+    topScrim: Boolean = true,
+    cardness: () -> Float = { 1f },
+    /**
+     * 垫底图: 主图 (backdropUrl) 下载太慢时先显示的应急底图 (探索页传"聚焦超过 2.5s 主图还
+     * 没上屏"时的竖版封面). 画在主图**下面**, 主图一旦解码完成自然盖住它 —— 不需要"主图已
+     * 上屏"的回调信号. null = 不垫 (默认, 其余页不受影响).
+     */
+    underlayUrl: () -> String? = { null },
 ) {
     Crossfade(
         backdropUrl(),
@@ -444,26 +505,30 @@ fun TvPageBackdropLayer(
         if (url != null) {
             Box(
                 Modifier
-                    .fillMaxHeight(TV_BACKDROP_HEIGHT_FRACTION)
+                    .fillMaxHeight(heightFraction)
                     .aspectRatio(TV_BACKDROP_ASPECT_RATIO, matchHeightConstraintsFirst = true)
                     .drawWithContent {
                         drawContent()
                         // 停点由平滑曲线采样生成 (无折点, 避免暗色端可见的马赫带分界线);
+                        // 渐变带端点在 hero / 卡片两态间插值, 曲线形状两态共用.
+                        val t = cardness()
                         // 顶缘轻度压暗 (非全遮): 给悬浮在 backdrop 上的顶部文字一层可读性 scrim
-                        drawRect(
-                            brush = Brush.verticalGradient(
-                                *tvBackdropFadeFromBlackStops(
-                                    start = 0f, end = TV_BACKDROP_TOP_SCRIM_END,
-                                    maxAlpha = TV_BACKDROP_TOP_SCRIM_ALPHA,
-                                    color = fadeColor,
+                        if (topScrim) {
+                            drawRect(
+                                brush = Brush.verticalGradient(
+                                    *tvBackdropFadeFromBlackStops(
+                                        start = 0f, end = TV_BACKDROP_TOP_SCRIM_END,
+                                        maxAlpha = TV_BACKDROP_TOP_SCRIM_ALPHA,
+                                        color = fadeColor,
+                                    ),
                                 ),
-                            ),
-                        )
+                            )
+                        }
                         drawRect(
                             brush = Brush.horizontalGradient(
                                 *tvBackdropFadeFromBlackStops(
-                                    start = TV_BACKDROP_LEFT_FADE_START,
-                                    end = TV_BACKDROP_LEFT_FADE_END,
+                                    start = lerp(0f, TV_BACKDROP_LEFT_FADE_START, t),
+                                    end = lerp(TV_BACKDROP_LEFT_FADE_END_HERO, TV_BACKDROP_LEFT_FADE_END, t),
                                     color = fadeColor,
                                 ),
                             ),
@@ -472,7 +537,7 @@ fun TvPageBackdropLayer(
                         drawRect(
                             brush = Brush.verticalGradient(
                                 *tvBackdropFadeToBlackStops(
-                                    start = TV_BACKDROP_BOTTOM_FADE_START,
+                                    start = lerp(TV_BACKDROP_BOTTOM_FADE_START_HERO, TV_BACKDROP_BOTTOM_FADE_START, t),
                                     end = 1f,
                                     color = fadeColor,
                                 ),
@@ -480,14 +545,71 @@ fun TvPageBackdropLayer(
                         )
                     },
             ) {
-                AsyncImage(
-                    url,
-                    contentDescription = null,
-                    Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop,
-                )
+                // 应急垫底 (见参数说明): 与主图同裁切, 同受上面的渐隐/scrim 遮罩.
+                // 半透明是刻意的: 垫的是竖版封面 Crop 进 16:9, 几倍上采样, 满不透明时糊得
+                // 一眼可辨、还会被误当成"这就是背景图". 压到这个透明度后它更像一层氛围底色,
+                // 真图一到照样盖住 —— 目的只是别让 hero 全黑, 不是冒充 backdrop
+                underlayUrl()?.let { underlay ->
+                    AsyncImage(
+                        underlay,
+                        contentDescription = null,
+                        Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                        alpha = TV_BACKDROP_UNDERLAY_ALPHA,
+                    )
+                }
+                TvBackdropImage(url)
             }
         }
+    }
+}
+
+/**
+ * backdrop 主图, 带**卡死重发**.
+ *
+ * 这台机器上单条 TCP 流假死是常态 (2026-08-14 实测背景图卡住 10.7s / 10.2s, 同期其它请求
+ * 200~300ms 正常完成). 卡住的流不会自己好, 但重发基本必然秒成 —— 所以到点再叠一张同 URL 的.
+ *
+ * **两张都留着, 不换 model 也不取消**: 换 model 会让 Coil 取消旧请求, 而取消一条正在读的
+ * TLS socket 正是上次那个 native 崩溃的引信 (见 [TvHeroImagePrefetch.retain]). Coil 不合流
+ * 并发的相同请求, 所以第二张是一条独立的新连接; 两张画的是同一幅画面, 谁先到都一样, 不必
+ * 判先后. 只重发一次: 再不成就是真的没网, 继续叠只是浪费连接.
+ */
+@Composable
+private fun TvBackdropImage(url: String) {
+    var shown by remember(url) { mutableStateOf(false) }
+    var retry by remember(url) { mutableStateOf(false) }
+    // 接管在途预热 (见 TV_BACKDROP_PREFETCH_HANDOFF_MILLIS): 这张图正被预热时先等它,
+    // 别另开一条把已经下了一半的字节作废. 在组合里取一次, 没有在途的常规情形一帧都不耽误
+    val prefetch = remember(url) { TvHeroImagePrefetch.inFlight(url) }
+    val handoffLeft = TV_BACKDROP_PREFETCH_HANDOFF_MILLIS - (prefetch?.elapsedMillis ?: 0)
+    var waitingPrefetch by remember(url) { mutableStateOf(prefetch != null && handoffLeft > 0) }
+    LaunchedEffect(url) {
+        if (waitingPrefetch) {
+            withTimeoutOrNull(handoffLeft) { prefetch?.job?.join() }
+            waitingPrefetch = false
+        }
+    }
+    LaunchedEffect(url) {
+        delay(tvBackdropHedgeMillis())
+        if (!shown) retry = true
+    }
+    if (waitingPrefetch) return
+    AsyncImage(
+        url,
+        contentDescription = null,
+        Modifier.fillMaxSize(),
+        onSuccess = { shown = true },
+        contentScale = ContentScale.Crop,
+    )
+    if (retry) {
+        AsyncImage(
+            url,
+            contentDescription = null,
+            Modifier.fillMaxSize(),
+            onSuccess = { shown = true },
+            contentScale = ContentScale.Crop,
+        )
     }
 }
 
@@ -527,12 +649,7 @@ fun TvFullScreenBackdropLayer(
             // 图铺满整屏, 均匀压暗一层就够 (与 16:9 那版不同: 那版图只占屏顶七成, 渐隐带落在
             // 屏幕中段, 是图与背景之间的过渡, 不是一条贴着屏底的边)
             Box(Modifier.fillMaxSize()) {
-                AsyncImage(
-                    url,
-                    contentDescription = null,
-                    Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop,
-                )
+                TvBackdropImage(url)
                 // 整屏基础压暗: 亮部海报上压不住灰色小字. 这是唯一一层压暗 —— 左缘不再额外补
                 // scrim: 任何"从左缘衰减到透明"的横向渐变都会在收尾处留下一条肉眼可见的边界,
                 // 而侧边栏图标压在这层整屏压暗上本来就足够清楚 (白图标 + 深底)
@@ -566,10 +683,46 @@ const val TV_BACKDROP_TOP_SCRIM_END = 0.16f
 const val TV_BACKDROP_TOP_SCRIM_ALPHA = 0.7f
 
 /**
+ * 应急垫底图 (竖版封面) 的不透明度, 见 [TvPageBackdropLayer] 的 `underlayUrl`.
+ * 压到半透明是为了让它读起来像氛围底色而不是"糊掉的背景图".
+ */
+const val TV_BACKDROP_UNDERLAY_ALPHA = 0.5f
+
+/**
+ * backdrop 主图等这么久还没上屏就再发一次, 见 `TvBackdropImage`.
+ *
+ * 4s: 正常路径 (含现取) 100~700ms 就位, 到 4 秒基本可以断定这条流废了; 又留在封面兜底
+ * (6s) 之前, 让重发有机会赶在糊图顶上来之前把真图画出来.
+ */
+// 时长按网络档位取, 见 tvBackdropHedgeMillis()
+
+/**
+ * 显示端"接管"同 URL 在途预热的耐心上限, **从预热开始时刻算起**, 见 `TvBackdropImage`.
+ *
+ * 用户走到这张卡时, 它的预热常常正跑到一半 (邻居预热在上一次聚焦时发出, 实测单张 250~600ms).
+ * Coil **不合流并发的相同请求**, 直接自己再发一份等于把已经下好的那截字节作废, 从零重来.
+ * 等它跑完再请求, 拿到的是磁盘命中 (60~145ms); 押中预解码那一张时是内存命中 (17~43ms).
+ *
+ * 算的是"还剩多久"而不是"再等多久": 预热已经跑了 900ms 就只等 100ms, 跑过 1s 还没完的直接
+ * 不等 —— 那种多半已经挂死在断掉的连接上 (实测这台机器上假死是常态, 一挂就是 10 秒), 干等
+ * 满一个固定窗口纯亏.
+ *
+ * 1s 这个总预算而不是两三百毫秒: 预算比预热本身还短的话, "刚开始预热"这种最该省的情形必然
+ * 落空、照样双发. 预算之外还有 [tvBackdropHedgeMillis] 那条重发兜着.
+ */
+private const val TV_BACKDROP_PREFETCH_HANDOFF_MILLIS = 1_000L
+
+/**
  * backdrop 下缘渐隐起点 (图片高度坐标 0..1, 此处开始向下渐暗, 一直渐变到图底).
- * 卡片聚焦态共用; 探索页轮播态另有自己的一档.
+ * 卡片聚焦态共用; hero 态那一档见 [TV_BACKDROP_BOTTOM_FADE_START_HERO].
  */
 const val TV_BACKDROP_BOTTOM_FADE_START = 0.78f
+
+/**
+ * backdrop 下缘渐隐起点的 **hero 态**一档 (探索页焦点在轮播按钮上时): 比卡片态收得晚,
+ * 图露得更多. 只有探索页会取到这一端, 其余页 [TvPageBackdropLayer] 的 `cardness` 恒为 1.
+ */
+const val TV_BACKDROP_BOTTOM_FADE_START_HERO = 0.88f
 
 /**
  * TV hero backdrop 左缘渐隐窗口起点 (图片宽度坐标 0..1, 此前全擦除).
@@ -584,6 +737,12 @@ const val TV_FULLSCREEN_BACKDROP_DIM_ALPHA = 0.46f
 
 /** TV hero backdrop 左缘渐隐窗口终点 (此处起图完全清晰). 三页共用. */
 const val TV_BACKDROP_LEFT_FADE_END = 0.3f
+
+/**
+ * 左缘渐隐窗口终点的 **hero 态**一档: 焦点在轮播按钮上时左缘擦得更宽 (那一片压着 hero 文字块,
+ * 需要更长的过渡才读得清). 取到这一端的只有探索页, 见 [TV_BACKDROP_BOTTOM_FADE_START_HERO].
+ */
+const val TV_BACKDROP_LEFT_FADE_END_HERO = 0.46f
 
 // ---- hero 文字 ----
 
@@ -660,47 +819,37 @@ const val TV_PORTRAIT_CARD_COVER_RATIO = 0.72f
 /** 卡片圆角. */
 private val TV_PORTRAIT_CARD_CORNER = 8.dp
 
-/**
- * 聚焦外圈描边宽度 (主题主色).
- *
- * 与详情页/播放器选集卡的 `FOCUS_RING_WIDTH` 同值 —— 都是从 Prime Video 4K 截图量的 1.75dp
- * (7px). 一次会话里两种卡会连着看到, 描边粗细必须一档; 改一边就改另一边.
- */
-private val TV_CARD_FOCUS_RING_WIDTH = 1.75.dp
-
-/**
- * 聚焦外圈与封面之间的空隙 (卡片内容常驻内缩此值, 聚焦时空隙处露出底色形成"色圈+留白").
- *
- * 描边从框盒边界**向内**画, 所以肉眼看到的空隙 = 本值 − [TV_CARD_FOCUS_RING_WIDTH] = 0.25dp,
- * 与选集卡的 `FOCUS_RING_GAP` 同一套 (Prime 的描边几乎贴着卡片内容). 调它要连描边宽一起算,
- * 否则空隙变负数 = 描边压到封面上.
- *
- * public 是因为**它同时是卡片外框与焦点目标之间的偏差**: 可聚焦节点是内缩后的封面, 而
- * [TvPortraitCardFocusRing] 画在外框上. 于是"把聚焦项滚到锚位"的 pivot 式
- * `BringIntoViewSpec` (拿到的是焦点目标矩形) 必须把锚加上本值, 否则框与卡片差这一点点
- * 对不齐 —— 真机肉眼可见 (2026-08-10 探索页踩到).
- */
-val TV_CARD_FOCUS_GAP = 2.dp
+// 聚焦外圈的描边宽度与空隙全仓唯一一份, 见 [TvFocusRing].
+//
+// [TvFocusRing.Gap] 同时是**卡片外框与焦点目标之间的偏差**: 可聚焦节点是内缩后的封面, 而
+// [TvPortraitCardFocusRing] 画在外框上. 于是"把聚焦项滚到锚位"的 pivot 式 `BringIntoViewSpec`
+// (拿到的是焦点目标矩形) 必须把锚加上它, 否则框与卡片差这一点点对不齐 —— 真机肉眼可见
+// (2026-08-10 探索页踩到), 见 TvExplorationPage 的 tvAnchorBringIntoViewSpec 调用处.
 
 /** 继续观看卡片底部集数进度条 (样式对齐详情页 FocusEpisodeProgressBar): 条厚, 同选集卡 3dp. */
 private val TV_CARD_PROGRESS_BAR_HEIGHT = 3.dp
 
 /**
- * 进度条左右内缩 = **卡片圆角半径**, 于是条长恰好等于底边的**直线段**长度 (两端落在圆角的
- * 切点上, 封面 108dp − 2×8dp = 92dp).
+ * **进度条长度 (手调)** —— 条是定宽 + `BottomCenter` 居中放置, 左右自动等距, 改这一个数就行.
  *
- * 这条规则同时解决了另外两件事, 别改回绝对值或百分比:
- * - **不可能被圆角啃到**. 圆角在距底 d 处的横向内切量是 `r − sqrt(r² − (r−d)²)`, d=0 时取到
- *   最大值恰为 r —— 内缩取 r 就等于把条卡在最坏情况的边界上, 于是条想贴多低都不会缺角,
- *   [TV_CARD_PROGRESS_BAR_BOTTOM_GAP] 可以纯按观感调.
- * - **在宽度差一倍的两种卡上都成立**. 选集卡 (240dp 宽、圆角 6dp) 现在的内缩正好也是 6dp,
- *   两边同一条规则. 早先两边各写死绝对值 (10dp / 6dp), 竖版卡封面才 108dp, 条只占 81%,
- *   比选集卡的 95% 明显短一截.
+ * 现值 92dp = 封面宽 (112 外框 − 2×[TvFocusRing.Gap] = 108dp) − 2×[TV_PORTRAIT_CARD_CORNER],
+ * 即**底边去掉两个圆角之后的直线段长度**, 两端正好落在圆角的切点上.
+ *
+ * 两条边界, 调之前先看:
+ * - **上限 108dp** (封面宽). 超过就被 `Surface` 裁掉.
+ * - **超过 92dp 后两端会被圆角啃**: 圆角在距底 d 处的横向内切量是 `r − sqrt(r² − (r−d)²)`,
+ *   d=0 时取到最大值恰为 r=8dp. 停在 92dp 等于把条卡在最坏情况的边界上, 于是条**想贴多低
+ *   都不缺角**, [TV_CARD_PROGRESS_BAR_BOTTOM_GAP] 才能纯按观感调.
+ *
+ * 别改回"占卡宽百分之几"那种写法: 竖版卡封面 108dp、选集卡 240dp, 早先两边各写死绝对值
+ * (10dp / 6dp), 竖版卡的条只占 81% 而选集卡 95%, 观感对不上 —— 现在两边同一条圆角规则.
  */
-private val TV_CARD_PROGRESS_BAR_INSET = TV_PORTRAIT_CARD_CORNER
+private val TV_CARD_PROGRESS_BAR_LENGTH =
+    TV_PAGE_CARD_WIDTH - TvFocusRing.Gap * 2 - TV_PORTRAIT_CARD_CORNER * 2 + 2.dp
 
 /**
- * 进度条与卡片底边的空隙 —— 纯观感值, 没有几何下限 (见 [TV_CARD_PROGRESS_BAR_INSET]).
+ * **进度条与卡片底边的空隙 (手调)** —— 纯观感值, 没有几何下限 (见 [TV_CARD_PROGRESS_BAR_LENGTH]),
+ * 调大=整条往上抬.
  *
  * 竖版卡上取 2dp: 5dp (选集卡那档) 用户实测"太高", Prime 的条也基本贴底 (0~1dp).
  * 选集卡不跟改 —— 它那 5dp 是为了不与聚焦描边糊在一起调出来的, 两者卡高与描边观感不同.

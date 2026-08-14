@@ -50,7 +50,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -80,11 +79,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emitAll
-import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -107,7 +104,14 @@ import me.him188.ani.app.ui.foundation.focus.tvFocusMoveRateLimit
 import me.him188.ani.app.ui.foundation.consumeHeldConfirmKey
 import me.him188.ani.app.ui.foundation.ifThen
 import me.him188.ani.app.ui.foundation.navigation.BackHandler
-import me.him188.ani.app.ui.foundation.tv.TV_HERO_MEDIA_DEBOUNCE_MILLIS
+import me.him188.ani.app.ui.foundation.tv.TvHeroMediaSpec
+import me.him188.ani.app.ui.foundation.tv.TvHeroNeighbor
+import me.him188.ani.app.ui.foundation.tv.TvHeroNeighbors
+import me.him188.ani.app.ui.foundation.tv.rememberTvHeroMediaPipeline
+import me.him188.ani.app.ui.foundation.tv.rememberTvSettledHeroProvider
+import me.him188.ani.app.ui.foundation.tv.tvGridNeighborsOf
+import me.him188.ani.app.ui.foundation.tv.prefetchTvBackdrop
+import me.him188.ani.app.ui.foundation.tv.tvHeroBackdropUrl
 import me.him188.ani.app.ui.foundation.tv.TV_PAGE_CARD_SPACING
 import me.him188.ani.app.ui.foundation.tv.TV_PORTRAIT_CARD_COVER_RATIO
 import me.him188.ani.app.ui.foundation.tv.TvFullScreenBackdropLayer
@@ -242,17 +246,42 @@ fun TvSchedulePage(
 
     // 聚焦卡片 -> 全屏 backdrop (TMDB, 异步); null = 查过没有, 不再重查
     var focusedTarget by remember { mutableStateOf<TvScheduleBackdropTarget?>(null) }
-    val backdropCache = remember { mutableStateMapOf<Int, String?>() }
-    LaunchedEffect(Unit) {
-        snapshotFlow { focusedTarget }.filterNotNull().collectLatest { target ->
-            if (target.subjectId in backdropCache) return@collectLatest
-            delay(TV_HERO_MEDIA_DEBOUNCE_MILLIS) // 防抖: 快速划过卡片时不发请求
-            runCatching {
-                // 传该集的播出日期: 新番刚播时 TMDB 往往还没有 backdrop, 负缓存据此限期失效
-                tmdb.getBackdropUrl(target.subjectId, target.originalName, activeAsOfDate = target.airDate)
-            }.onSuccess { backdropCache[target.subjectId] = it } // 失败不写缓存, 下次聚焦重试
+    // backdrop 的**展示**目标: 低特效档下连发导航期间不换图, 停下来才换一次 (完整特效档原样
+    // 直通). 下面的预取仍读真实的 focusedTarget —— 停下来时 URL 已在缓存里, 换挡不等网络.
+    // 本页的 backdrop 是全屏的, 连发期间反复重启它的代价比另外几页更高
+    val backdropDisplayTarget = rememberTvSettledHeroProvider { focusedTarget }
+
+    // 预取要的两样东西 (subjectId 之外): TMDB 只认**原名**, 而负缓存限期失效要**播出日期**.
+    // 一屏网格就是一天, 所以日期对全网格是同一个; 名字按 subjectId 查表 —— 邻居只带 id 过来.
+    val cardNames = remember(dayItems) {
+        dayItems.cards.mapNotNull { it.item }
+            .associate { it.subjectId to it.subjectName.ifBlank { it.subjectTitle } }
+    }
+    val displayedDate = displayedDay?.date?.toString()
+    val prefetchBackdrop: suspend (Int) -> Unit = { subjectId ->
+        cardNames[subjectId]?.let { name ->
+            // 传播出日期: 新番刚播时 TMDB 往往还没有 backdrop, 负缓存据此限期失效
+            // (本页恰恰是带得出播出日期的那一个, 见 prefetchTvBackdrop 的说明)
+            tmdb.prefetchTvBackdrop(subjectId, name, activeAsOfDate = displayedDate)
         }
     }
+    // 接进四页共用的 hero 媒体流水线 (2026-08-16). 本页原先只有"聚焦后现拉当前这张"一条路,
+    // 每移动一格都得从零等一次网络. 接进来白拿四样: 连发合并 (原来自己写了半套 settle)、
+    // 在途去重、前台优先的调度 (邻居永远不跟聚焦那张抢带宽), 以及本页真正缺的那块 ——
+    // **邻居的 URL 预取与图片预热**: 网格四个方向都单步可达, 图不预热就不可能接近零等待.
+    //
+    // 只借机械部分, 不接它的 backdropUrl/underlayUrl: 本页背景是全屏层, 还有"没聚焦过卡片时
+    // 用今天第一张有图的"这条私有规则 (见 defaultBackdrop), 展示路径保持原样.
+    rememberTvHeroMediaPipeline(
+        tmdb = tmdb,
+        // 与展示端同一个取值 (见下方 TvFullScreenBackdropLayer): 预热的必须正是要显示的那张
+        fullVisualEffects = false,
+        restartKey = Unit,
+        // coverUrl 留空: 封面兜底与垫底图是流水线展示端的事, 本页不走那条
+        spec = { focusedTarget?.let { TvHeroMediaSpec(it.subjectId, coverUrl = "", neighbors = it.neighbors) } },
+        resolve = { spec -> prefetchBackdrop(spec.subjectId) },
+        resolveNeighbor = { _, neighbor -> prefetchBackdrop(neighbor.subjectId) },
+    )
 
     // 还没聚焦过任何卡片时 (焦点停在日期行) 的默认背景: 从**今天**的卡片里依次试, 第一张
     // 有图的顶上, 全都没有才落回纯背景色. 一旦聚焦过卡片就不再用它 —— 那时该显示的是聚焦那部
@@ -270,13 +299,9 @@ fun TvSchedulePage(
         val airDate = days.getOrNull(todayIndex)?.date?.toString()
         for (item in todayItems) {
             if (focusedTarget != null) return@LaunchedEffect // 用户已经进卡片区, 不必再找默认图
-            val url = if (item.subjectId in backdropCache) {
-                backdropCache[item.subjectId] // 聚焦过的卡已经查过, 别重复请求
-            } else {
-                runCatching {
-                    tmdb.getBackdropUrl(item.subjectId, item.subjectName.ifBlank { item.subjectTitle }, airDate)
-                }.onSuccess { backdropCache[item.subjectId] = it }.getOrNull()
-            }
+            // 聚焦过 (或别的页面预取过) 的条目已经在服务层热表里, prefetch 会直接返回, 不重复请求
+            tmdb.prefetchTvBackdrop(item.subjectId, item.subjectName.ifBlank { item.subjectTitle }, airDate)
+            val url = tmdb.peekBackdropUrl(item.subjectId)
             if (url != null) {
                 defaultBackdrop = url
                 return@LaunchedEffect
@@ -520,14 +545,25 @@ fun TvSchedulePage(
             .onFocusChanged { pageHasFocus = it.hasFocus }
             .then(playKeyModifier),
     ) {
-        // 全屏 backdrop (聚焦条目; 无图时本层不绘制, 整页落在纯背景色上 —— 同详情页的 fallback).
+        // 全屏 backdrop (聚焦条目; 连封面都没有时本层才不绘制, 整页落在纯背景色上).
         // 本页是独立目的地, 整屏归自己, 图直接铺到屏幕边缘, 不必再考虑主壳给侧边栏让出的那一条.
         // 地址用 lambda 传入: 状态在组件内部才读取, 遥控器每换一张卡只重组那一层, 不连带整页
         TvFullScreenBackdropLayer(
             backdropUrl = {
-                val target = focusedTarget
+                val target = backdropDisplayTarget()
                 // 聚焦过卡片: 只认它自己的图 (没有就黑); 从没聚焦过: 用今天那张默认图
-                if (target != null) backdropCache[target.subjectId] else defaultBackdrop
+                if (target != null) {
+                    // 没有 TMDB 横版图时回退它自己的竖版封面居中裁切 (四页同构, 见
+                    // tvHeroBackdropUrl). 仍然**只认它自己的图** —— 上面 defaultBackdrop 那条
+                    // "拿别人的图顶上会误导"的顾虑在这里不存在
+                    tmdb.tvHeroBackdropUrl(
+                        target.subjectId,
+                        fullVisualEffects = false,
+                        coverUrl = target.coverUrl,
+                    )
+                } else {
+                    defaultBackdrop
+                }
             },
         )
 
@@ -748,6 +784,10 @@ fun TvSchedulePage(
                         // 行尾不留余量, 且导航用的行列换算与实际布局不可能对不上
                         columns = GridCells.Fixed(gridColumns),
                         modifier = Modifier.fillMaxSize().clipToBounds()
+                            // 长按方向键的移动频率上限. 日期行早就有 (见下方 tvFocusMoveRateLimit),
+                            // 卡片网格一直漏着 —— 而本页每换一格要重启的是一张**全屏** backdrop.
+                            // 必须挂在 gridKeyNavigation 之前: 两者都是 onPreviewKeyEvent, 靠前的先收到
+                            .tvFocusMoveRateLimit()
                             .gridKeyNavigation(
                                 gridFocus,
                                 focusedIndex = { lastFocusedCard },
@@ -835,11 +875,15 @@ fun TvSchedulePage(
                                     lastFocusedCard = index
                                     anyFocusObtained = true
                                     gridFocus.onCardFocused(index)
-                                    if (item != null && displayedDay != null) {
+                                    if (item != null) {
                                         focusedTarget = TvScheduleBackdropTarget(
                                             subjectId = item.subjectId,
-                                            originalName = item.subjectName.ifBlank { item.subjectTitle },
-                                            airDate = displayedDay.date.toString(),
+                                            coverUrl = item.imageUrl,
+                                            // 网格中间那张四个方向都单步可达且都可能是冷的
+                                            // (跨天回来、上键从日期行进来都不是顺方向), 见 tvGridNeighborsOf
+                                            neighbors = tvGridNeighborsOf(index, gridColumns) { i ->
+                                                cards.getOrNull(i)?.item?.let { TvHeroNeighbor(it.subjectId) }
+                                            },
                                         )
                                     }
                                 },
@@ -1279,11 +1323,24 @@ private data class TvScheduleDayItems(
         get() = cards.indexOfFirst { !it.aired }.let { if (it < 0) cards.size else it }
 }
 
-/** 聚焦卡片 -> backdrop 取图请求 ([airDate] 供 TMDB 负缓存限期失效). */
+/**
+ * 聚焦卡片 -> backdrop 取图请求.
+ *
+ * 原名与播出日期不在这里: 邻居也要这两样, 而邻居只有下标 —— 统一按 subjectId 查当天那张表
+ * (见 `cardNames` / `displayedDate`), 免得同一份信息在两处各带一遍.
+ */
 private data class TvScheduleBackdropTarget(
     val subjectId: Int,
-    val originalName: String,
-    val airDate: String,
+    /**
+     * 该条目的竖版封面: 没有 TMDB 横版图时拿它当全屏背景 (居中裁切), 见 [tvHeroBackdropUrl].
+     * 从卡片直接带过来 —— 卡片本来就是拿它渲染的, 一定已经有值.
+     */
+    val coverUrl: String = "",
+    /**
+     * 单步可达的邻居 (右/下/左/上) + 两步的同行第三格, 供流水线预取, 见 [tvGridNeighborsOf].
+     * **在 onFocused 里算**: 那儿才同时有下标、列数与当天的卡片表.
+     */
+    val neighbors: TvHeroNeighbors = TvHeroNeighbors(),
 )
 
 

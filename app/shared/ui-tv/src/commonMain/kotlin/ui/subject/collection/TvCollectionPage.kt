@@ -54,7 +54,6 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -69,7 +68,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -79,7 +77,6 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.intl.Locale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -90,7 +87,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.paging.compose.collectWithLifecycle
 import androidx.paging.compose.itemKey
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.collectLatest
@@ -101,12 +97,10 @@ import me.him188.ani.app.data.models.subject.SubjectCollectionInfo
 import me.him188.ani.app.data.models.subject.toNavPlaceholder
 import me.him188.ani.app.data.network.BangumiSummaryService
 import me.him188.ani.app.data.network.TmdbImageService
-import me.him188.ani.app.data.network.matchToEpisodes
 import me.him188.ani.app.data.network.newestAiredDateStringOrNull
-import me.him188.ani.app.data.network.tmdbStillHeroSizeUrl
-import me.him188.ani.app.data.network.toTmdbLanguage
 import me.him188.ani.app.data.repository.player.EpisodePlayHistoryRepository
 import me.him188.ani.app.data.repository.subject.SetSubjectCollectionTypeOrDeleteUseCase
+import me.him188.ani.app.data.repository.subject.SubjectCollectionRepository
 import me.him188.ani.app.data.repository.user.SettingsRepository
 import me.him188.ani.app.domain.foundation.LoadError
 import me.him188.ani.app.domain.usecase.GlobalKoin
@@ -125,7 +119,20 @@ import me.him188.ani.app.ui.foundation.tv.TvPageBackdropLayer
 import me.him188.ani.app.ui.foundation.tv.TvPortraitCard
 import me.him188.ani.app.ui.foundation.tv.tvPlayKeyForceRefresh
 import me.him188.ani.app.ui.foundation.focus.gridKeyNavigation
+import me.him188.ani.app.ui.foundation.focus.tvFocusMoveRateLimit
+import me.him188.ani.app.ui.foundation.tv.rememberTvSettledHeroProvider
 import me.him188.ani.app.ui.foundation.tv.TV_HERO_MEDIA_DEBOUNCE_MILLIS
+import me.him188.ani.app.ui.foundation.tv.TvNavigationSettle
+import me.him188.ani.app.ui.foundation.tv.TvHeroMediaCache
+import me.him188.ani.app.ui.foundation.tv.TvNextEpisodeMedia
+import me.him188.ani.app.ui.foundation.tv.TvHeroMediaSpec
+import me.him188.ani.app.ui.foundation.tv.TvHeroNeighbor
+import me.him188.ani.app.ui.foundation.tv.TvHeroNeighbors
+import me.him188.ani.app.ui.foundation.tv.rememberTvHeroMediaPipeline
+import me.him188.ani.app.ui.foundation.tv.resolveTvHeroMedia
+import me.him188.ani.app.ui.foundation.tv.tvGridNeighborsOf
+import me.him188.ani.app.ui.foundation.tv.prefetchTvSummaryFallback
+import me.him188.ani.app.ui.foundation.tv.tvHeroBackdropUrl
 import me.him188.ani.app.ui.foundation.tv.TV_HERO_TEXT_FADE_MILLIS
 import me.him188.ani.app.ui.foundation.tv.TV_HERO_TITLE_WIDTH_FRACTION
 import me.him188.ani.app.ui.foundation.tv.TV_PAGE_BOTTOM_SCRIM_HEIGHT
@@ -193,10 +200,41 @@ fun TvCollectionPage(
     val tmdb = remember { GlobalKoin.get<TmdbImageService>() }
     val bangumiSummaryService = remember { GlobalKoin.get<BangumiSummaryService>() }
     val settingsRepository = remember { GlobalKoin.get<SettingsRepository>() }
+    val collectionRepo = remember { GlobalKoin.get<SubjectCollectionRepository>() }
     val playHistoryRepository = remember { GlobalKoin.get<EpisodePlayHistoryRepository>() }
     val setCollectionTypeUseCase = remember { GlobalKoin.get<SetSubjectCollectionTypeOrDeleteUseCase>() }
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
+
+    // 重新进入本页 (从主页其它 tab 切回来) 一律回到"第一次进入"的样子: 落到本页显示顺序里
+    // 第一个有条目的分类 (全空则第一个) + 网格回顶.
+    //
+    // 不复位的话选中分类留在 [UserCollectionsState] (ViewModel 级, 跨页面存活) 里带着上次的
+    // 值回来, 而本页的焦点簿记随组合销毁清零 —— 进页焦点由焦点系统落在标签行第一个标签上,
+    // 选中项与网格内容却还是上次那个分类, 二者对不上 (标签的"聚焦即选中"刻意不认系统塞来的
+    // 焦点, 见 selectByFocusArmed), 表现为"焦点在最左标签、内容是别的标签、往左直接进侧边栏".
+    //
+    // 判据用 rememberSaveable 的存活: 主页三个 tab 的 AnimatedContent 不带 SaveableStateHolder,
+    // 切走本页保存态就丢了 = 重新进入; 而进详情页/播放器时本页随 NavHost 目的地被
+    // SaveableStateProvider 保存, 返回时原样回来 —— 那条路要保留上次的分类与落点
+    // (见下方 restoreCardIndex), 不能复位.
+    var enteredBefore by rememberSaveable { mutableStateOf(false) }
+    val freshEntry = remember { !enteredBefore }
+    // 收藏计数是异步来的, 冷启动进页时往往还是 null: 全按 0 算 -> 落到第一个标签, 计数到达后
+    // 由下方效应再定一次
+    val firstNonEmptyTabIndex: () -> Int = {
+        val counts = state.collectionCounts
+        val type = TV_COLLECTION_TABS.firstOrNull { (counts?.getCount(it) ?: 0) > 0 }
+            ?: TV_COLLECTION_TABS.first()
+        COLLECTION_TABS_SORTED.indexOf(type)
+    }
+    if (freshEntry && !enteredBefore) {
+        enteredBefore = true
+        // 写在组合体里而不是效应里: 效应要等一帧, 那一帧会先用上次的分类渲染一次
+        // (标签指示条与网格内容闪一下再跳走)
+        val target = firstNonEmptyTabIndex()
+        if (state.selectedTypeIndex != target) state.selectTypeIndex(target)
+    }
 
     // 只取实例不再收集: 选中 tab 的网格 (下方 AnimatedContent 内) 已对同一缓存实例
     // collectWithLifecycle, 页面级再收集会有两个协程并发把每个分页 generation 灌进
@@ -218,9 +256,32 @@ fun TvCollectionPage(
     // 用户离开"的判据 (下方塌缩恢复效应用)
     var gridRegionFocused by remember { mutableStateOf(false) }
 
+    // 重新进入本页的收尾 (承上方 freshEntry): 等收藏计数到达后再定一次落哪个分类, 并把网格
+    // 拉回顶部 —— hero 在还没聚焦卡片时展示的是列表第一项, 网格却停在上次滚动的位置的话,
+    // 就是"信息块讲第一部、网格里看不到它".
+    // 声明在这里而不是 freshEntry 那段旁边: 要用下方才声明的 gridFocus 判断用户是否已接手.
+    LaunchedEffect(Unit) {
+        if (!freshEntry) return@LaunchedEffect
+        if (state.collectionCounts == null) {
+            val keysAtStart = gridFocus.userNavigations
+            withTimeoutOrNull(TV_COLLECTION_COUNTS_WAIT_MILLIS) {
+                snapshotFlow { state.collectionCounts }.filterNotNull().first()
+            }
+            // 等待期间用户自己切了标签/进了网格: 他说了算, 不再改选中项
+            if (gridFocus.userNavigations == keysAtStart && !gridRegionFocused) {
+                val target = firstNonEmptyTabIndex()
+                if (state.selectedTypeIndex != target) state.selectTypeIndex(target)
+            }
+        }
+        state.getGridState(state.selectedTypeIndex).scrollToItem(0)
+    }
+
     // Hero 数据源: 聚焦卡片时记录该条目快照; 展示时再按 subjectId 对回最新列表数据
     // (看完一集返回本页后分页已刷新, 快照里的进度是旧的)
     var heroItem by remember { mutableStateOf<SubjectCollectionInfo?>(null) }
+    // 聚焦卡的邻居 (subjectId -> 邻居), 在 onFocused 里按网格几何算好; 记 subjectId 是为了
+    // 默认 hero (列表第一项, 没被聚焦过) 时不错用上一次聚焦位置的邻居
+    var heroNeighbors by remember { mutableStateOf<Pair<Int, TvHeroNeighbors>?>(null) }
     // 刚进页 / 切 tab 后还没聚焦过卡片: 默认展示当前列表第一项. 切 tab 数据加载期间保留
     // 旧 hero (信息块与主按钮不闪没, 新信息到了随渐隐换入); 确认新 tab 为空才清掉.
     // 落点解析期间不设默认 (否则先闪一下第一张卡的状态): 目标卡聚焦后由 onFocused
@@ -252,68 +313,68 @@ fun TvCollectionPage(
         }
     }
 
-    // subjectId -> TMDB backdrop URL (null = 已查过但没有, 不再重查; 请求失败不缓存)
-    val backdropCache = remember { mutableStateMapOf<Int, String?>() }
-    // subjectId -> 观看中条目"下一集"的 TMDB 数据 (剧照 + 单集简介; 字段为 null = 查过没有)
-    val episodeStillCache = remember { mutableStateMapOf<Int, TvCollectionNextEpisodeMedia>() }
-    // subjectId -> bgm.tv 简介兜底 (Ani 服务器部分条目 summary 为空; "" = 也没有)
-    val summaryFallbackCache = remember { mutableStateMapOf<Int, String>() }
+    // hero 的**展示**目标: 低特效档下连发导航期间不换背景图/文字, 停下来才换一次 (完整特效档
+    // 原样直通). 下面的数据预取仍读真实的 heroInfo —— 停下来时数据已在缓存里, 换挡不等网络.
+    // 用 provider 版: 值版本会把 heroInfo 的读记到本页 body 上, 每换一格整页重组, 正是
+    // backdrop 层与 hero 信息块收 lambda 想避免的事. 机理与实测数据见 [rememberTvSettledHero]
+    val heroDisplay = rememberTvSettledHeroProvider { heroInfo }
+
+    // hero 媒体全部走 TvHeroMediaCache (进程级, 四个 TV 页共用): 原先本页各存一份 remember 表,
+    // 于是同一部作品从探索页进详情页有图、从本页进没图 —— 见那里的 KDoc
+    val episodeStillCache = TvHeroMediaCache.nextEpisodeMedia
+    val summaryFallbackCache = TvHeroMediaCache.summaryFallbacks
     // 播放历史 (响应式): 卡片进度条与 hero 剩余分钟, 退出播放器回本页自动更新
     val playHistories by playHistoryRepository.flow.collectAsStateWithLifecycle(emptyList())
 
-    // 异步补 Hero 媒体: 换聚焦条目时 collectLatest 取消在途请求; 条目信息本身来自列表, 无需请求.
-    // 键到 items 上: 切 tab 换分页实例时重启, 不然闭包里捕获的是旧 tab 的 heroInfo 状态
-    LaunchedEffect(items) {
-        snapshotFlow { heroInfo }.filterNotNull().collectLatest { info ->
-            delay(TV_HERO_MEDIA_DEBOUNCE_MILLIS) // 防抖: 网格快速划过时不发请求
-            // 观看途中 (Continue/Watched): 背景优先用"下一集"的单集剧照, 直观提示进度节点.
-            // 连载番的永久缓存可能不含新播集, 传已播出最新集日期触发陈旧重取 (服务层闸门限频).
-            val nextEpisodeId = info.stillEpisodeIdOrNull()
-            if (nextEpisodeId != null && episodeStillCache[info.subjectId]?.episodeId != nextEpisodeId) {
-                runCatching {
-                    val language = (settingsRepository.uiSettings.flow.first().appLanguage ?: Locale.current)
-                        .toTmdbLanguage()
-                    val stills = tmdb.getEpisodeStills(
-                        info.subjectId, info.subjectInfo.name, language,
-                        newestWantedAirDate = info.episodes.newestAiredDateStringOrNull(),
-                    )
-                    stills.matchToEpisodes(info.episodes)[nextEpisodeId]
-                }.onSuccess { media ->
-                    // 剧照存 w1280 档: 服务层存的是 original (偶有 4K 级原图), 当 hero 背景
-                    // 解码 8-33MB 位图是低端盒子每次换卡的重锤; w1280 经渐隐压暗后无差
-                    episodeStillCache[info.subjectId] =
-                        // 存原图档 URL, 显示时才按设置降档 (见 TvPageBackdropLayer 调用处)
-                        TvCollectionNextEpisodeMedia(nextEpisodeId, media?.stillUrl, media?.overview)
-                }
+    // hero 媒体流水线 (连发合并/调度器/邻居预取/图片预热/封面兜底), 与探索页同一 host ——
+    // 见 rememberTvHeroMediaPipeline. 本页条目信息来自列表 (种进进程缓存后解析链第一跳
+    // 直接命中, 不发请求), 解析链实际只剩剧照 + backdrop 两跳.
+    // 剧照那跳的语义与从前一致: 观看途中 (Continue/Watched) 优先"下一集"单集剧照;
+    // backdrop **有剧照也照拉** —— 它同时是详情页的预取, 见 resolveTvHeroMedia 的 KDoc.
+    val fullVisualEffects = LocalThemeSettings.current.tvFullVisualEffects
+    val heroPipeline = rememberTvHeroMediaPipeline(
+        tmdb = tmdb,
+        fullVisualEffects = fullVisualEffects,
+        // 键到 items 上: 切 tab 换分页实例时重启, 不然闭包里捕获的是旧 tab 的状态
+        restartKey = items,
+        spec = {
+            heroInfo?.let { info ->
+                info.toHeroMediaSpec(
+                    heroNeighbors?.takeIf { it.first == info.subjectId }?.second ?: TvHeroNeighbors(),
+                )
             }
-            // 整部 backdrop: 单集剧照缺失时的兜底 (以及未在看条目的主图).
-            //
-            // **有剧照也照拉** (与探索页同一判断): 详情页 Hero 用的一律是整部 backdrop,
-            // 剧照只在本页当 hero 背景. 原先"拿到剧照就不再拉"省下的那次请求, 代价是本页
-            // 观看中的条目 (恰恰是最常按进去的那批) 进详情页时 peekBackdropUrl 必然落空,
-            // 首帧空白等解析 —— 同一部从探索页进有图、从这里进没图.
-            // 正缓存永久有效, 每个条目全生命周期只真的请求一次.
-            // 放在剧照之后: 本页 hero 要用的图先到, 这条不抢它的身位.
-            if (info.subjectId !in backdropCache) {
-                runCatching {
-                    // 官方主背景图 (与详情页 hero 同源, 进详情零跳变); 屏保轮播才用全量列表.
-                    // 传最新已播集日期: 新番刚播时 TMDB 往往还没有 backdrop, 负缓存据此限期失效
-                    tmdb.getBackdropUrl(
-                        info.subjectId,
-                        info.subjectInfo.name,
-                        activeAsOfDate = info.episodes.newestAiredDateStringOrNull(),
-                    )
-                }.onSuccess { url ->
-                    backdropCache[info.subjectId] = url
-                }
+        },
+        resolve = { s ->
+            resolveTvHeroMedia(
+                s.subjectId, collectionRepo, tmdb,
+                preferNextEpisodeStill = s.preferNextEpisodeStill,
+                settingsRepository = settingsRepository,
+            )
+        },
+        resolveNeighbor = { _, neighbor ->
+            // 邻居的信息就在列表里: 种进进程缓存让第一跳直接命中.
+            // 剧照偏好用邻居自带的 (算邻居时就按它自己的状态定好了, 与图片预热同一份判据)
+            items.itemSnapshotList.items.firstOrNull { it.subjectId == neighbor.subjectId }
+                ?.let { TvHeroMediaCache.putSubjectInfo(neighbor.subjectId, it) }
+            resolveTvHeroMedia(
+                neighbor.subjectId, collectionRepo, tmdb,
+                preferNextEpisodeStill = neighbor.preferNextEpisodeStill,
+                settingsRepository = settingsRepository,
+            )
+        },
+        beforeResolve = { s ->
+            // 列表自带完整信息 (含分集), 种进进程缓存 —— hero 文字本来就直读列表, 不受媒体链影响
+            heroInfo?.takeIf { it.subjectId == s.subjectId }
+                ?.let { TvHeroMediaCache.putSubjectInfo(s.subjectId, it) }
+        },
+        afterResolve = { s ->
+            val info = heroInfo
+            if (info?.subjectId == s.subjectId && info.subjectInfo.summary.isBlank()) {
+                launch { bangumiSummaryService.prefetchTvSummaryFallback(s.subjectId) }
             }
-            // Ani 服务器简介为空时直连 bgm.tv 补 (仅替代不合并); 网络错误不写缓存, 下次聚焦重试
-            if (info.subjectInfo.summary.isBlank() && info.subjectId !in summaryFallbackCache) {
-                runCatching { bangumiSummaryService.getSummary(info.subjectId) }
-                    .onSuccess { summaryFallbackCache[info.subjectId] = it.orEmpty() }
-            }
-        }
-    }
+            true
+        },
+    )
 
     val navigateToSubject: (SubjectCollectionInfo) -> Unit = { info ->
         Analytics.recordEvent(SubjectEnter) {
@@ -351,9 +412,13 @@ fun TvCollectionPage(
     // 焦点发回第一个可聚焦元素 (第一个 tab). 而"聚焦即选中"意味着每次焦点落到新 tab 都会触发
     // 一次选中态变化, 于是按住方向键快速移动时偶发被拉回最左标签.
     val tabFocusRequesters = remember { List(TV_COLLECTION_TABS.size) { FocusRequester() } }
-    // 聚焦当前选中的 tab. 用函数而非捕获下标: 效应/按键回调里调用时要读到最新选中项
+    // 选中标签在本页显示顺序里的下标. 用函数而非捕获值: 效应/按键回调里调用时要读到最新选中项
+    val selectedTabTvIndex: () -> Int = { TV_COLLECTION_TABS.indexOf(COLLECTION_TABS_SORTED[state.selectedTypeIndex]) }
+    // 当前持有焦点的标签下标 (按本页显示顺序); -1 = 焦点不在标签行上
+    var focusedTabTvIndex by remember { mutableIntStateOf(-1) }
+    // 聚焦当前选中的 tab
     val focusSelectedTab: () -> Boolean = {
-        val tvIndex = TV_COLLECTION_TABS.indexOf(COLLECTION_TABS_SORTED[state.selectedTypeIndex])
+        val tvIndex = selectedTabTvIndex()
         tvIndex >= 0 && runCatching { tabFocusRequesters[tvIndex].requestFocus() }.isSuccess
     }
     // 列表加载出错 (如未登录) 时的错误横幅: 挂请求器让 tab 下键能落到横幅里的按钮 (登录/重试)
@@ -371,7 +436,6 @@ fun TvCollectionPage(
     }
     // 进入本页要恢复的目标卡片下标 (进页那一刻的快照; -1 = 聚焦选中 tab)
     val restoreCardIndex = remember { lastFocusedCard }
-    var anyFocusObtained by remember { mutableStateOf(false) }
     // 恢复期间抑制标签的"聚焦即选中": 返回本页瞬间系统会把默认焦点塞给第一个可聚焦元素
     // (第一个 tab 标签), 若不抑制, 其"聚焦即选中"会把选中 tab 改掉, 恢复目标卡随之落进错误的 tab
     var restorePending by remember { mutableStateOf(restoreCardIndex >= 0) }
@@ -386,7 +450,17 @@ fun TvCollectionPage(
             resolveFocusRepeatedly(attempts = 120, arrived = { gridFocus.pending == null }) {}
             restorePending = false
         } else {
-            resolveFocusRepeatedly(attempts = 80, delayMillis = 50, arrived = { anyFocusObtained }) {
+            val keysAtStart = gridFocus.userNavigations
+            resolveFocusRepeatedly(
+                attempts = 80, delayMillis = 50,
+                // 到位判据必须是"选中的那个标签拿到了焦点", 不能是"页面里有东西拿到了焦点":
+                // 进页时焦点系统会把默认焦点塞给第一个可聚焦元素 (最左那个标签), 后者当判据
+                // 就是一次假成功 —— 循环一帧都不试就退出, 焦点停在最左标签而选中项/内容是
+                // 另一个分类 (标签的"聚焦即选中"刻意不认系统塞来的焦点)
+                arrived = { focusedTabTvIndex == selectedTabTvIndex() },
+                // 用户自己按了键 / 焦点已经进了网格: 别再把焦点抢回标签行
+                abandon = { gridFocus.userNavigations != keysAtStart || gridRegionFocused },
+            ) {
                 focusSelectedTab()
             }
         }
@@ -506,20 +580,13 @@ fun TvCollectionPage(
         // 背景 backdrop 层 (探索/搜索页同款, 恒用"卡片态"渐变): 观看途中优先下一集剧照,
         // 缺失回退整部官方主图. URL 用 lambda 传入: 聚焦条目状态在组件内部才读取,
         // 遥控器换卡只重组这一小块.
-        // 剧照按设置降档 (默认 w1280, 完整视觉效果用原图); backdrop 那路服务层已是 w1280 档
-        val fullVisualEffects = LocalThemeSettings.current.tvFullVisualEffects
+        // 三级回落 + 封面兜底/垫底 (四页同构), 语义见 TvHeroMediaPipelineState
         TvPageBackdropLayer(
-            backdropUrl = {
-                heroInfo?.let { info ->
-                    (if (info.stillEpisodeIdOrNull() != null) {
-                        episodeStillCache[info.subjectId]?.stillUrl?.let { tmdbStillHeroSizeUrl(it, fullVisualEffects) }
-                    } else null)
-                        ?: backdropCache[info.subjectId]
-                }
-            },
+            backdropUrl = { heroPipeline.backdropUrl(heroDisplay()?.toHeroMediaSpec()) },
             // 本页在主壳内, 图层正下方是主壳铺的 shellBackgroundColor (见 TvMainScreenLayout)
             fadeColor = AniThemeDefaults.shellBackgroundColor,
             modifier = Modifier.align(Alignment.TopEnd),
+            underlayUrl = { heroPipeline.underlayUrl(heroDisplay()?.toHeroMediaSpec()) },
         )
 
         Column(
@@ -534,7 +601,10 @@ fun TvCollectionPage(
                 // 瞬时焦点飘到某个标签上, 不能让它改写目标 tab 的选择)
                 onSelect = { type -> if (gridFocus.pending == null && !restorePending) selectType(type) },
                 tabFocusRequesters = tabFocusRequesters,
-                onAnyFocused = { anyFocusObtained = true },
+                onTabFocusChanged = { index, focused ->
+                    if (focused) focusedTabTvIndex = index
+                    else if (focusedTabTvIndex == index) focusedTabTvIndex = -1
+                },
                 // 标签间导航也算用户接手: 取消挂起的网格落点解析, 否则它的 onEmptyIdle
                 // 会把焦点拉回"选中的标签"(选中态比焦点滞后一帧, 于是像是被拉回上一个标签)
                 onUserNavigation = gridFocus::onUserNavigation,
@@ -556,7 +626,7 @@ fun TvCollectionPage(
             // Hero 信息块 (固定高度, 切换聚焦条目时网格不跳动). 聚焦条目状态在子组件内部
             // 才读取, 遥控器换卡只重组信息块自身, 不连带整页作用域
             TvCollectionHeroBlock(
-                heroInfoProvider = { heroInfo },
+                heroInfoProvider = heroDisplay,
                 episodeStillCache = episodeStillCache,
                 summaryFallbackCache = summaryFallbackCache,
                 remainingMinutesOf = { episodeId ->
@@ -725,6 +795,11 @@ fun TvCollectionPage(
                             columns = GridCells.Adaptive(TV_PAGE_CARD_WIDTH),
                             modifier = Modifier
                                 .fillMaxSize()
+                                // 长按方向键的移动频率上限 (同探索页卡片区/时间表日期行). 必须挂在
+                                // gridKeyNavigation 之前: 两者都是 onPreviewKeyEvent, 靠前的先收到,
+                                // 于是导航逻辑只看得见放行的那几发.
+                                // 系统连发约 20 次/秒, 而每换一格就要重启一次 hero 背景/文字的换挡
+                                .tvFocusMoveRateLimit()
                                 // 同列上下导航 + 播放键直达 (共享实现, 理由见 [gridKeyNavigation]);
                                 // extraKeys 处理跨 tab 行对齐导航: 行末右键 -> 右侧 tab 同一行最左卡,
                                 // 行首左键对称 (第一个 tab 行首不消费, 交给焦点系统 -> 侧边栏).
@@ -805,9 +880,25 @@ fun TvCollectionPage(
                                     contentDescription = info?.subjectInfo?.displayName,
                                     onClick = { info?.let(navigateToSubject) },
                                     onFocused = {
-                                        info?.let { heroItem = it }
+                                        info?.let {
+                                            heroItem = it
+                                            // 邻居按网格几何算 (中间卡四方向), 见 tvGridNeighborsOf
+                                            heroNeighbors = it.subjectId to tvGridNeighborsOf(
+                                                index, gridColumns,
+                                            ) { i ->
+                                                // 剧照偏好按**每个邻居自己**的观看状态定: 网格里
+                                                // "在看"与其余条目是混着的, 见 TvHeroNeighbor
+                                                if (i in 0 until tabItems.itemCount) {
+                                                    tabItems.peek(i)?.let { n ->
+                                                        TvHeroNeighbor(
+                                                            n.subjectId,
+                                                            n.stillEpisodeIdOrNull() != null,
+                                                        )
+                                                    }
+                                                } else null
+                                            }
+                                        }
                                         lastFocusedCard = index
-                                        anyFocusObtained = true
                                         gridFocus.onCardFocused(index)
                                     },
                                     // 焦点在网格与否 (塌缩恢复的判据): 获焦 true / 正常失焦 false;
@@ -907,12 +998,14 @@ private fun SubjectCollectionInfo.stillEpisodeIdOrNull(): Int? {
     } else null
 }
 
-/** 观看中条目"下一集"的 TMDB 数据; [episodeId] 用于看完一集后 (下一集变化) 失效重查. */
-private data class TvCollectionNextEpisodeMedia(
-    val episodeId: Int,
-    val stillUrl: String?,
-    val overview: String?,
-)
+/** 交给共享流水线/展示层的最小描述, 见 [TvHeroMediaSpec]. */
+private fun SubjectCollectionInfo.toHeroMediaSpec(neighbors: TvHeroNeighbors = TvHeroNeighbors()) =
+    TvHeroMediaSpec(
+        subjectId = subjectId,
+        preferNextEpisodeStill = stillEpisodeIdOrNull() != null,
+        coverUrl = subjectInfo.imageLarge,
+        neighbors = neighbors,
+    )
 
 /**
  * Hero 信息块 (含换条目渐隐渐现). [heroInfoProvider] 用 lambda 传入: 聚焦条目状态在
@@ -922,7 +1015,7 @@ private data class TvCollectionNextEpisodeMedia(
 @Composable
 private fun TvCollectionHeroBlock(
     heroInfoProvider: () -> SubjectCollectionInfo?,
-    episodeStillCache: Map<Int, TvCollectionNextEpisodeMedia>,
+    episodeStillCache: Map<Int, TvNextEpisodeMedia>,
     summaryFallbackCache: Map<Int, String>,
     remainingMinutesOf: (Int) -> Int?,
     modifier: Modifier = Modifier,
@@ -1115,7 +1208,8 @@ private fun TvCollectionTabRow(
     counts: (UnifiedCollectionType) -> Int?,
     onSelect: (UnifiedCollectionType) -> Unit,
     tabFocusRequesters: List<FocusRequester>,
-    onAnyFocused: () -> Unit,
+    /** 某个标签获得/失去焦点 (下标按本行显示顺序); 进页落点循环靠它判断"选中的标签到位了没". */
+    onTabFocusChanged: (index: Int, focused: Boolean) -> Unit,
     onUserNavigation: () -> Unit,
     onNavigateDown: () -> Boolean,
     modifier: Modifier = Modifier,
@@ -1180,9 +1274,9 @@ private fun TvCollectionTabRow(
                         // 无条件挂: 链上元素个数恒定, 选中态变化不会重建其后的焦点节点
                         .focusRequester(tabFocusRequesters[index])
                         .onFocusChanged {
+                            onTabFocusChanged(index, it.isFocused)
                             if (it.isFocused) {
                                 focusedTabIndex = index
-                                onAnyFocused()
                                 if (selectByFocusArmed) {
                                     selectByFocusArmed = false
                                     onSelect(type)
@@ -1272,6 +1366,12 @@ private val TV_COLLECTION_TABS = listOf(
     UnifiedCollectionType.DONE,
     UnifiedCollectionType.DROPPED,
 )
+
+/**
+ * 重新进入本页时等收藏计数到达的上限 (毫秒). 超时就按当前 (可能为空的) 计数定分类,
+ * 不让"等计数"把进页焦点拖在半空.
+ */
+private const val TV_COLLECTION_COUNTS_WAIT_MILLIS = 3000L
 
 /**
  * 等"改了收藏状态的条目"从当前 tab 列表消失的上限 (毫秒). 需覆盖一次网络往返 + 分页刷新;

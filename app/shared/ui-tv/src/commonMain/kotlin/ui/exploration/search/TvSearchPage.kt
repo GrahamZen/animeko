@@ -97,7 +97,6 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -134,7 +133,19 @@ import me.him188.ani.app.ui.foundation.focus.TvScrollAnimator
 import me.him188.ani.app.ui.foundation.tv.TvPageBackdropLayer
 import me.him188.ani.app.ui.foundation.tv.TvPortraitCard
 import me.him188.ani.app.ui.foundation.focus.gridKeyNavigation
+import me.him188.ani.app.ui.foundation.focus.tvFocusMoveRateLimit
+import me.him188.ani.app.ui.foundation.tv.rememberTvSettledHeroProvider
 import me.him188.ani.app.ui.foundation.tv.TV_HERO_MEDIA_DEBOUNCE_MILLIS
+import me.him188.ani.app.ui.foundation.tv.TvNavigationSettle
+import me.him188.ani.app.ui.foundation.tv.TvHeroMediaCache
+import me.him188.ani.app.ui.foundation.tv.TvHeroMediaSpec
+import me.him188.ani.app.ui.foundation.tv.TvHeroNeighbor
+import me.him188.ani.app.ui.foundation.tv.TvHeroNeighbors
+import me.him188.ani.app.ui.foundation.tv.prefetchTvBackdrop
+import me.him188.ani.app.ui.foundation.tv.rememberTvHeroMediaPipeline
+import me.him188.ani.app.ui.foundation.tv.tvGridNeighborsOf
+import me.him188.ani.app.ui.foundation.tv.prefetchTvSummaryFallback
+import me.him188.ani.app.ui.foundation.tv.tvHeroBackdropUrl
 import me.him188.ani.app.ui.foundation.tv.TV_HERO_TEXT_FADE_MILLIS
 import me.him188.ani.app.ui.foundation.tv.TV_HERO_TITLE_WIDTH_FRACTION
 import me.him188.ani.app.ui.foundation.tv.TV_PAGE_BOTTOM_SCRIM_HEIGHT
@@ -484,6 +495,9 @@ private fun TvSearchResultsPane(
 
     // Hero 数据源: 聚焦卡片驱动; 默认当前列表第一项, 列表确认为空才清
     var heroItem by remember { mutableStateOf<SubjectPreviewItemInfo?>(null) }
+    // 聚焦卡的邻居 (subjectId -> 邻居), 在 onFocused 里按网格几何算好; 记 subjectId 是为了
+    // 默认 hero (列表第一项, 没被聚焦过) 时不错用上一次聚焦位置的邻居
+    var heroNeighbors by remember { mutableStateOf<Pair<Int, TvHeroNeighbors>?>(null) }
     LaunchedEffect(items.itemCount > 0, items.isLoadingFirstPageOrRefreshing) {
         val cur = heroItem
         if (items.itemCount > 0) {
@@ -495,35 +509,57 @@ private fun TvSearchResultsPane(
         }
     }
 
+    // hero 的**展示**目标: 低特效档下连发导航期间不换背景图/文字, 停下来才换一次 (完整特效档
+    // 原样直通). 下面的数据预取仍读真实的 heroItem —— 停下来时数据已在缓存里, 换挡不等网络.
+    // 用 provider 版的理由同追番页 (别把热状态读进页面 body), 见 [rememberTvSettledHeroProvider]
+    val heroDisplay = rememberTvSettledHeroProvider { heroItem }
+
     // subjectId -> TMDB backdrop URL (null = 已查过没有); 搜索结果没有 summary 字段,
     // 简介一律按聚焦条目异步向 bgm.tv 取 ("" = 查过没有); 网络错误都不写缓存, 下次聚焦重试.
     // 收藏状态供长按菜单高亮当前项, 聚焦时顺带拉取, 菜单操作成功后本地覆盖
-    val backdropCache = remember { mutableStateMapOf<Int, String?>() }
-    val summaryCache = remember { mutableStateMapOf<Int, String>() }
+    // backdrop 与简介走进程级共享表 (见 TvHeroMediaCache): 搜索结果里的条目多半在探索/追番页
+    // 也见过, 共表之后不必再各解析一次
+    val summaryCache = TvHeroMediaCache.summaryFallbacks
     val collectionTypeCache = remember { mutableStateMapOf<Int, UnifiedCollectionType>() }
-    LaunchedEffect(items) {
-        snapshotFlow { heroItem }.filterNotNull().collectLatest { info ->
-            delay(TV_HERO_MEDIA_DEBOUNCE_MILLIS) // 防抖: 网格快速划过时不发请求
-            if (info.subjectId !in backdropCache) {
-                runCatching {
-                    // 官方主背景图 (与详情页 hero 同源, 进详情零跳变).
-                    // 必须用原名 (日文) 匹配 TMDB: 中文译名命中率低, 且失败会写持久负缓存
-                    tmdb.getBackdropUrl(
-                        info.subjectId,
-                        info.originalName.ifBlank { info.title },
-                    )
-                }.onSuccess { url -> backdropCache[info.subjectId] = url }
+    // hero 媒体流水线 (连发合并/调度器/邻居预取/图片预热/封面兜底), 与探索/追番页同一 host.
+    // 本页的解析链最短: 只有整部 backdrop 一跳 —— 必须用原名 (日文) 匹配 TMDB (中文译名命中
+    // 率低, 且失败会写持久负缓存); 搜索结果没有分集数据, 拿不到"最新已播集日期"只能不传
+    // (连载新番的负缓存因此要等常规过期, 不像另外三页那样能按播出日期限期失效)
+    val heroPipeline = rememberTvHeroMediaPipeline(
+        tmdb = tmdb,
+        fullVisualEffects = false, // 本页无剧照链, 恒 w1280 档
+        // 键到 items 上: 重新搜索换分页实例时重启, 不然闭包里捕获的是旧实例
+        restartKey = items,
+        spec = {
+            heroItem?.let { info ->
+                info.toHeroMediaSpec(
+                    heroNeighbors?.takeIf { it.first == info.subjectId }?.second ?: TvHeroNeighbors(),
+                )
             }
-            if (info.subjectId !in summaryCache) {
-                runCatching { bangumiSummaryService.getSummary(info.subjectId) }
-                    .onSuccess { summaryCache[info.subjectId] = it.orEmpty() }
+        },
+        resolve = { s ->
+            items.itemSnapshotList.items.firstOrNull { it.subjectId == s.subjectId }?.let { item ->
+                tmdb.prefetchTvBackdrop(s.subjectId, item.originalName.ifBlank { item.title })
             }
-            if (info.subjectId !in collectionTypeCache) {
-                runCatching { collectionRepo.subjectCollectionFlow(info.subjectId).first() }
-                    .onSuccess { collectionTypeCache[info.subjectId] = it.collectionType }
+        },
+        resolveNeighbor = { _, neighbor ->
+            // 邻居的原名就在列表项里 (本页链短的原因), 不用发条目信息请求
+            items.itemSnapshotList.items.firstOrNull { it.subjectId == neighbor.subjectId }?.let { item ->
+                tmdb.prefetchTvBackdrop(neighbor.subjectId, item.originalName.ifBlank { item.title })
             }
-        }
-    }
+        },
+        afterResolve = { s ->
+            launch { bangumiSummaryService.prefetchTvSummaryFallback(s.subjectId) }
+            // 收藏状态供长按菜单高亮当前项, 聚焦时顺带拉取, 菜单操作成功后本地覆盖
+            if (s.subjectId !in collectionTypeCache) {
+                launch {
+                    runCatching { collectionRepo.subjectCollectionFlow(s.subjectId).first() }
+                        .onSuccess { collectionTypeCache[s.subjectId] = it.collectionType }
+                }
+            }
+            true
+        },
+    )
 
     // 卡片长按弹出的收藏下拉 (与探索页/追番页一致); 打开后短暂吞掉长按残余的确认键, 避免误触第一项.
     // remember: 工厂被网格 items 内容 lambda 捕获, 每次新实例都会让所有可见卡片跟着重组
@@ -656,10 +692,13 @@ private fun TvSearchResultsPane(
         // 背景 backdrop 层: 同追番页 (16:9 贴右上角, 恒用卡片态渐变).
         // URL 用 lambda 传入: 聚焦条目状态在组件内部才读取, 换卡只重组这一小块
         TvPageBackdropLayer(
-            backdropUrl = { heroItem?.let { backdropCache[it.subjectId] } },
+            // 搜索结果没有"下一集"的概念, 只用整部 backdrop; 封面兜底/垫底的 NSFW 门控
+            // 在 toHeroMediaSpec 里 (判据照抄卡片: 卡片不出图, 全屏更不能出)
+            backdropUrl = { heroPipeline.backdropUrl(heroDisplay()?.toHeroMediaSpec()) },
             // 本页是独立页面, 图层正下方是页面根 Box 自铺的 colorScheme.background
             fadeColor = MaterialTheme.colorScheme.background,
             modifier = Modifier.align(Alignment.TopEnd),
+            underlayUrl = { heroPipeline.underlayUrl(heroDisplay()?.toHeroMediaSpec()) },
         )
 
         Column(
@@ -701,7 +740,7 @@ private fun TvSearchResultsPane(
             // Hero 信息块 (固定高度; 换条目整块文字渐隐渐现). 聚焦条目状态在子组件内部
             // 才读取, 遥控器换卡只重组信息块自身, 不连带整个结果面板
             TvSearchHeroInfoBlock(
-                heroItemProvider = { heroItem },
+                heroItemProvider = heroDisplay,
                 summaryCache = summaryCache,
                 // end 留白与探索页 hero 块一致, 否则 fillMaxWidth(比例) 的基数比其他页宽.
                 // 有筛选行时等量压缩高度, 保持网格位置不变
@@ -777,6 +816,9 @@ private fun TvSearchResultsPane(
                         modifier = Modifier
                             .fillMaxSize()
                             .clipToBounds()
+                            // 长按方向键的移动频率上限 (同追番页/探索页). 必须挂在 gridKeyNavigation
+                            // 之前: 两者都是 onPreviewKeyEvent, 靠前的先收到, 导航逻辑只看放行的那几发
+                            .tvFocusMoveRateLimit()
                             // 同列上下导航 + 播放键直达 (与追番页共享实现, 理由见 [gridKeyNavigation])
                             .gridKeyNavigation(
                                 gridFocus,
@@ -833,7 +875,18 @@ private fun TvSearchResultsPane(
                                     info?.let { onIntent(SearchPageIntent.OpenSubjectDetails(index, it)) }
                                 },
                                 onFocused = {
-                                    info?.let { heroItem = it }
+                                    info?.let {
+                                        heroItem = it
+                                        // 邻居按网格几何算 (中间卡四方向), 见 tvGridNeighborsOf
+                                        heroNeighbors = it.subjectId to tvGridNeighborsOf(
+                                            index, gridColumns,
+                                        ) { i ->
+                                            // 本页无剧照链, 偏好恒 false
+                                            if (i in 0 until items.itemCount) {
+                                                items.peek(i)?.subjectId?.let(::TvHeroNeighbor)
+                                            } else null
+                                        }
+                                    }
                                     lastFocusedCard.intValue = index
                                     gridFocus.onCardFocused(index)
                                 },
@@ -1490,3 +1543,15 @@ private val TV_SEARCH_HERO_TO_GRID_GAP = 16.dp
 /** 筛选弹窗宽/高占屏比例. */
 private const val TV_SEARCH_FILTER_DIALOG_WIDTH_FRACTION = 0.62f
 private const val TV_SEARCH_FILTER_DIALOG_HEIGHT_FRACTION = 0.8f
+
+/**
+ * 交给共享流水线/展示层的最小描述, 见 [TvHeroMediaSpec]. 封面兜底的 NSFW 门控在这里:
+ * **判据照抄卡片那边** (见本页 imageUrl 的 takeIf) —— 打了码或被隐藏的条目卡片上就不出图,
+ * 兜底要是照放, 等于把用户特意藏起来的图铺满整屏.
+ */
+private fun SubjectPreviewItemInfo.toHeroMediaSpec(neighbors: TvHeroNeighbors = TvHeroNeighbors()) =
+    TvHeroMediaSpec(
+        subjectId = subjectId,
+        coverUrl = takeIf { it.nsfwMode != NsfwMode.BLUR && !it.hide }?.imageUrl.orEmpty(),
+        neighbors = neighbors,
+    )
