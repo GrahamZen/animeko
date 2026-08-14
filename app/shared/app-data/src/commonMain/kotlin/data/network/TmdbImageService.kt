@@ -9,6 +9,7 @@
 
 package me.him188.ani.app.data.network
 
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.datastore.core.DataStore
 import io.ktor.client.plugins.expectSuccess
 import io.ktor.client.plugins.timeout
@@ -19,6 +20,8 @@ import io.ktor.client.request.head
 import io.ktor.client.request.parameter
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.isSuccess
+import kotlinx.atomicfu.locks.SynchronizedObject
+import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -120,33 +123,59 @@ class TmdbImageService(
     }
 
     /**
-     * 本进程内已解析出结果的 backdrop (subjectId -> URL, `""` = 已确认无图).
+     * 本进程内已解析出结果的 backdrop: subjectId -> URL, **值为 `null` = 已确认无图**,
+     * 键不存在 = 还没解析过. 这是**全应用唯一的一层进程级 backdrop 热缓存**.
      *
-     * 存在的意义是**同步可读** (见 [peekBackdropUrl]): [getBackdropUrl] 即使全部命中持久缓存,
-     * 也要走一次 `withContext(ioDispatcher)` + DataStore 读盘, 耗时随磁盘/GC 抖动 ——
-     * 详情页首帧等不到它, 只能先按"加载中"渲染, 之后再把图淡进来.
-     * 它同时是 [getBackdropUrl] 自己的第一道查表 (只短路正缓存, 原因见那里), 页面级薄映射
-     * 被清空后重新问过来的条目不必再读一次盘.
+     * 存在的意义有两个:
+     *  - **同步可读** (见 [peekBackdropUrl]): [getBackdropUrl] 即使全部命中持久缓存,
+     *    也要走一次 `withContext(ioDispatcher)` + DataStore 读盘, 耗时随磁盘/GC 抖动 ——
+     *    详情页首帧等不到它, 只能先按"加载中"渲染, 之后再把图淡进来.
+     *  - **快照可观察**: TV 各页的 hero 背景直接在组合里读它 (经 `tvHeroBackdropUrl`),
+     *    预取写入后自动重组. 曾经页面层还各自养过薄映射 (最多时四份互不相认), 同一部作品
+     *    从哪个页面进详情页首帧长什么样取决于哪张表恰好有货 —— 现在只有这一张.
      *
-     * 写入是 copy-on-write 的整表替换 (读方永远看到一个完整的不可变 map); 并发写最坏是丢一条,
-     * 表现为该条目这次没命中热缓存, 无副作用.
+     * 有界: 超过 [RESOLVED_HOT_CACHE_MAX] 时**按写入顺序淘汰最老的一批**, 不整表清空
+     * (清空会让长会话里早就解析过的条目成批退化回"先空着再淡入", 还会卡住探索页的跳转门控).
+     * 淘汰只丢热缓存, 持久层还在, 代价是那些条目下次要多一次读盘.
+     *
+     * 写入可能来自多个 IO 线程, 淘汰簿记用 [resolvedLock] 保护; SnapshotStateMap 自身线程安全.
      */
-    @Volatile
-    private var resolvedBackdropUrls: Map<Int, String> = emptyMap()
+    private val resolvedBackdropUrls = mutableStateMapOf<Int, String?>()
+    private val resolvedLock = SynchronizedObject()
+
+    /** 写入顺序簿记, 只在 [resolvedLock] 里碰; 与表一起构成"淘汰最老"而不是"整表清空". */
+    private val resolvedInsertionOrder = ArrayDeque<Int>()
 
     /**
-     * 同步读取本进程**已经解析过**的 backdrop 结果, 不发请求也不读盘.
+     * 同步读取本进程**已经解析过**的 backdrop URL, 不发请求也不读盘.
      *
      * 给"上一个页面早就查过同一条目"的场景做首帧初值用 (TV 探索/搜索/时间表页聚焦时会预取
      * 背景图, 点进详情页时结果就在这张表里). 首帧直接拿到 URL 意味着图还在 Coil 内存缓存里,
      * 详情页 Hero 一进场就是满的, 没有"先空着再淡入"那一下.
      *
-     * @return URL; `""` = 已确认无图 (调用方应走无图回退); `null` = 本进程还没解析过, 按加载中处理.
+     * 在组合里读是**快照订阅**: 结果落表时读方自动重组.
+     *
+     * @return URL; `null` = 没有图 —— 可能是已确认无图, 也可能是还没解析过,
+     *   两者要区分时用 [peekBackdropResolved] (不再用空串混编在返回值里).
      */
     fun peekBackdropUrl(subjectId: Int): String? = resolvedBackdropUrls[subjectId]
 
-    private fun rememberResolvedBackdrop(subjectId: Int, url: String) {
-        resolvedBackdropUrls = resolvedBackdropUrls + (subjectId to url)
+    /** 该条目是否已解析过 (含"已确认无图"). 与 [peekBackdropUrl] 一起构成三态. */
+    fun peekBackdropResolved(subjectId: Int): Boolean = resolvedBackdropUrls.containsKey(subjectId)
+
+    private fun rememberResolvedBackdrop(subjectId: Int, url: String?) {
+        synchronized(resolvedLock) {
+            if (subjectId !in resolvedBackdropUrls) {
+                resolvedInsertionOrder.addLast(subjectId)
+                // 淘汰一批而不是一条: 均摊掉每次写入都要动表的开销
+                if (resolvedInsertionOrder.size > RESOLVED_HOT_CACHE_MAX) {
+                    repeat(RESOLVED_HOT_CACHE_EVICT_BATCH) {
+                        resolvedInsertionOrder.removeFirstOrNull()?.let { resolvedBackdropUrls.remove(it) }
+                    }
+                }
+            }
+            resolvedBackdropUrls[subjectId] = url
+        }
     }
 
     /**
@@ -162,13 +191,12 @@ class TmdbImageService(
         activeAsOfDate: String? = null,
     ): String? {
         // 本进程已解析出 URL 的直接给结果, 连 withContext 与读盘都省掉 (正缓存永久有效, 读盘只会
-        // 拿到同一个 URL). 页面级的薄映射 (如 TvHeroMediaCache.backdrops) 超量时是整表清空的,
-        // 清空后成批条目会重新走到这里 —— 少了这道短路, 早就解析过的卡要等一次 DataStore 读盘
-        // 才拿回图, hero 背景当场空一下再淡回来.
+        // 拿到同一个 URL).
         //
-        // 负缓存 ("") 故意不在这里短路: 它该不该重取取决于 activeAsOfDate 与重取闸门, 而这张表
-        // 只记结果不记时间, 短路会把"传了更近播出日期本该重取一次"的条目钉死到进程结束.
-        resolvedBackdropUrls[subjectId]?.takeIf { it.isNotEmpty() }?.let { return it }
+        // 负缓存 (值为 null) 故意不在这里短路: 它该不该重取取决于 activeAsOfDate 与重取闸门,
+        // 而这张表只记结果不记时间, 短路会把"传了更近播出日期本该重取一次"的条目钉死到进程结束.
+        // `map[id]` 对"值为 null"与"没解析过"都返回 null, 正好只短路正缓存.
+        resolvedBackdropUrls[subjectId]?.let { return it }
         return resolveBackdropUrl(subjectId, originalName, activeAsOfDate)
     }
 
@@ -191,7 +219,7 @@ class TmdbImageService(
             // TMDB 侧确实没图时, 反复进出详情页不会反复空拉
             val stale = negativeCacheStale(cache.backdropMissAt[subjectId], activeAsOfDate)
             if (!backdropRefreshGate.shouldRefresh(subjectId) { stale }) {
-                rememberResolvedBackdrop(subjectId, "")
+                rememberResolvedBackdrop(subjectId, null)
                 return@withContext null
             }
             logger.info { "Retrying TMDB backdrop for subject $subjectId (negative cache expired)" }
@@ -221,7 +249,7 @@ class TmdbImageService(
                 },
             )
         }
-        rememberResolvedBackdrop(subjectId, url ?: "")
+        rememberResolvedBackdrop(subjectId, url)
         url
     }
 
@@ -791,6 +819,15 @@ class TmdbImageService(
 
         /** 关联回溯跳数上限 (实测常见链 1-2 跳, 上限只是环路/脏数据保险). */
         private const val MAX_RELATION_HOPS = 8
+
+        /**
+         * 进程内 backdrop 热表的容量上限. 远高于一次浏览会掠过的条目数 (单条只是一个 URL 字符串);
+         * 超限按写入顺序淘汰最老一批 —— 见 [resolvedBackdropUrls] 处不许整表清空的原因.
+         */
+        private const val RESOLVED_HOT_CACHE_MAX = 600
+
+        /** 超限时一次淘汰的条数 (均摊淘汰开销, 不必每次写入都动表). */
+        private const val RESOLVED_HOT_CACHE_EVICT_BATCH = 100
 
         /** 最新已播集在此天数内 = 还在播或刚完结, 负缓存按 [NEGATIVE_CACHE_TTL_AIRING] 失效. */
         private const val NEGATIVE_CACHE_AIRING_DAYS = 60

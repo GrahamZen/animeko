@@ -73,8 +73,10 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -92,6 +94,8 @@ import me.him188.ani.app.ui.foundation.animation.AniAnimatedVisibility
 import me.him188.ani.app.ui.foundation.animation.StandardAccelerateEasing
 import me.him188.ani.app.ui.foundation.animation.StandardDecelerateEasing
 import me.him188.ani.app.ui.foundation.theme.EasingDurations
+import me.him188.ani.app.ui.foundation.tv.TV_PILL_ICON_SIZE
+import me.him188.ani.app.ui.foundation.tv.TvPillShell
 import me.him188.ani.app.ui.foundation.focus.restoreFocusAfter
 import me.him188.ani.app.ui.foundation.icons.AniIcons
 import me.him188.ani.app.ui.foundation.PlayerFrameHolder
@@ -237,7 +241,28 @@ internal fun TvPlayerControlsOverlay(
         ),
         label = "TvPlayerControlsChrome",
     )
-    val chrome = Modifier.graphicsLayer { alpha = chromeAlpha.value }
+    // 淡入淡出期间的合成策略. 默认的 `CompositingStrategy.Auto` 在 alpha ∈ (0,1) 时会给**每个**
+    // 挂了本修饰符的节点各开一次离屏缓冲 (saveLayerAlpha), 而本层有 8 个挂载点, 其中两条 scrim
+    // 是全宽 × 380dp / 180dp 的大面积 —— 强制原生 4K UI 的机器上单条 scrim 就是约 3840×760 的
+    // ARGB 缓冲 (十几 MB). 控制层每 5 秒自动隐藏一次、每次按键又唤出一次, 这是电视上最高频的
+    // 动画路径.
+    //
+    // [CompositingStrategy.ModulateAlpha] 不开离屏缓冲, 直接把 alpha 乘进每个绘制调用; 代价是
+    // **层内内容重叠处会互相透视**. 按这个前提分两档, 别整层一刀切:
+    // - [chrome]: 两条渐变 scrim (单个 Box 一层渐变) 与文字/图标/胶囊行 (白字白图标平铺).
+    //   重叠只发生在同色元素之间, 淡入淡出的两百毫秒里看不出来
+    // - [chromeLayered]: 浮出面板与选集条. 卡片有底色 + 图片 + 阴影相叠, 透视是能看见的,
+    //   老老实实开离屏缓冲
+    //
+    // 另外补一道 alpha == 0 的绘制闸门: 手动档下"整层为托住提示按钮而留在场上"这个窗口是整段
+    // OP/ED (80~95 秒), 期间除按钮外一个像素都不该画 —— alpha=0 的图层只是不合成, 内容照样
+    // 要走一遍绘制. 闸门读在绘制 lambda 里, 只失效绘制不重组.
+    val chromeGate = Modifier.drawWithContent { if (chromeAlpha.value > 0f) drawContent() }
+    val chrome = chromeGate.graphicsLayer {
+        alpha = chromeAlpha.value
+        compositingStrategy = CompositingStrategy.ModulateAlpha
+    }
+    val chromeLayered = chromeGate.graphicsLayer { alpha = chromeAlpha.value }
     Box(modifier) {
         // 选集条展开态不整屏压暗: 内容全部贴底, 上下两条渐变 scrim 已足够托住可读性,
         // 画面中部保持通透
@@ -330,7 +355,8 @@ internal fun TvPlayerControlsOverlay(
                         },
                     ) {
                         TvPlayerPanelHost(
-                            modifier = chrome,
+                            // 卡片底色/图片/阴影相叠, 走整层合成 (见 chrome 处的分档)
+                            modifier = chromeLayered,
                             overlay = overlay,
                             vm = vm,
                             page = page,
@@ -368,6 +394,7 @@ internal fun TvPlayerControlsOverlay(
                     // 摘掉的话那颗提示按钮会当场往下掉一截 (下面的图标行同理)
                     TvPlayerProgressRow(
                         modifier = chrome,
+                        live = chromeVisible,
                         vm = vm,
                         progressSliderState = progressSliderState,
                         framePreview = framePreview,
@@ -406,7 +433,8 @@ internal fun TvPlayerControlsOverlay(
                 vm = vm,
                 overlay = overlay,
                 stripFocusRequester = episodeStripFocusRequester,
-                modifier = chrome.align(Alignment.BottomStart).fillMaxWidth(),
+                // 同 TvPlayerPanelHost: 卡片行要整层合成
+                modifier = chromeLayered.align(Alignment.BottomStart).fillMaxWidth(),
             )
         }
     }
@@ -620,24 +648,16 @@ private fun TvPlayerPill(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val focused by interactionSource.collectIsFocusedAsState()
-    Surface(
+    TvPillShell(
+        highlighted = focused,
         onClick = onClick,
+        interactionSource = interactionSource,
         modifier = modifier
             .focusRequester(focusRequester)
             .onFocusChanged { if (it.isFocused) overlay.activePanel = panel },
-        shape = CircleShape,
-        color = if (focused) Color.White else Color.White.copy(alpha = 0.14f),
-        contentColor = if (focused) Color.Black else Color.White,
-        interactionSource = interactionSource,
     ) {
-        Row(
-            Modifier.padding(horizontal = TV_PILL_PADDING_H, vertical = TV_PILL_PADDING_V),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            icon()
-            Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1)
-        }
+        icon()
+        Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1)
     }
 }
 
@@ -675,42 +695,34 @@ internal fun TvSkipOpEdTipButton(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val focused by interactionSource.collectIsFocusedAsState()
-    Surface(
+    TvPillShell(
+        highlighted = focused,
         onClick = onClick,
-        modifier = modifier,
-        shape = CircleShape,
-        color = if (focused) Color.White else Color.White.copy(alpha = 0.14f),
-        contentColor = if (focused) Color.Black else Color.White,
         interactionSource = interactionSource,
+        modifier = modifier,
     ) {
-        Row(
-            Modifier.padding(horizontal = TV_PILL_PADDING_H, vertical = TV_PILL_PADDING_V),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                if (tip.canCancel) Icons.Rounded.Close else Icons.Rounded.FastForward,
-                null,
-                Modifier.size(TV_PILL_ICON_SIZE),
-            )
-            Text(
-                // 说清楚是 OP 还是 ED (按章节在时间轴上的位置判, 见 PlayerSkipOpEdState).
-                // "OP"/"ED" 是原文照抄的行话, 各语言一样, 不进资源
-                stringResource(
-                    if (tip.canCancel) {
-                        Lang.video_player_tv_cancel_skip_segment
-                    } else {
-                        Lang.video_player_tv_skip_segment
-                    },
-                    when (tip.kind) {
-                        SkipOpEdKind.OP -> "OP"
-                        SkipOpEdKind.ED -> "ED"
-                    },
-                ),
-                style = MaterialTheme.typography.labelMedium,
-                maxLines = 1,
-            )
-        }
+        Icon(
+            if (tip.canCancel) Icons.Rounded.Close else Icons.Rounded.FastForward,
+            null,
+            Modifier.size(TV_PILL_ICON_SIZE),
+        )
+        Text(
+            // 说清楚是 OP 还是 ED (按章节在时间轴上的位置判, 见 PlayerSkipOpEdState).
+            // "OP"/"ED" 是原文照抄的行话, 各语言一样, 不进资源
+            stringResource(
+                if (tip.canCancel) {
+                    Lang.video_player_tv_cancel_skip_segment
+                } else {
+                    Lang.video_player_tv_skip_segment
+                },
+                when (tip.kind) {
+                    SkipOpEdKind.OP -> "OP"
+                    SkipOpEdKind.ED -> "ED"
+                },
+            ),
+            style = MaterialTheme.typography.labelMedium,
+            maxLines = 1,
+        )
     }
 }
 
@@ -725,9 +737,7 @@ private val TV_PLAYBACK_SPEED_RANGE =
     VideoScaffoldConfig.MIN_SUPPORTED_PLAYBACK_SPEED..VideoScaffoldConfig.MAX_SUPPORTED_PLAYBACK_SPEED
 
 // ---- 控件尺寸 (Prime 密度: 初版的 80%) ----
-internal val TV_PILL_ICON_SIZE = 14.dp
-internal val TV_PILL_PADDING_H = 14.dp
-internal val TV_PILL_PADDING_V = 8.dp
+// 胶囊那几个尺寸在 TvPillShell (ui/foundation/tv/TvPill.kt) 里, 与外壳放在一起
 private val TV_ICON_BUTTON_SIZE = 38.dp
 private val TV_ICON_SIZE = 20.dp
 
@@ -753,6 +763,14 @@ private fun TvPlayerProgressRow(
     downFocus: FocusRequester?,
     /** 上键的显式落点 (胶囊行最左按钮): 同 [downFocus], 空间搜索会落到行中间的胶囊上. */
     upFocus: FocusRequester,
+    /**
+     * 本行此刻看得见吗. false = 控制层已淡到透明, 本行只是**为了撑住胶囊行到屏幕底缘的距离**
+     * 而留在布局里 (摘掉的话那颗 OP/ED 提示按钮会当场往下掉一截, 见调用处).
+     *
+     * 这时切断两条热订阅: 播放位置与缓存进度. 手动档下这个窗口是整段 OP/ED (80~95 秒),
+     * 期间每次位置刷新都会重组一遍整行 —— 而一个像素都看不见.
+     */
+    live: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -769,22 +787,24 @@ private fun TvPlayerProgressRow(
             .focusable(interactionSource = interactionSource),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            // 拖拽预览中这里仍是**播放位置** (Prime 实测): 目标时间由圆点上方的浮窗给出,
-            // 两处都显示目标就没人告诉用户"原来播到哪儿了", 返回取消后也失去了参照
-            renderTvPlayerTime(progressSliderState.currentPositionMillis),
-            color = Color.White,
-            style = MaterialTheme.typography.labelLarge,
-        )
+        // 拖拽预览中这里仍是**播放位置** (Prime 实测): 目标时间由圆点上方的浮窗给出,
+        // 两处都显示目标就没人告诉用户"原来播到哪儿了", 返回取消后也失去了参照
+        TvPlayerTimeText { if (live) progressSliderState.currentPositionMillis else 0L }
         Box(
             Modifier
                 .weight(1f)
                 .padding(horizontal = 12.dp),
         ) {
-            val cacheProgressInfo by vm.cacheProgressInfoFlow.collectAsStateWithLifecycle(null)
+            // 不可见时不订阅: 缓存进度在下载期间刷得很勤, 而 by 解构是在本行的组合里读
+            val cacheProgressInfo = if (live) {
+                vm.cacheProgressInfoFlow.collectAsStateWithLifecycle(null)
+            } else {
+                null
+            }
             MediaProgressSlider(
                 progressSliderState,
-                { cacheProgressInfo },
+                // 收 lambda: 读记在 slider 自己身上, 缓存进度每刷一次不带走整行
+                { cacheProgressInfo?.value },
                 colors = MediaProgressSliderDefaults.colors(
                     trackProgressColor = Color.White,
                     // 圆点即示焦: 未聚焦隐藏, 聚焦出现
@@ -800,12 +820,23 @@ private fun TvPlayerProgressRow(
                 previewStyle = ProgressSliderPreviewStyle.FrameOnly,
             )
         }
-        Text(
-            renderTvPlayerTime(progressSliderState.totalDurationMillis),
-            color = Color.White,
-            style = MaterialTheme.typography.labelLarge,
-        )
+        TvPlayerTimeText { if (live) progressSliderState.totalDurationMillis else 0L }
     }
+}
+
+/**
+ * 进度条行两端的时间文字.
+ *
+ * 单独一个 composable 而不是就地 [Text]: 播放位置每刷新一次只重组这一个文字节点, 不带走整行 ——
+ * 同一行里还挂着进度条与拖拽预览浮窗. [millis] 收 lambda 是同一个理由, 别在调用处的 body 里读.
+ */
+@Composable
+private fun TvPlayerTimeText(millis: () -> Long) {
+    Text(
+        renderTvPlayerTime(millis()),
+        color = Color.White,
+        style = MaterialTheme.typography.labelLarge,
+    )
 }
 
 private fun renderTvPlayerTime(millis: Long): String {

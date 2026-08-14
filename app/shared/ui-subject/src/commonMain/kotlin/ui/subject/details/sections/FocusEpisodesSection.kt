@@ -12,7 +12,6 @@ package me.him188.ani.app.ui.subject.details.sections
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
-import androidx.compose.foundation.border
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
@@ -82,7 +81,6 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
@@ -117,6 +115,8 @@ import me.him188.ani.app.ui.foundation.focus.TvScrollAnimator
 import me.him188.ani.app.ui.foundation.focus.tvAnchorBringIntoViewSpec
 import me.him188.ani.app.ui.foundation.focus.resolveFocusRepeatedly
 import me.him188.ani.app.ui.foundation.focus.tvFocusMoveRateLimit
+import me.him188.ani.app.ui.foundation.tv.TvFocusRing
+import me.him188.ani.app.ui.foundation.tv.tvFocusRingBorder
 import me.him188.ani.app.ui.foundation.theme.glassContainerColor
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.subject_details_episodes
@@ -514,7 +514,7 @@ fun FocusEpisodeCarousel(
         }
         CompositionLocalProvider(LocalBringIntoViewSpec provides bringIntoViewSpec) {
             // 高度锁死在卡片高: 聚焦框是向外探出的 (offset 只挪位置不改上报尺寸, 见
-            // [FocusEpisodeAnchorRing]), 它上报的高度是 cellHeight + 2*FOCUS_RING_GAP, 而框只在
+            // [FocusEpisodeAnchorRing]), 它上报的高度是 cellHeight + 2*TvFocusRing.Gap, 而框只在
             // 有卡片持焦时才组合 —— 不锁高度的话本 Box 会跟着焦点进出行在 144/150dp 之间来回跳,
             // 详情页里整行选集连带下方简介行硬跳 6dp. 锁了之后框照旧画到行外留白里 (父不裁剪).
             BoxWithConstraints(Modifier.height(cellHeight)) {
@@ -666,27 +666,16 @@ private fun FocusEpisodeAnchorRing(
                 // 空隙 (offset 允许负值; 父容器不裁剪, 探出到行距/留白里没关系)
                 .padding(start = horizontalPadding)
                 .offset {
-                    val gap = FOCUS_RING_GAP.roundToPx()
+                    val gap = TvFocusRing.Gap.roundToPx()
                     IntOffset(-gap, -gap)
                 }
-                .size(cellWidth + FOCUS_RING_GAP * 2, cellHeight + FOCUS_RING_GAP * 2)
+                .size(cellWidth + TvFocusRing.Gap * 2, cellHeight + TvFocusRing.Gap * 2)
                 // 定尺寸之后缩放 = 绕框自身中心缩, 与卡片 (绕卡中心缩) 同心
                 .scale(pressScale)
-                .border(
-                    FOCUS_RING_WIDTH,
-                    if (monochrome) {
-                        // 黑白态: 纯白描边 (同播放器面板条目)
-                        SolidColor(Color.White)
-                    } else {
-                        // 主题动态色渐变 (左上 primary → 右下 secondary)
-                        Brush.linearGradient(
-                            listOf(
-                                MaterialTheme.colorScheme.primary,
-                                MaterialTheme.colorScheme.secondary,
-                            ),
-                        )
-                    },
-                    RoundedCornerShape(EPISODE_CARD_CORNER + FOCUS_RING_GAP),
+                .tvFocusRingBorder(
+                    EPISODE_CARD_CORNER + TvFocusRing.Gap,
+                    // 黑白态用纯白 (同播放器面板条目), 其余用主题动态色渐变
+                    if (monochrome) TvFocusRing.monochromeBrush else TvFocusRing.gradientBrush,
                 ),
         )
     }
@@ -697,15 +686,6 @@ private fun FocusEpisodeAnchorRing(
  * 两者必须同值同曲线, 否则按住时框与卡脱开一圈.
  */
 private const val EPISODE_CARD_PRESS_SCALE = 0.94f
-
-/**
- * TV 选集聚焦框的描边宽度.
- *
- * Prime Video 实测 **1.75dp**(4K 截图 7px), 且描边内缘几乎贴着卡片内容(空隙 0.25dp,
- * 见 [FOCUS_RING_GAP])—— 比我们原来的 2.5dp + 0.5dp 空隙细一档、也更紧.
- * 探索页竖版卡那套 (`TV_CARD_FOCUS_RING_WIDTH` / `TV_CARD_FOCUS_GAP`) 仍是 2.5dp + 3dp, 未跟改.
- */
-private val FOCUS_RING_WIDTH = 1.75.dp
 
 // ---- 卡片底部进度条与文字的几何 ----
 //
@@ -727,9 +707,10 @@ private val FOCUS_RING_WIDTH = 1.75.dp
 // | 条与文字**一起**左右移 | [EPISODE_PROGRESS_BAR_SIDE_INSET] |
 // | **文字左缘相对条左端**的距离 | [EPISODE_TEXT_LEFT_OFFSET_FROM_BAR] (正=文字更靠右, 负=更靠左) |
 // | 条本身的粗细 | [EPISODE_PROGRESS_BAR_HEIGHT] |
+// | **无图卡**的文字离卡片上缘多远 | [EPISODE_TEXT_CARD_TOP_PADDING] |
 //
 // 两种"重叠"分别由不同旋钮治, 别调错:
-//  - **条压到聚焦描边上** → 描边内缘在卡片轮廓外 `FOCUS_RING_GAP - FOCUS_RING_WIDTH` = 0.25dp,
+//  - **条压到聚焦描边上** → 描边内缘在卡片轮廓外 `TvFocusRing.Gap - TvFocusRing.Width` = 0.25dp,
 //    条离卡底太近时两者贴在一起 → 调大 [EPISODE_PROGRESS_BOTTOM_INSET];
 //  - **字压到条上** → 文字盒底与条顶只差 [EPISODE_TEXT_TO_BAR_GAP], 而 CJK 字形几乎填满字盒
 //    (下沉部留白比拉丁字母小得多), 几何 1dp 在电视上就已经看着贴住 → 调大它.
@@ -762,7 +743,7 @@ private val EPISODE_PROGRESS_BAR_SIDE_INSET = EPISODE_CARD_CORNER
  * - **下限 1.5dp**: 卡片是 [EPISODE_CARD_CORNER] 6dp 圆角的 `Surface`, 会裁剪内容. 圆角在距底 d
  *   处的横向内切量是 `r - sqrt(r² - (r-d)²)`, d=0 时等于整个 6dp —— 条也正好内缩 6dp
  *   ([EPISODE_PROGRESS_BAR_SIDE_INSET]), 所以再往下条的左右两端会被圆角啃掉.
- * - **实测 1.5dp 太贴**: 描边内缘只在卡片轮廓外 0.25dp (见 [FOCUS_RING_GAP]), 真机上条与描边
+ * - **实测 1.5dp 太贴**: 描边内缘只在卡片轮廓外 0.25dp (见 [TvFocusRing.Gap]), 真机上条与描边
  *   看着连成一体. Prime 能贴底是因为它描边更淡、卡片圆角也更大. 现取 5dp (真机调出来的).
  */
 private val EPISODE_PROGRESS_BOTTOM_INSET = 5.dp
@@ -801,6 +782,40 @@ private val EPISODE_IMAGE_TEXT_BOTTOM_PADDING =
  */
 private val EPISODE_TEXT_BOTTOM_PADDING_NO_BAR =
     EPISODE_IMAGE_TEXT_BOTTOM_PADDING - EPISODE_PROGRESS_BAR_HEIGHT - EPISODE_TEXT_TO_BAR_GAP
+
+/**
+ * 集号所用字体的 **cap height 占字号的比例** (Roboto ≈ 0.71) —— 用来把行首图标对到集号的
+ * **视觉中心**上, 见 `FocusEpisodeCard` 里的 `leadingIconAlignBy`.
+ *
+ * 为什么不能直接 `verticalAlignment = CenterVertically` 了事: 那对齐的是**字盒**中心, 而字盒
+ * 上下并不对称 —— 行高多出来的那几 dp 按 ascent/descent 的比例分配 (上多下少), 下沉部又只有
+ * 汉字/数字用不到的一小截, 于是数字的墨迹中心并不在字盒中心上, 图标跟着字盒居中就会偏。
+ * 偏多少取决于字体度量与 `lineHeight` 的裁剪策略, 算不准也不该算 —— 所以改成绑**基线**:
+ * 图标声明一条位于"墨迹中心下方半个 cap height"的对齐线, 与集号的 FirstBaseline 对齐, 于是
+ * 图标墨迹中心恒等于 `基线 − cap height / 2` = 数字的视觉中心, 与行高/字号缩放无关.
+ */
+private const val EPISODE_SORT_CAP_HEIGHT_FRACTION = 0.71f
+
+/**
+ * **行首图标相对集号的竖向微调 (手调)** —— 正=图标下移, 负=上移, 0 = 纯按上面那条几何对齐.
+ *
+ * 只在真机上仍看得出偏差时才动它 (三角是实心块、数字是笔画, 观感重心可能与几何中心差一点点).
+ */
+private val EPISODE_LEADING_ICON_NUDGE = 0.dp
+
+/**
+ * **无图 (纯文字态) 选集卡文字的上边距 (手调)** —— 调小=字更贴卡片上缘.
+ *
+ * 现值 8.7dp 是这么来的: 想让左、上两侧的留白看着一样宽, 而"看到的左边距"不是文字盒的左缘,
+ * 是**墨迹左线** = [EPISODE_IMAGE_TEXT_SIDE_PADDING] 3dp + 三角内白 (17dp × 8/24 ≈ 5.67dp,
+ * 见 [PLAY_ICON_INK_LEFT_FRACTION]) ≈ 8.67dp, 取整到 8.7dp.
+ *
+ * 注意文字盒自身的行高还会在墨迹上方留一两 dp, 所以**看到的**上留白仍略大于本值 —— 真机上
+ * 觉得偏高就直接调小它, 别去动横向那几个 (它们与进度条、与有图态是绑定的).
+ *
+ * 只管纯文字态: 有图态的文字是底部对齐、压在 scrim 上, 顶部由 8dp 固定, 与本值无关.
+ */
+private val EPISODE_TEXT_CARD_TOP_PADDING = 5.dp
 
 /**
  * **文字盒左缘相对进度条左端的偏移** —— 想让文字比条更靠右就调大, 更靠左给负值 (条的左端由
@@ -845,14 +860,8 @@ private const val EPISODE_PAST_CARD_DIM_ALPHA = 0.45f
 /** 左侧压暗的渐变时长 (与单格滚动 260ms 大致同步, 边滑边暗). */
 private const val EPISODE_DIM_FADE_MILLIS = 200
 
-/**
- * TV 选集聚焦框盒相对卡片轮廓向外探出的量 (框圆角 = 卡片圆角 + 此值).
- *
- * 描边是从框盒边界**向内**画的, 所以肉眼看到的"描边与卡片之间的空隙" =
- * 本值 − [FOCUS_RING_WIDTH] = 0.25dp —— 对齐 Prime 实测 (它的描边几乎贴着卡片内容).
- * 调这个值要连 [FOCUS_RING_WIDTH] 一起算, 否则空隙会变成负数 (描边压到卡片上).
- */
-private val FOCUS_RING_GAP = 2.dp
+// 聚焦框盒相对卡片轮廓向外探出的量 (框圆角 = 卡片圆角 + 此值) 用 [TvFocusRing.Gap],
+// 全仓一份. 本文件的进度条几何按它算, 见 [EPISODE_PROGRESS_BOTTOM_INSET] 一带的说明.
 
 /**
  * 玻璃态无图卡片的墨色浓度 (见 [FocusEpisodeCard] 的 `glass`).
@@ -1048,6 +1057,16 @@ fun FocusEpisodeCard(
         else -> playInkInset // 无图标: 补满一个三角内白, 首个数字与三角同线
     }
 
+    // 行首图标的竖向对齐: 声明一条"墨迹中心下方半个 cap height"的对齐线, 与集号的
+    // FirstBaseline 对齐 -> 图标墨迹中心恒落在数字的视觉中心上 (盒子居中做不到, 原因见
+    // [EPISODE_SORT_CAP_HEIGHT_FRACTION]). 两个矢量的图形在 24 视口里都是竖向居中的,
+    // 所以"墨迹中心"就是盒中心.
+    val sortFontSize = MaterialTheme.typography.titleSmall.fontSize
+    val leadingIconBaselineOffsetPx = with(LocalDensity.current) {
+        (sortFontSize.toDp() * EPISODE_SORT_CAP_HEIGHT_FRACTION / 2 + EPISODE_LEADING_ICON_NUDGE)
+            .roundToPx()
+    }
+
     // 长按确认键 (同网格方块, 共用实现见 tvLongPressKey): 按住到阈值当场触发, 不等松开.
     // 网格菜单长按跳转把焦点送到本卡时, 那次按住的残余按键不是从本卡起手的手势, 会被它吞掉
     val longPressState = rememberTvLongPressKeyState()
@@ -1121,14 +1140,16 @@ fun FocusEpisodeCard(
                         Icon(
                             rememberVectorPainter(Icons.Rounded.PlayArrow),
                             contentDescription = null,
-                            Modifier.size(playIconSize),
+                            Modifier.size(playIconSize)
+                                .alignBy { it.measuredHeight / 2 + leadingIconBaselineOffsetPx },
                             tint = Color.White,
                         )
                     } else if (isPlaying) {
                         Icon(
                             rememberVectorPainter(Icons.Rounded.GraphicEq),
                             contentDescription = null,
-                            Modifier.size(playingIconSize),
+                            Modifier.size(playingIconSize)
+                                .alignBy { it.measuredHeight / 2 + leadingIconBaselineOffsetPx },
                             tint = Color.White,
                         )
                     }
@@ -1164,12 +1185,12 @@ fun FocusEpisodeCard(
                 Column(
                     // 横向与有图态同一套 (进度条也是同一个组件, 左端在同一条线上): 同一条轮播里
                     // 有剧照与没剧照的卡混排, 左缘不能一个 3dp 一个 12dp 来回跳.
-                    // 上边距取"看到的左边距"= 墨迹左线 (盒左缘 + 图标内白), 让左上两侧留白等观感;
-                    // 下边距对齐进度条那一档, 文字压不到条上.
+                    // 上边距见 EPISODE_TEXT_CARD_TOP_PADDING (手调); 下边距对齐进度条那一档,
+                    // 文字压不到条上.
                     Modifier.fillMaxSize()
                         .padding(horizontal = EPISODE_IMAGE_TEXT_SIDE_PADDING)
                         .padding(
-                            top = EPISODE_IMAGE_TEXT_SIDE_PADDING + playInkInset,
+                            top = EPISODE_TEXT_CARD_TOP_PADDING,
                             bottom = EPISODE_IMAGE_TEXT_BOTTOM_PADDING,
                         ),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -1185,19 +1206,24 @@ fun FocusEpisodeCard(
                         Icon(
                             rememberVectorPainter(Icons.Rounded.PlayArrow),
                             contentDescription = null,
-                            Modifier.size(playIconSize),
+                            Modifier.size(playIconSize)
+                                .alignBy { it.measuredHeight / 2 + leadingIconBaselineOffsetPx },
                             tint = sortColor,
                         )
                     } else if (isPlaying) {
                         Icon(
                             rememberVectorPainter(Icons.Rounded.GraphicEq),
                             contentDescription = null,
-                            Modifier.size(playingIconSize),
+                            Modifier.size(playingIconSize)
+                                .alignBy { it.measuredHeight / 2 + leadingIconBaselineOffsetPx },
                             tint = sortColor,
                         )
                     }
                     Text(
                         item.sort.toString(),
+                        // 与图标同组基线对齐 (图标那条线见 leadingIconBaselineOffsetPx);
+                        // 一旦有成员走 alignBy, 同行其余成员不跟上就会各自按盒子居中而错开
+                        Modifier.alignByBaseline(),
                         color = sortColor,
                         style = MaterialTheme.typography.titleSmall,
                         maxLines = 1,

@@ -9,9 +9,7 @@
 
 package me.him188.ani.app.ui.update
 
-import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,23 +43,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
 import me.him188.ani.app.ui.foundation.LocalAniUiBehavior
 import me.him188.ani.app.ui.foundation.focus.resolveFocusRepeatedly
 import me.him188.ani.app.ui.foundation.ifThen
+import me.him188.ani.app.ui.foundation.tv.tvFieldBorder
+import me.him188.ani.app.ui.foundation.tv.tvPageScrollKeys
 import me.him188.ani.app.ui.foundation.widgets.AniCenteredPanelDialog
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.settings_update_popup_close
 import me.him188.ani.app.ui.lang.settings_update_popup_new_version
 import me.him188.ani.app.ui.lang.settings_update_popup_see_details
 import org.jetbrains.compose.resources.stringResource
-import androidx.compose.runtime.rememberCoroutineScope
 
 /**
  * 完整更新内容弹窗.
@@ -162,7 +155,6 @@ private fun ChangelogBody(
 ) {
     val lines = remember(changes) { parseChangelogLines(changes) }
     val scrollState = rememberScrollState()
-    val scope = rememberCoroutineScope()
     val focusRequester = remember { FocusRequester() }
     var focused by remember { mutableStateOf(false) }
     // 打开就把焦点放在正文上: 用户点"查看详情"就是来看内容的, 让他直接能翻.
@@ -178,36 +170,16 @@ private fun ChangelogBody(
     Box(
         modifier
             .ifThen(focusable) {
-                onPreviewKeyEvent { event ->
-                    // 焦点搜索只发生在 KeyDown, KeyUp 一律放行
-                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                    val page = (scrollState.viewportSize * SCROLL_PAGE_FRACTION).coerceAtLeast(1f)
-                    when {
-                        event.key == Key.DirectionDown && scrollState.canScrollForward -> {
-                            scope.launch { scrollState.animateScrollBy(page) }
-                            true
-                        }
-
-                        event.key == Key.DirectionUp && scrollState.canScrollBackward -> {
-                            scope.launch { scrollState.animateScrollBy(-page) }
-                            true
-                        }
-                        // 翻到底再按下键就放行, 焦点落到下方按钮上; 上键对称 (顶上没有目标, 焦点不动)
-                        else -> false
-                    }
-                }
+                // 上下键翻页; 翻到底/顶放行, 焦点落到下方按钮行 (见 tvPageScrollKeys)
+                tvPageScrollKeys(scrollState)
                     .focusRequester(focusRequester)
                     .onFocusChanged { focused = it.isFocused }
                     .focusable()
-                    .clip(RoundedCornerShape(12.dp))
-                    .border(
-                        width = if (focused) 2.dp else 1.dp,
-                        color = if (focused) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.outlineVariant
-                        },
-                        shape = RoundedCornerShape(12.dp),
+                    .clip(RoundedCornerShape(CHANGELOG_BLOCK_CORNER))
+                    .tvFieldBorder(
+                        focused,
+                        idleColor = MaterialTheme.colorScheme.outlineVariant,
+                        cornerRadius = CHANGELOG_BLOCK_CORNER,
                     )
                     .padding(12.dp)
             },
@@ -254,5 +226,5 @@ private fun parseChangelogLines(changes: String): List<ChangelogLine> =
         }
         .toList()
 
-/** 上下键一次翻多少: 留一点重叠, 免得翻页后接不上前一屏的最后一行. */
-private const val SCROLL_PAGE_FRACTION = 0.8f
+/** 正文块的圆角: 边框与裁剪共用. */
+private val CHANGELOG_BLOCK_CORNER = 12.dp

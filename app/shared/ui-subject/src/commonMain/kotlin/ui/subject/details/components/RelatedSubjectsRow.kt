@@ -46,11 +46,10 @@ import me.him188.ani.app.navigation.LocalNavigator
 import me.him188.ani.app.navigation.SubjectDetailPlaceholder
 import me.him188.ani.app.platform.currentAniBuildConfig
 import me.him188.ani.app.ui.foundation.AsyncImage
-import me.him188.ani.app.ui.foundation.LocalAniUiBehavior
 import me.him188.ani.app.ui.foundation.ProvideCompositionLocalsForPreview
-import me.him188.ani.app.ui.foundation.focus.FOCUS_BORDER_TEXT_INSET
 import me.him188.ani.app.ui.foundation.focus.TvAnchoredStrip
-import me.him188.ani.app.ui.foundation.focus.focusBorder
+import me.him188.ani.app.ui.foundation.tv.tvCardTextInset
+import me.him188.ani.app.ui.foundation.tv.tvFocusableCard
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.subject_details_relation_derived
 import me.him188.ani.app.ui.lang.subject_details_relation_prequel
@@ -121,20 +120,10 @@ fun RelatedSubjectCard(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val focused by interactionSource.collectIsFocusedAsState()
+    val textInset = tvCardTextInset()
     Column(
-        modifier
-            // 示焦用主题色描边而不是涟漪的高亮状态层 (压在封面上分辨不出哪张有焦点)
-            .focusBorder(MaterialTheme.shapes.small)
-            .clip(MaterialTheme.shapes.small)
-            // 焦点驱动 (TV) 下不要涟漪的焦点状态层: 半透明高亮 + 描边 = 两层特效, 且高亮本身
-            // 在封面上分辨不出哪张有焦点 (与 FocusHighlightCard 的取舍一致). 触摸端保留涟漪.
-            .clickable(
-                interactionSource = interactionSource,
-                indication = if (LocalAniUiBehavior.current.focusDrivenNavigation) null else LocalIndication.current,
-                onClick = onClick,
-            )
-            // 末行文字贴着卡底, 给聚焦描边留出余地 (横向内缩在文字上, 封面仍满宽)
-            .padding(bottom = FOCUS_BORDER_TEXT_INSET),
+        // 示焦描边 + 圆角 + 按形态换示焦手段 + 文字避让, 见 tvFocusableCard
+        modifier.tvFocusableCard(onClick, interactionSource = interactionSource),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Surface(
@@ -150,7 +139,7 @@ fun RelatedSubjectCard(
                 placeholder = if (currentAniBuildConfig.isDebug) remember { ColorPainter(Color.Gray) } else null,
             )
         }
-        Column(Modifier.padding(horizontal = FOCUS_BORDER_TEXT_INSET)) {
+        Column(Modifier.padding(horizontal = textInset)) {
             Text(
                 info.displayName,
                 if (focused) Modifier.basicMarquee(iterations = Int.MAX_VALUE) else Modifier,
