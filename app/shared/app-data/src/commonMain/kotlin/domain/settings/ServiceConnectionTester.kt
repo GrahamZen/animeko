@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import me.him188.ani.app.data.network.TmdbImageService
 import me.him188.ani.app.domain.settings.ServiceConnectionTester.Service
 import me.him188.ani.client.apis.TrendsAniApi
@@ -193,11 +194,33 @@ class ServiceConnectionTester(
 }
 
 
+/**
+ * 给单项探测封顶, 超时即判失败.
+ *
+ * 探测请求多数没覆盖超时, 吃的是全局 30 秒连接超时, 而 IPv4 + IPv6 各试一次就是 60 秒 ——
+ * `api.bgm.tv` 在墙内被 DNS 投毒时, 设置页那一行要整整转一分钟才变红叉 (issue #7 报告者
+ * 实测), 这期间用户只看到一个转圈, 分不清是在等还是已经卡死.
+ *
+ * **必须用 [withTimeoutOrNull] 而不是 `withTimeout`**: 后者抛的是 `CancellationException`
+ * 的子类, 会被 [ServiceConnectionTester.Service] 的取消分支当成"用户主动取消"而置回
+ * `TestState.Idle` —— 那样这一行会永远停在转圈上, 比现在还糟.
+ */
+private suspend fun withTestTimeout(
+    timeoutMillis: Long = ServiceConnectionTesters.DEFAULT_TEST_TIMEOUT_MILLIS,
+    block: suspend () -> Boolean,
+): Boolean = withTimeoutOrNull(timeoutMillis) { block() } ?: false
+
 object ServiceConnectionTesters {
     const val ID_BANGUMI = "BANGUMI"
     const val ID_BANGUMI_NEXT = "BANGUMI_NEXT"
     const val ID_ANI = "ANI"
     const val ID_TMDB = "TMDB"
+
+    /** 单项探测的时间上限, 见 [withTestTimeout]. 能连通的服务握手远用不到 5 秒. */
+    internal const val DEFAULT_TEST_TIMEOUT_MILLIS = 5_000L
+
+    /** TMDB 那项内部串了两三个请求, 单独给更宽的上限, 见调用处. */
+    internal const val TMDB_TEST_TIMEOUT_MILLIS = 15_000L
 
     val DefaultServiceIds = setOf(ID_BANGUMI, ID_BANGUMI_NEXT, ID_ANI, ID_TMDB)
 
@@ -211,22 +234,32 @@ object ServiceConnectionTesters {
         return ServiceConnectionTester(
             listOf(
                 Service(ID_BANGUMI) {
-                    bangumiClient.testConnectionMaster() == ConnectionStatus.SUCCESS
+                    withTestTimeout {
+                        bangumiClient.testConnectionMaster() == ConnectionStatus.SUCCESS
+                    }
                 },
                 Service(ID_BANGUMI_NEXT) {
-                    bangumiClient.testConnectionNext() == ConnectionStatus.SUCCESS
+                    withTestTimeout {
+                        bangumiClient.testConnectionNext() == ConnectionStatus.SUCCESS
+                    }
                 },
                 Service(ID_ANI) {
-                    runCatching {
-                        // Note, we may have `expectSuccess = true` so on failure it will throw an exception.
-                        aniClient.invoke {
-                            getTrends().response.status.isSuccess()
-                        }
-                    }.getOrElse { false }
+                    withTestTimeout {
+                        runCatching {
+                            // Note, we may have `expectSuccess = true` so on failure it will throw an exception.
+                            aniClient.invoke {
+                                getTrends().response.status.isSuccess()
+                            }
+                        }.getOrElse { false }
+                    }
                 },
                 // 详情页背景图与选集卡片剧照的来源; 接口与图片 CDN 两个域名都探, 见 testConnection
                 Service(ID_TMDB) {
-                    tmdbImageService.testConnection()
+                    // 它内部要依次探接口与图片 CDN, 接口还可能回退备用域名, 实测总耗时 4 秒
+                    // 出头 —— 给的上限比别人宽, 否则通的网络也会被判超时
+                    withTestTimeout(TMDB_TEST_TIMEOUT_MILLIS) {
+                        tmdbImageService.testConnection()
+                    }
                 },
             ).filter { it.id in serviceIds },
             defaultDispatcher,
