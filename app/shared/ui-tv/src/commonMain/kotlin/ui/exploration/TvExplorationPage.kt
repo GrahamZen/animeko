@@ -112,6 +112,8 @@ import me.him188.ani.app.domain.usecase.GlobalKoin
 import me.him188.ani.app.navigation.LocalNavigator
 import me.him188.ani.app.navigation.SubjectDetailPlaceholder
 import me.him188.ani.app.tools.WeekFormatter
+import me.him188.ani.app.ui.foundation.LocalTvBackLongPressHost
+import me.him188.ani.app.ui.foundation.TvPageRefreshHandler
 import me.him188.ani.app.ui.foundation.consumeHeldConfirmKey
 import me.him188.ani.app.ui.foundation.focus.TvScrollAnimator
 import me.him188.ani.app.ui.foundation.focus.tvAnchorBringIntoViewSpec
@@ -160,7 +162,7 @@ import me.him188.ani.app.ui.foundation.tv.TvPortraitCardFocusRing
 import me.him188.ani.app.ui.foundation.tv.tvHeroContentColor
 import me.him188.ani.app.ui.foundation.tv.tvHeroMarqueeIterations
 import me.him188.ani.app.ui.foundation.tv.tvHeroSecondaryContentColor
-import me.him188.ani.app.ui.foundation.tv.tvPlayKeyForceRefresh
+import me.him188.ani.app.ui.foundation.tv.tvPlayKeyShortPress
 import me.him188.ani.app.ui.foundation.widgets.LocalToaster
 import me.him188.ani.app.ui.foundation.widgets.showLoadError
 import me.him188.ani.app.ui.lang.Lang
@@ -725,11 +727,29 @@ fun TvExplorationPage(
             else -> heroFocusRequest = TvHeroFocusButton.PRIMARY
         }
     }
+    // 长按返回在本页不再单独注册: 根部兜底统一弹快捷菜单 (回到主界面 / 回到·关闭正在播放 /
+    // 刷新本页 / 退出应用, 见 TvQuickActionMenu). 菜单的「回到主界面」落地后把焦点送上轮播
+    // 主按钮 —— 发起方可能在别的 tab / 别的目的地 (那一刻本页还没组合出来), 只能留一个标志,
+    // 这里看到就消费. heroFocusRequest 的既有机制会先把按钮组合出来再轮询聚焦, 列表也随
+    // hero 态回顶
+    val backLongPressHost = LocalTvBackLongPressHost.current
+    if (backLongPressHost != null) {
+        LaunchedEffect(backLongPressHost) {
+            snapshotFlow { backLongPressHost.pendingHomeFocus }.collect { pending ->
+                if (pending) {
+                    backLongPressHost.pendingHomeFocus = false
+                    heroFocusRequest = TvHeroFocusButton.PRIMARY
+                }
+            }
+        }
+    }
+    // 快捷菜单「刷新本页」= 强制重拉"在看"(继续观看栏). 推荐流不重拉 —— 换的是推荐结果,
+    // 不是"更没更"
+    TvPageRefreshHandler { state.refreshFollowedSubjects() }
 
-    // hero 的播放键: 短按直接播当前轮播条目 (按钮本身走确认键进详情, 同卡片的约定),
-    // 长按强制刷新在看 —— 与卡片上那套完全一致, 同一页不能两种手感
-    val heroPlayKeyModifier = tvPlayKeyForceRefresh(
-        onRefresh = { state.refreshFollowedSubjects() },
+    // hero 的播放键: 短按直接播当前轮播条目 (按钮本身走确认键进详情, 同卡片的约定).
+    // 长按不在这里: 播放键长按是全局手势「回到正在播放」, 由根部统一跟踪器认领
+    val heroPlayKeyModifier = tvPlayKeyShortPress(
         onPlay = {
             carouselItem()?.let {
                 navigateToPlay(it.bangumiId, it.nameCn, it.imageLarge, "home_trending_play")
@@ -737,11 +757,9 @@ fun TvExplorationPage(
             } ?: false
         },
     )
-    // 继续观看行的播放键: 短按续播聚焦那部, 长按强制重拉本栏目. 一份 modifier 整行共用:
-    // 同一时刻只有一张卡有焦点, 按键只会送到那一张; 落点用页面记的"行内聚焦下标"取.
-    // 推荐行不加 —— 那里刷新没有意义 (换的是推荐结果, 不是"更没更")
-    val followedPlayKeyModifier = tvPlayKeyForceRefresh(
-        onRefresh = { state.refreshFollowedSubjects() },
+    // 继续观看行的播放键: 短按续播聚焦那部. 一份 modifier 整行共用:
+    // 同一时刻只有一张卡有焦点, 按键只会送到那一张; 落点用页面记的"行内聚焦下标"取
+    val followedPlayKeyModifier = tvPlayKeyShortPress(
         onPlay = {
             val subject = focusedCardIndex
                 .takeIf { focusedRowKey == TV_FOLLOWED_ROW_KEY }

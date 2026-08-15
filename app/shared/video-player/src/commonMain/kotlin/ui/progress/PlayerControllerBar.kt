@@ -111,7 +111,7 @@ import me.him188.ani.app.ui.foundation.effects.onKey
 import me.him188.ani.app.ui.foundation.ifThen
 import me.him188.ani.app.ui.lang.*
 import me.him188.ani.app.ui.foundation.FOCUS_REQ_DELAY_MILLIS
-import me.him188.ani.app.ui.foundation.tvPlayPauseKey
+import me.him188.ani.app.ui.foundation.tvOverlayWindowKeys
 import me.him188.ani.app.ui.foundation.theme.AniTheme
 import me.him188.ani.app.ui.foundation.theme.slightlyWeaken
 import me.him188.ani.app.ui.foundation.theme.stronglyWeaken
@@ -633,7 +633,7 @@ object PlayerControllerDefaults {
                     modifier = Modifier
                         .testTag(TAG_SPEED_SWITCHER_DROPDOWN_MENU)
                         // 同 OptionsSwitcher: 独立窗口自己接播放暂停键
-                        .tvPlayPauseKey()
+                        .tvOverlayWindowKeys(onDismissRequest)
                         .width(280.dp),
                     shape = RoundedCornerShape(16.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -731,7 +731,7 @@ object PlayerControllerDefaults {
                     .testTag(dropdownMenuTestTag)
                     // TV: 下拉是独立窗口, 按键到不了播放页的根按键路由 —— 它盖在画面上,
                     // 遥控器播放暂停键仍该管用 (播放页之外为空操作)
-                    .tvPlayPauseKey()
+                    .tvOverlayWindowKeys { expanded = false }
                     // TV: 遥控器没有 dismiss 手势, 返回键关闭下拉
                     .onPreviewKeyEvent { event ->
                         if (event.key == Key.Back && event.type == KeyEventType.KeyDown) {

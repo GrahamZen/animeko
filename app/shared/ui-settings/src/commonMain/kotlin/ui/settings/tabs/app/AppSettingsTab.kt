@@ -132,6 +132,8 @@ import me.him188.ani.app.ui.lang.settings_player_video_enhancement_default_descr
 import me.him188.ani.app.ui.lang.video_player_off
 import me.him188.ani.app.ui.lang.video_player_performance
 import me.him188.ani.app.ui.lang.video_player_quality
+import me.him188.ani.app.ui.lang.settings_theme_tv_exit_confirmation
+import me.him188.ani.app.ui.lang.settings_theme_tv_exit_confirmation_description
 import me.him188.ani.app.ui.lang.settings_theme_tv_retain_playback_session
 import me.him188.ani.app.ui.lang.settings_theme_tv_retain_playback_session_description
 import me.him188.ani.app.ui.lang.settings_theme_tv_ui_scale
@@ -159,6 +161,7 @@ import me.him188.ani.app.ui.lang.settings_update_type_stable_short
 import me.him188.ani.app.ui.lang.settings_update_up_to_date
 import me.him188.ani.app.ui.lang.settings_update_view_changelog
 import me.him188.ani.app.ui.lang.settings_watch_together_description
+import me.him188.ani.app.ui.lang.settings_watch_together_entry_hint_tv
 import me.him188.ani.app.ui.lang.settings_watch_together_social
 import me.him188.ani.app.ui.lang.watch_together_title
 import me.him188.ani.app.ui.settings.SettingsTab
@@ -241,7 +244,18 @@ fun SettingsScope.WatchTogetherGroup(state: SettingsState<WatchTogetherSettings>
             checked = config.enabled,
             onCheckedChange = { state.update(config.copy(enabled = it)) },
             title = { Text(stringResource(Lang.watch_together_title)) },
-            description = { Text(stringResource(Lang.settings_watch_together_description)) },
+            description = {
+                // 遥控器形态补一句入口在哪: 那里没有悬浮气泡, 入口是长按返回那个面板里的一颗图标,
+                // 平时不在视野里 —— 开着却找不到, 等于没开
+                Text(
+                    if (LocalAniUiBehavior.current.immersiveShell) {
+                        stringResource(Lang.settings_watch_together_description) +
+                                stringResource(Lang.settings_watch_together_entry_hint_tv)
+                    } else {
+                        stringResource(Lang.settings_watch_together_description)
+                    },
+                )
+            },
         )
     }
 }
@@ -257,6 +271,18 @@ fun SettingsScope.AppearanceGroup(
     // 排在后面的话, 上方那些条目的高度变化会叠加起来把它推出屏幕
     if (LocalAniUiBehavior.current.immersiveShell) {
         UiScaleSliderItem(themeSettings)
+
+        // 「退出确认」: 遥控器形态专属 —— 只有那里的返回键会一路退到"再按一下就退出应用".
+        // 存在 ThemeSettings 里只是存储位置 (同界面缩放/保留播放会话)
+        val themeConfig by themeSettings
+        SwitchItem(
+            checked = themeConfig.tvExitConfirmation,
+            onCheckedChange = { checked ->
+                themeSettings.update(themeConfig.copy(tvExitConfirmation = checked))
+            },
+            title = { Text(stringResource(Lang.settings_theme_tv_exit_confirmation)) },
+            description = { Text(stringResource(Lang.settings_theme_tv_exit_confirmation_description)) },
+        )
     }
 
     LanguageSettingsPlatform(state)

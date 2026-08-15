@@ -55,6 +55,14 @@ data class ThemeSettings(
      */
     val tvNoticeSound: NoticeSoundKind = NoticeSoundKind.Default,
     /**
+     * TV: 在主页按返回键 (即"再按一下就退出应用"的那一下) 先弹确认框, 而不是直接退出.
+     *
+     * 默认开: 遥控器上返回键按得很随意, 一路退到底就把应用关了 —— 而这个形态下"关掉"的代价
+     * 比手机大 (保留的播放会话、正在跑的 BT 服务都跟着没). 确认框里顺带给"回到/关闭正在播放"
+     * 两个出口 (见 TvExitAppDialog). 关掉则回到"按返回直接退出"的老行为.
+     */
+    val tvExitConfirmation: Boolean = true,
+    /**
      * TV: 完整视觉效果 (**默认关**), 即不为低端设备让步的那一档.
      *
      * 一个开关打包全部"好看但费机器"的取舍, 因为需要其中一项的设备通常三项都扛得住:

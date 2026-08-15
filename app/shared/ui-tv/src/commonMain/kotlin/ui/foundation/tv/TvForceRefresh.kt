@@ -13,39 +13,32 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import me.him188.ani.app.ui.foundation.TV_PLAY_KEYS
 import me.him188.ani.app.ui.foundation.tvLongPressKey
-import me.him188.ani.app.ui.foundation.widgets.LocalToaster
-import me.him188.ani.app.ui.lang.Lang
-import me.him188.ani.app.ui.lang.tv_force_refresh_toast
-import org.jetbrains.compose.resources.stringResource
 
 /**
- * 遥控器**播放键长按 = 强制刷新**, 短按仍是 [onPlay] (直达播放).
+ * 遥控器播放键**短按 = [onPlay]** (直达播放); 长按刻意不在这里处理.
  *
- * 只加在"刷新有意义"的页面上 (追番 / 新番时间表 / 探索页的继续观看): 这些页面的数据都是一小时
- * 一刷的定时拉取 (见各自的 repository), 用户想立刻看到更新时没有别的入口.
+ * 播放键长按是全局手势「回到正在播放」, 由应用根部的统一跟踪器认领 (见 TvPageVariants 与
+ * [TvKeyLongPressHost][me.him188.ani.app.ui.foundation.TvKeyLongPressHost] 的并存规则):
+ * 根部拦截器先收到事件, 认领那一刻起本节点再也看不到后续连发与 KeyUp, 所以这里的
+ * onLongPress 永远到不了阈值 (传空只为占位). 旧的「长按 = 强制刷新」挪进了长按返回的
+ * 快捷菜单 (TvPageRefreshHandler 注册, 各页自理).
  *
- * 判定与全库其它长按共用一份实现 (见 [tvLongPressKey]): 按住到阈值**当场**触发 (不等松手,
- * 立即给出 toast 反馈), 松手时若还没触发就算短按. 因此本 modifier 必须挂在**已经拥有播放键的
- * 那个节点**上并接管它 —— 短按要等到 KeyUp 才能确定, 期间不能让 KeyDown 漏下去被别人当成
- * "按了播放" (所以网格的键路由把 onPlayKey 让给了本 modifier).
+ * 仍要用 [tvLongPressKey] 而不是裸的 onKeyEvent: 短按要等到 KeyUp 才能确定 (期间不能让
+ * KeyDown 漏下去被别人当成"按了播放"), 且要同一套残余免疫 —— 本 modifier 必须挂在**已经
+ * 拥有播放键的那个节点**上并接管它 (网格的键路由把 onPlayKey 让给了它).
  *
- * @param onRefresh 长按触发: 强制重拉数据
  * @param onPlay 短按触发, 返回是否已处理 (焦点不在卡片上时返回 false)
  */
 @Composable
-fun tvPlayKeyForceRefresh(
-    onRefresh: () -> Unit,
+fun tvPlayKeyShortPress(
     onPlay: () -> Boolean = { false },
 ): Modifier {
-    val toaster = LocalToaster.current
-    val refreshingText = stringResource(Lang.tv_force_refresh_toast)
-    // 不 remember 这个 Modifier: 它要读到最新的 onRefresh/onPlay 与文案 (remember 会把首次组合
-    // 那一份闭包永久留下), 而 modifier 元素本身很轻, 每次重组重建无所谓
+    // 不 remember 这个 Modifier: 它要读到最新的 onPlay (remember 会把首次组合那一份闭包
+    // 永久留下), 而 modifier 元素本身很轻, 每次重组重建无所谓
     return Modifier.tvLongPressKey(
         onLongPress = {
-            // 刷新本身可能没有可见变化 (数据没变时界面一模一样), 必须给一句反馈
-            toaster.toast(refreshingText)
-            onRefresh()
+            // 到不了这里 (根部拦截器在阈值那一发就把手势认领走了); 万一根部宿主不在场
+            // (预览/测试), 空操作也比误触发好
         },
         onShortPress = { onPlay() },
         keys = TV_PLAY_KEYS,

@@ -87,6 +87,7 @@ import me.him188.ani.app.ui.foundation.animation.NavigationMotionScheme
 import me.him188.ani.app.ui.foundation.animation.ProvideAniMotionCompositionLocals
 import androidx.compose.ui.graphics.Color
 import me.him188.ani.app.ui.foundation.LocalAniUiBehavior
+import me.him188.ani.app.ui.foundation.consumeHeldConfirmKey
 import me.him188.ani.app.ui.foundation.effects.OnLifecycleEvent
 import me.him188.ani.app.ui.foundation.effects.rememberNoticeSoundPlayer
 import me.him188.ani.app.ui.foundation.playback.LocalPlaybackSessionEntry
@@ -165,8 +166,10 @@ fun AniAppContent(aniNavigator: AniNavigator) {
         if (LocalAniUiBehavior.current.blackRootBackground) Color.Black
         else MaterialTheme.colorScheme.background
     // "一起看" 入口把手: 弹窗本体在下面的 WatchTogetherOverlayHost 里 (与 NavHost 同级),
-    // 入口按钮在 NavHost 内的各页面上 (TV 侧边栏 / 播放器胶囊行), 两边隔着 NavHost 靠它通气
-    val watchTogetherEntry = remember { WatchTogetherEntryState() }
+    // 入口按钮在 NavHost 内的各页面上 (播放器胶囊行), 两边隔着 NavHost 靠它通气.
+    // viewModel 而不是 remember: 遥控器形态的动作面板在本函数外面组合, 靠"同 owner 同 key"
+    // 拿同一个实例 (见 WatchTogetherEntryState 的说明)
+    val watchTogetherEntry = viewModel { WatchTogetherEntryState() }
     // 保留播放会话 (遥控器形态, 可在设置里关): 播放页退出后播放器与整条起播流水线不销毁,
     // 由侧边栏"正在播放"条目回去. holder 挂在这里 (NavHost 之外) 才能不随播放页那个返回栈条目
     // 一起死; 它同时是入口把手 (PlaybackSessionEntry), 经 CompositionLocal 给到 NavHost 内的入口.
@@ -611,7 +614,10 @@ private fun AniAppContentImpl(
                             Res.readBytes("files/additional_libraries.json"),
                         )
                     },
-                    Modifier.fillMaxSize(),
+                    // 本页可以被**长按**开出来 (遥控器动作面板里长按服务连通那一行 → 代理设置),
+                    // 那时用户的手还没松: 残余的连发 KeyDown + KeyUp 会落在刚拿到焦点的第一项设置上,
+                    // 表现成"页面刚开就自己点了一下". 短按进来挂着它同样安全 (见该 modifier 的文档).
+                    Modifier.fillMaxSize().consumeHeldConfirmKey(),
                     route.tab,
                     navigationIcon = {
                         BackNavigationIconButton(

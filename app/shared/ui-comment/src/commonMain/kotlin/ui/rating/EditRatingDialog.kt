@@ -74,6 +74,7 @@ import me.him188.ani.app.ui.foundation.ProvideCompositionLocalsForPreview
 import me.him188.ani.app.ui.foundation.focus.resolveFocusRepeatedly
 import me.him188.ani.app.ui.foundation.icons.EditSquare
 import me.him188.ani.app.ui.foundation.theme.adjustHsv
+import me.him188.ani.app.ui.foundation.tvOverlayWindowKeys
 import me.him188.ani.app.ui.foundation.widgets.AniCenteredPanelDialog
 import me.him188.ani.app.ui.foundation.widgets.AniFocusActionButton
 import me.him188.ani.app.ui.foundation.widgets.dismissDialogButton
@@ -146,6 +147,8 @@ fun RatingEditorDialog(
     if (showConfirmCancelDialog) {
         AlertDialog(
             onDismissRequest = { showConfirmCancelDialog = false },
+            // 独立窗口: 遥控器全局键接回主窗口 (见 tvOverlayWindowKeys)
+            modifier = Modifier.tvOverlayWindowKeys { showConfirmCancelDialog = false },
             title = { Text(discardEditTitle) },
             text = { Text(discardEditMessage) },
             confirmButton = {

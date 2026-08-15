@@ -9,11 +9,8 @@
 
 package me.him188.ani.app.ui.subject.details.layout
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
@@ -61,7 +58,6 @@ import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
-import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Surface
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
@@ -117,7 +113,6 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
@@ -155,7 +150,11 @@ import me.him188.ani.app.ui.foundation.session.TvNavigationSideRail
 import me.him188.ani.app.ui.foundation.focus.resolveFocusRepeatedly
 import me.him188.ani.app.ui.foundation.focus.restoreFocusAfter
 import me.him188.ani.app.ui.foundation.tvLongPressKey
-import me.him188.ani.app.ui.foundation.tvPlayPauseKey
+import me.him188.ani.app.ui.foundation.tvOverlayWindowKeys
+import me.him188.ani.app.ui.foundation.tv.TV_CAPSULE_SIZE
+import me.him188.ani.app.ui.foundation.tv.TV_FOCUSED_CONTAINER_ALPHA
+import me.him188.ani.app.ui.foundation.tv.TV_ICON_GLYPH_SIZE
+import me.him188.ani.app.ui.foundation.tv.TvCapsuleButton
 import me.him188.ani.app.ui.foundation.session.buildTvRailItems
 import me.him188.ani.app.ui.foundation.theme.AniThemeDefaults
 import me.him188.ani.app.ui.foundation.theme.GLASS_CONTAINER_ALPHA
@@ -1151,7 +1150,6 @@ private fun TvDetailsSideRail(
  * 图标按钮的字形 (glyph) 尺寸: 侧边栏与 Hero 圆钮共用. 配 32dp 容器,
  * 即 M3 extra-small icon button 规格 (20dp icon / 32dp container).
  */
-private val TV_ICON_GLYPH_SIZE = 20.dp
 
 /** 详情页侧边栏遮罩: surface 向 surfaceTint (封面取色动态主色) 的偏移比例, 调大主题色更浓. */
 private const val TV_DETAILS_RAIL_SCRIM_TINT = 0.35f
@@ -1597,7 +1595,7 @@ private fun TvTagsMenu(
             }
             Surface(
                 // Popup 是独立窗口, 按键到不了播放页的根路由 (播放器内嵌详情页也开得出这个菜单)
-                Modifier.tvPlayPauseKey().width(560.dp).heightIn(max = 400.dp),
+                Modifier.tvOverlayWindowKeys(onDismissRequest).width(560.dp).heightIn(max = 400.dp),
                 shape = RoundedCornerShape(16.dp),
                 // 半透明容器 (详情页所有弹出菜单统一), 隐约透出下层内容
                 color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = MENU_CONTAINER_ALPHA),
@@ -2230,7 +2228,6 @@ private val TV_BUTTON_SHAPE = RoundedCornerShape(8.dp)
  * (32dp 容器 / 20dp 字形, 见 [TV_ICON_GLYPH_SIZE]), 与左缘侧边栏图标按钮同尺寸.
  * 聚焦填充即容器本身.
  */
-private val TV_CAPSULE_SIZE = 32.dp
 
 /** Hero 中列左侧 (统计+连载) 的高度: 与左列 "圆钮行 (44dp) + 间距 (10dp) + 播放按钮 (38dp)" 一致. */
 private val TV_HERO_MIDDLE_HEIGHT = TV_CAPSULE_SIZE + 10.dp + 38.dp
@@ -2272,7 +2269,6 @@ private const val TV_READING_SCROLL_ANIM_MS = 120
 private fun tvGlassColor(alpha: Float = TV_GLASS_ALPHA): Color = glassContainerColor(alpha)
 
 /** 按钮聚焦时主色填充的不透明度: 留一点透明让背景透出来, 不至于一块实心色块. */
-private const val TV_FOCUSED_CONTAINER_ALPHA = 0.8f
 
 /**
  * 收藏圆钮: 平时只显示当前收藏状态的图标, 聚焦时横向展开状态文字.
@@ -2305,73 +2301,6 @@ private fun TvCollectionCapsule(
             // 半透明容器 (详情页所有弹出菜单统一)
             containerColor = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = MENU_CONTAINER_ALPHA),
         )
-    }
-}
-
-/**
- * 图标圆钮: 固定 [TV_CAPSULE_SIZE] 正圆, 无底色无描边, 仅主题色图标;
- * 聚焦时填充主题主色 (动态主题下即封面取色), 并在圆钮上方浮现 [label] 纯文字标签
- * 标签不占布局空间, 不推挤周围.
- */
-@Composable
-private fun TvCapsuleButton(
-    onClick: () -> Unit,
-    icon: @Composable () -> Unit,
-    label: @Composable () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var focused by remember { mutableStateOf(false) }
-    val onSurface = MaterialTheme.colorScheme.onSurface
-    val containerColor by animateColorAsState(
-        if (focused) MaterialTheme.colorScheme.primary.copy(alpha = TV_FOCUSED_CONTAINER_ALPHA)
-        else Color.Transparent,
-    )
-    val contentColor by animateColorAsState(
-        if (focused) MaterialTheme.colorScheme.onPrimary else onSurface,
-    )
-    Box(modifier) {
-        Box(
-            Modifier
-                .size(TV_CAPSULE_SIZE)
-                .onFocusChanged { focused = it.isFocused }
-                .clip(CircleShape)
-                .background(containerColor)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onClick,
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            CompositionLocalProvider(LocalContentColor provides contentColor) {
-                // 20dp 字形: 外层约束把默认 24dp 的 Icon 收到字形尺寸
-                Box(Modifier.size(TV_ICON_GLYPH_SIZE), contentAlignment = Alignment.Center) {
-                    icon()
-                }
-            }
-        }
-        // 聚焦时上方浮现的文字标签: layout(0,0) 不占任何布局空间;
-        // 相对圆钮水平居中, 底缘在圆钮上缘之上 8dp
-        Box(
-            Modifier.layout { measurable, _ ->
-                val placeable = measurable.measure(Constraints())
-                val anchorWidth = TV_CAPSULE_SIZE.roundToPx()
-                layout(0, 0) {
-                    placeable.place(
-                        x = (anchorWidth - placeable.width) / 2,
-                        y = -(placeable.height + 8.dp.roundToPx()),
-                    )
-                }
-            },
-        ) {
-            AnimatedVisibility(focused, enter = fadeIn(), exit = fadeOut()) {
-                ProvideTextStyle(MaterialTheme.typography.labelLarge) {
-                    CompositionLocalProvider(LocalContentColor provides onSurface) {
-                        Row { label() }
-                    }
-                }
-            }
-        }
     }
 }
 

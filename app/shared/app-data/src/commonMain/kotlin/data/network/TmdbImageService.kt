@@ -50,6 +50,7 @@ import me.him188.ani.app.domain.foundation.ServerListFeature
 import me.him188.ani.app.domain.foundation.ServerListFeatureConfig
 import me.him188.ani.app.domain.foundation.get
 import me.him188.ani.app.domain.foundation.withValue
+import me.him188.ani.app.domain.settings.NetworkTroubleBeacon
 import me.him188.ani.app.platform.currentAniBuildConfig
 import me.him188.ani.utils.coroutines.IO_
 import me.him188.ani.utils.logging.info
@@ -441,6 +442,8 @@ class TmdbImageService(
                 throw e
             } catch (e: Exception) {
                 logger.warn(e) { "Failed to search TMDB backdrop for subject $subjectId, will retry next time" }
+                // 亮一下信标: 用户此刻正在浏览而背景图没出来, 下次打开动作面板就自动测一轮连通性
+                NetworkTroubleBeacon.report("tmdb backdrop search failed for subject $subjectId")
                 return@withContext null // 网络错误不写缓存, 下次进页面重试
             }
 
@@ -568,6 +571,7 @@ class TmdbImageService(
                 throw e
             } catch (e: Exception) {
                 logger.warn(e) { "Failed to fetch TMDB episode stills for subject $subjectId, will retry next time" }
+                NetworkTroubleBeacon.report("tmdb episode stills failed for subject $subjectId")
                 // 网络错误不写缓存; 陈旧重取失败时继续用旧缓存, 首次拉取失败返回 null (见 KDoc)
                 return@withContext cached
             }

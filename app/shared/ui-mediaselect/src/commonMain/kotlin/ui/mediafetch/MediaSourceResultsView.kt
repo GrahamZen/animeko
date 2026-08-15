@@ -65,6 +65,7 @@ import me.him188.ani.app.navigation.LocalNavigator
 import me.him188.ani.app.ui.foundation.LocalAniUiBehavior
 import me.him188.ani.app.ui.foundation.ProvideCompositionLocalsForPreview
 import me.him188.ani.app.ui.foundation.ifThen
+import me.him188.ani.app.ui.foundation.tvOverlayWindowKeys
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.cache_details_source_online
 import me.him188.ani.app.ui.lang.media_source_results_captcha_required
@@ -157,7 +158,11 @@ fun MediaSourceResultsView(
 
             var showHelp by remember { mutableStateOf(false) }
             if (showHelp) {
-                BasicAlertDialog({ showHelp = false }) {
+                BasicAlertDialog(
+                    { showHelp = false },
+                    // 独立窗口: 遥控器全局键接回主窗口 (见 tvOverlayWindowKeys)
+                    Modifier.tvOverlayWindowKeys { showHelp = false },
+                ) {
                     MediaSelectorHelp({ showHelp = false })
                 }
             }

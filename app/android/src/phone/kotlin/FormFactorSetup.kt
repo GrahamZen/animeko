@@ -11,6 +11,7 @@ package me.him188.ani.android
 
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.Composable
+import me.him188.ani.app.navigation.AniNavigator
 import me.him188.ani.app.ui.foundation.AniUiBehavior
 
 /*
@@ -21,9 +22,9 @@ import me.him188.ani.app.ui.foundation.AniUiBehavior
 /** 指针设备 (触屏/鼠标) 的界面行为. */
 internal val formFactorUiBehavior: AniUiBehavior get() = AniUiBehavior.Default
 
-/** 无需安装任何界面变体, 原样组合. */
+/** 无需安装任何界面变体, 原样组合 ([aniNavigator] 只有 TV 形态用得到). */
 @Composable
-internal fun InstallFormFactorUi(content: @Composable () -> Unit) = content()
+internal fun InstallFormFactorUi(aniNavigator: AniNavigator, content: @Composable () -> Unit) = content()
 
 /** 无需额外初始化. */
 internal fun onFormFactorActivityCreated(activity: ComponentActivity) {

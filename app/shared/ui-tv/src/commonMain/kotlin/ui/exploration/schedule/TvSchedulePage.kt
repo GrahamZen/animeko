@@ -116,7 +116,8 @@ import me.him188.ani.app.ui.foundation.tv.TV_PAGE_CARD_SPACING
 import me.him188.ani.app.ui.foundation.tv.TV_PORTRAIT_CARD_COVER_RATIO
 import me.him188.ani.app.ui.foundation.tv.TvFullScreenBackdropLayer
 import me.him188.ani.app.ui.foundation.tv.TvPortraitCard
-import me.him188.ani.app.ui.foundation.tv.tvPlayKeyForceRefresh
+import me.him188.ani.app.ui.foundation.TvPageRefreshHandler
+import me.him188.ani.app.ui.foundation.tv.tvPlayKeyShortPress
 import me.him188.ani.app.ui.foundation.tv.tvHeroContentColor
 import me.him188.ani.app.ui.foundation.tv.tvHeroSecondaryContentColor
 import me.him188.ani.app.ui.foundation.widgets.LocalToaster
@@ -533,8 +534,9 @@ fun TvSchedulePage(
 
     // 播放键: 短按播聚焦那一集, 长按强制重拉时间表 (数据默认一小时才刷一次).
     // 挂在页面根上而不是网格上: 焦点在日期行时也能刷
-    val playKeyModifier = tvPlayKeyForceRefresh(
-        onRefresh = onRetry,
+    // 快捷菜单「刷新本页」= 重拉整张时间表 (播放键长按已改为全局的「回到正在播放」)
+    TvPageRefreshHandler(onRetry)
+    val playKeyModifier = tvPlayKeyShortPress(
         onPlay = {
             dayItems.cards.getOrNull(lastFocusedCard)?.item?.let { navigateToPlay(it); true } ?: false
         },
@@ -800,7 +802,7 @@ fun TvSchedulePage(
                                     true
                                 },
                                 // 播放键由页面根节点接管 (短按播放 / 长按强制刷新, 见
-                                // tvPlayKeyForceRefresh): 长按要靠 KeyUp 才能与短按区分,
+                                // tvPlayKeyShortPress): 短按要靠 KeyUp 才能确定 (可能是长按的开头),
                                 // 而本路由只处理 KeyDown
                                 onPlayKey = { false },
                                 // 左右键按时间线性移动: 行末接下一行行首, 行首接上一行行末;

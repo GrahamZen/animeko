@@ -14,20 +14,27 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.ViewModel
 
 /**
  * "一起看" 弹窗的开合把手.
  *
  * 弹窗本体挂在应用根部 (WatchTogetherOverlayHost, 与 NavHost 同级), 唯一持有
- * WatchTogetherViewModel; 而入口按钮散落在各页面里 (TV: 侧边栏最底 + 播放器胶囊行最右).
+ * WatchTogetherViewModel; 而入口按钮散落在各页面里 (TV: 长按返回的动作面板 + 播放器胶囊行最右).
  * 入口只经本把手开弹窗与判断该不该显示, **绝不自己 `viewModel<WatchTogetherViewModel>()`** ——
  * 那些页面在不同的 ViewModelStoreOwner 下, 会各自造出一个新实例, 变成多份轮询与多份房间会话.
  *
  * 由 AniAppContent 建好后 provide 给整棵树 (NavHost 与弹窗宿主都在里面), 见
  * [LocalWatchTogetherEntry].
+ *
+ * **是 ViewModel 而不是 `remember` 出来的普通对象**: 遥控器形态的动作面板组合在
+ * `InstallFormFactorUi` 里, 那是 `AniAppContent` 的**外面** —— 它读 [LocalWatchTogetherEntry]
+ * 只会拿到默认空实例 (`enabled` 永远 false). 挂成 Activity 级 ViewModel 之后, 两处
+ * `viewModel { WatchTogetherEntryState() }` (同 owner 同 key) 拿到的是同一个实例, 与
+ * RetainedPlaybackSessionHolder 同一个套路.
  */
 @Stable
-class WatchTogetherEntryState {
+class WatchTogetherEntryState : ViewModel() {
     /**
      * 功能是否已在设置里打开. 由弹窗宿主写入, 入口按钮据此决定显不显示 ——
      * 关着的时候整个入口不存在 (等同于原来那颗悬浮气泡不出现).

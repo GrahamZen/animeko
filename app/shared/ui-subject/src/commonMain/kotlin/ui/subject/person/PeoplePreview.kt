@@ -63,7 +63,7 @@ import kotlinx.coroutines.launch
 import me.him188.ani.app.navigation.LocalNavigator
 import me.him188.ani.app.ui.foundation.LocalAniUiBehavior
 import me.him188.ani.app.ui.foundation.ifThen
-import me.him188.ani.app.ui.foundation.tvPlayPauseKey
+import me.him188.ani.app.ui.foundation.tvOverlayWindowKeys
 import me.him188.ani.app.ui.foundation.widgets.ModalSideSheet
 import me.him188.ani.app.ui.foundation.widgets.rememberModalSideSheetState
 import me.him188.ani.app.ui.lang.Lang
@@ -182,7 +182,7 @@ private fun PeoplePreviewSideSheet(
         ) {
             // Dialog 是独立窗口, 按键到不了播放页的根按键路由 —— 从播放器的角色/制作人员面板
             // 点开时画面还在后面放着, 遥控器播放暂停键仍该管用. 播放页之外为空操作
-            Box(Modifier.fillMaxSize().tvPlayPauseKey()) {
+            Box(Modifier.fillMaxSize().tvOverlayWindowKeys(onDismissRequest)) {
                 Box(
                     Modifier
                         .fillMaxSize()

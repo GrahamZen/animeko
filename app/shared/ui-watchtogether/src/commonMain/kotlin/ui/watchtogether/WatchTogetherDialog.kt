@@ -87,7 +87,7 @@ import androidx.compose.ui.window.Dialog
 import me.him188.ani.app.data.network.WatchTogetherJoinFailure
 import me.him188.ani.app.ui.foundation.LocalAniUiBehavior
 import me.him188.ani.app.ui.foundation.avatar.AvatarImage
-import me.him188.ani.app.ui.foundation.tvPlayPauseKey
+import me.him188.ani.app.ui.foundation.tvOverlayWindowKeys
 import me.him188.ani.app.ui.foundation.focus.resolveFocusRepeatedly
 import me.him188.ani.app.ui.foundation.widgets.AniCenteredPanelDialog
 import me.him188.ani.app.ui.foundation.widgets.DismissDialogButton
@@ -390,7 +390,7 @@ private fun WatchTogetherOptionsButton(
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
-            modifier = Modifier.tvPlayPauseKey(),
+            modifier = Modifier.tvOverlayWindowKeys { expanded = false },
         ) {
             DropdownMenuItem(
                 leadingIcon = {

@@ -28,6 +28,7 @@ import me.him188.ani.app.data.models.subject.SubjectInfo
 import me.him188.ani.app.data.models.subject.TestSelfRatingInfo
 import me.him188.ani.app.data.models.subject.TestSubjectInfo
 import me.him188.ani.app.tools.MonoTasker
+import me.him188.ani.app.ui.foundation.tvOverlayWindowKeys
 import me.him188.ani.app.ui.foundation.widgets.DismissDialogButton
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.rating_requires_collection
@@ -148,6 +149,8 @@ fun EditableRatingDialogsHost(state: EditableRatingState) {
     if (state.showRatingRequiresCollectionDialog) {
         AlertDialog(
             { state.dismissRatingRequiresCollectionDialog() },
+            // 独立窗口: 遥控器全局键接回主窗口 (见 tvOverlayWindowKeys)
+            modifier = Modifier.tvOverlayWindowKeys { state.dismissRatingRequiresCollectionDialog() },
             text = { Text(stringResource(Lang.rating_requires_collection)) },
             // 纯提示, 唯一的按钮就是"关闭"
             confirmButton = {

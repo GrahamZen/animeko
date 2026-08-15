@@ -117,7 +117,8 @@ import me.him188.ani.app.ui.foundation.focus.TvScrollAnimator
 import me.him188.ani.app.ui.foundation.theme.AniThemeDefaults
 import me.him188.ani.app.ui.foundation.tv.TvPageBackdropLayer
 import me.him188.ani.app.ui.foundation.tv.TvPortraitCard
-import me.him188.ani.app.ui.foundation.tv.tvPlayKeyForceRefresh
+import me.him188.ani.app.ui.foundation.TvPageRefreshHandler
+import me.him188.ani.app.ui.foundation.tv.tvPlayKeyShortPress
 import me.him188.ani.app.ui.foundation.focus.gridKeyNavigation
 import me.him188.ani.app.ui.foundation.focus.tvFocusMoveRateLimit
 import me.him188.ani.app.ui.foundation.tv.rememberTvSettledHeroProvider
@@ -562,8 +563,9 @@ fun TvCollectionPage(
 
     // 播放键: 短按播聚焦条目的下一集, 长按强制重拉当前 tab 的收藏列表 (默认只在进页/一小时
     // 定时同步时刷新). 挂在页面根上而不是网格上: 焦点在 tab 行时也能刷
-    val playKeyModifier = tvPlayKeyForceRefresh(
-        onRefresh = { state.refreshSelectedPage() },
+    // 快捷菜单「刷新本页」= 强制重拉当前分类 (播放键长按已改为全局的「回到正在播放」)
+    TvPageRefreshHandler { state.refreshSelectedPage() }
+    val playKeyModifier = tvPlayKeyShortPress(
         onPlay = {
             val info = lastFocusedCard.takeIf { it >= 0 }
                 ?.let { runCatching { items.peek(it) }.getOrNull() }
@@ -814,7 +816,7 @@ fun TvCollectionPage(
                                         focusSelectedTab()
                                     },
                                     // 播放键由页面根节点接管 (短按续播 / 长按强制刷新, 见
-                                    // tvPlayKeyForceRefresh): 长按要靠 KeyUp 才能与短按区分,
+                                    // tvPlayKeyShortPress): 短按要靠 KeyUp 才能确定 (可能是长按的开头),
                                     // 而本路由只处理 KeyDown
                                     onPlayKey = { false },
                                     enabled = { isActiveTab },

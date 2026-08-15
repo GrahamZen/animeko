@@ -30,7 +30,7 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
-import me.him188.ani.app.ui.foundation.tvPlayPauseKey
+import me.him188.ani.app.ui.foundation.tvOverlayWindowKeys
 import me.him188.ani.app.ui.foundation.widgets.LocalToaster
 import me.him188.ani.app.ui.foundation.widgets.showLoadError
 import me.him188.ani.app.ui.lang.*
@@ -89,7 +89,7 @@ fun EditCollectionTypeDropDown(
         offset = DpOffset(x = 0.dp, y = 4.dp),
         // 菜单是独立窗口, 按键到不了播放页的根按键路由 —— 从播放器内嵌详情页点开时,
         // 画面还在后面放着, 遥控器播放暂停键仍该管用. 播放页之外为空操作
-        modifier = modifier.tvPlayPauseKey(),
+        modifier = modifier.tvOverlayWindowKeys(onDismissRequest),
         containerColor = containerColor,
     ) {
         for (action in actions) {
@@ -121,7 +121,7 @@ fun EditCollectionTypeDropDown(
         if (showConfirmDeleteDialog) {
             AlertDialog(
                 onDismissRequest = { showConfirmDeleteDialog = false },
-                modifier = Modifier.tvPlayPauseKey(), // 同上: 独立窗口, 自己接播放暂停键
+                modifier = Modifier.tvOverlayWindowKeys { showConfirmDeleteDialog = false }, // 同上
                 title = { Text(stringResource(Lang.subject_collection_delete_confirm_title)) },
                 text = { Text(stringResource(Lang.subject_collection_delete_confirm_message)) },
                 icon = { SubjectCollectionActions.DeleteCollection.icon() },
