@@ -31,11 +31,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccountCircle
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.SyncAlt
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -69,21 +66,15 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import me.him188.ani.app.navigation.LocalNavigator
 import me.him188.ani.app.navigation.MainScreenPage
 import me.him188.ani.app.navigation.getIcon
 import me.him188.ani.app.navigation.getText
 import me.him188.ani.app.ui.foundation.avatar.AvatarImage
-import me.him188.ani.app.ui.foundation.playback.LocalPlaybackSessionEntry
 import me.him188.ani.app.ui.foundation.theme.AniThemeDefaults
-import me.him188.ani.app.ui.foundation.watchtogether.LocalWatchTogetherEntry
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.exploration_search
 import me.him188.ani.app.ui.lang.login_sign_in
-import me.him188.ani.app.ui.lang.playback_session_close
-import me.him188.ani.app.ui.lang.playback_session_now_playing
 import me.him188.ani.app.ui.lang.settings
-import me.him188.ani.app.ui.lang.watch_together_title
 import me.him188.ani.app.ui.user.SelfInfoUiState
 import org.jetbrains.compose.resources.stringResource
 
@@ -111,33 +102,22 @@ data class TvNavRailItem(
      * 焦点回不到本条目上.
      */
     val keepFocusOnClick: Boolean = false,
-    /**
-     * 非空时聚焦本条目会在它**下方**浮现这些按钮, 与头像那簇动作按钮同一形态与视觉:
-     * 不占布局 (不推挤其余条目), 按下键即落到第一个按钮上, 焦点离开本簇即隐藏.
-     *
-     * 给"点击是主动作、另有次要动作"的条目用 (如"正在播放": 点击回到播放页, 下方浮出"关闭").
-     * 不用长按弹菜单: 那是个独立窗口 (按键不经本页路由, 还要处理长按残余按键), 而这里
-     * 只是同一棵树里多一个可聚焦目标, 遥控器上也更好发现 —— 焦点一到就看得见.
-     */
-    val floatingActions: List<TvRailItemAction> = emptyList(),
-    val onClick: () -> Unit,
-)
-
-/** 条目的次要动作 (聚焦条目时在其下方浮现). */
-@Immutable
-data class TvRailItemAction(
-    val icon: ImageVector,
-    val label: String,
     val onClick: () -> Unit,
 )
 
 /**
  * 头像的关联动作 (编辑资料/播放记录/退出登录): 焦点在头像簇上时浮现于头像上方.
  *
- * 与 [TvRailItemAction] 是同一个东西 —— 两簇浮出按钮唯一的差别是往上长还是往下长
- * (见 [TvRailFloatingActionCluster]), 动作本身没有区别, 所以不再各留一个同字段的类.
+ * 曾经条目也能带一簇往**下**长的同款按钮 (给"正在播放"的关闭用), 2026-08-16 随那个条目一起
+ * 删掉了 —— 后台会话的入口与状态都收进了长按返回的动作面板 (见 TvActionPanelDialog),
+ * 侧边栏不再承担它. 现在只剩头像这一簇, 所以 [TvRailFloatingActionCluster] 也只往上长.
  */
-typealias TvRailAvatarAction = TvRailItemAction
+@Immutable
+data class TvRailAvatarAction(
+    val icon: ImageVector,
+    val label: String,
+    val onClick: () -> Unit,
+)
 
 /**
  * 组装主页与详情页侧边栏共用的条目列表 (搜索 + 主页各 tab + 设置), 两处只差点击行为
@@ -173,53 +153,16 @@ fun buildTvRailItems(
             onClick = onSettings,
         ),
     )
-    // "一起看": 只在设置里打开了功能时出现 —— 遥控器上没有可拖的悬浮气泡, 这颗常驻图标
-    // 与播放器胶囊行末尾那颗一起承担气泡原本的入口作用, 显隐条件与气泡完全一致.
-    val watchTogether = LocalWatchTogetherEntry.current
-    if (watchTogether.enabled) {
-        add(
-            TvNavRailItem(
-                icon = Icons.Rounded.SyncAlt,
-                label = stringResource(Lang.watch_together_title),
-                keepFocusOnClick = true,
-                onClick = { watchTogether.open() },
-            ),
-        )
-    }
-    // "正在播放": 退出播放页后播放会话仍留在后台 (见 AniUiBehavior.retainPlaybackSession),
-    // 这颗图标是回去的唯一入口, 长按可结束会话 —— 没有这个出口的话它会一直占着解码器与缓冲.
+    // 这里曾经还有一颗"一起看", 2026-08-17 挪进长按返回的动作面板 (与播放器胶囊行末尾那颗一起
+    // 承担悬浮气泡原本的入口作用). 侧边栏那颗的路径是"按左 + 一路往下按到最底", 而面板是一个
+    // 手势就到; 播放器内够不到面板, 但那里本来就有胶囊行那颗.
     //
-    // 放在整列**最后**: 会话来去是动态的, 夹在中间会让其余条目的位置随之上下移动 (遥控器上
-    // 位置就是肌肉记忆), 而且不能放头像那一簇上方 —— 头像聚焦时本来就会在其上方浮出动作按钮.
-    val playback = LocalPlaybackSessionEntry.current
-    val playbackNavigator = LocalNavigator.current
-    playback.session?.let { retained ->
-        add(
-            TvNavRailItem(
-                icon = Icons.Rounded.PlayCircle,
-                label = stringResource(Lang.playback_session_now_playing),
-                onClick = {
-                    // force: 这不是"去开另一集", 而是回到**已经在播的这一集**, 所以跳过跟随房主时
-                    // 那道导航守卫 (WatchTogetherManager.observeFollowerMode). 那道守卫只在目标与
-                    // 房主已发布的播放位置一字不差时放行 —— 房主还没发布 (还在选源/详情页) 时是
-                    // null, 一律拒绝, 于是跟随者退出播放页后连回自己的会话都被挡住, 提示"跟随房主
-                    // 中, 无法…"却又没有别的出路. 跟随该拦的是"播别的", 不是"回去接着看".
-                    playbackNavigator.navigateEpisodeDetails(
-                        retained.subjectId,
-                        retained.episodeId,
-                        force = true,
-                    )
-                },
-                floatingActions = listOf(
-                    TvRailItemAction(
-                        icon = Icons.Rounded.Close,
-                        label = stringResource(Lang.playback_session_close),
-                        onClick = { playback.close() },
-                    ),
-                ),
-            ),
-        )
-    }
+    // 这里曾经还有一颗"正在播放"(回到 / 关闭后台保留的播放会话), 2026-08-16 删掉.
+    //
+    // 它与长按返回的动作面板功能完全重复, 却是四个入口里最难够到的那个: 为了不让会话来去推动
+    // 其余条目的位置, 它被钉在整列最后 —— 于是路径是"按左 + 往下按到底", 而长按返回是一个手势.
+    // 更要命的是**一个看起来能点的东西会把导航吸过去**: 即使用户记得手势, 也容易慢慢挪过来点它.
+    // 状态显示与两个动作现已一并收进那个面板 (见 TvActionPanelDialog 的会话信息块).
 }
 
 /**
@@ -247,18 +190,16 @@ fun TvNavigationSideRail(
 ) {
     // hasFocus (含子节点): 任一条目聚焦即展开
     var expanded by remember { mutableStateOf(false) }
-    // 两端浮出按钮各自需要的高度: 它们不占布局 (见 TvRailAvatar / TvRailIconItem), 整列纯居中时
-    // 会被屏幕上下边界切掉 —— 条目越多 (一起看 + 正在播放都在场) 整列越高, 居中后头像越靠上,
-    // 上方那簇就露不全. 下方同理 (带浮出动作的条目排在整列最后).
+    // 头像那簇浮出按钮需要的高度: 它们不占布局 (见 TvRailAvatar), 整列纯居中时会被屏幕上边界
+    // 切掉 —— 条目越多整列越高, 居中后头像越靠上, 上方那簇就露不全.
+    //
+    // 下端曾经也要留 (带浮出动作的条目排在整列最后), 随"正在播放"条目一起删了; 再给条目加
+    // 往下长的浮出按钮的话, 这里要把那份预留加回来.
     val topReserve = if (selfInfo != null && avatarActions.isNotEmpty()) {
         floatingActionsStackHeight(avatarActions.size)
     } else {
         0.dp
     }
-    val bottomReserve = (items.maxOfOrNull { it.floatingActions.size } ?: 0)
-        .takeIf { it > 0 }
-        ?.let { floatingActionsStackHeight(it) }
-        ?: 0.dp
     // 垂直居中 (纵向位置由下面的 layout 自己算, 因此这里对齐到顶)
     Box(modifier.fillMaxHeight(), contentAlignment = Alignment.TopStart) {
         AnimatedVisibility(expanded, enter = fadeIn(), exit = fadeOut()) {
@@ -296,20 +237,19 @@ fun TvNavigationSideRail(
         val itemAnchors = items.map { itemAnchorCache.getOrPut(it.label) { FocusRequester() } }
         Column(
             Modifier
-                // 居中, 但两端给浮出按钮留够高度: 居中位置放不下时整列往里让, 让到还是放不下
-                // (屏幕太矮 / 条目太多) 就优先保上方 —— 头像那簇是三颗, 下方通常只有一颗.
+                // 居中, 但上端给头像那簇浮出按钮留够高度: 居中位置放不下时整列往下让, 让到还是
+                // 放不下 (屏幕太矮 / 条目太多) 就贴着预留位置.
                 // 在测量阶段一次算完, 不读位置状态, 因此没有"改位置→再测量"的回路.
                 .layout { measurable, constraints ->
                     val placeable = measurable.measure(constraints)
                     val top = topReserve.roundToPx()
-                    val bottom = bottomReserve.roundToPx()
                     val available = if (constraints.hasBoundedHeight) {
                         constraints.maxHeight
                     } else {
-                        placeable.height + top + bottom
+                        placeable.height + top
                     }
                     val centered = ((available - placeable.height) / 2).coerceAtLeast(0)
-                    val maxY = (available - placeable.height - bottom).coerceAtLeast(0)
+                    val maxY = (available - placeable.height).coerceAtLeast(0)
                     val y = if (maxY < top) top else centered.coerceIn(top, maxY)
                     layout(placeable.width, placeable.height) { placeable.place(0, y) }
                 }
@@ -352,7 +292,6 @@ fun TvNavigationSideRail(
                         item.focusRequester
                     },
                     keepFocusOnClick = item.keepFocusOnClick,
-                    floatingActions = item.floatingActions,
                     onClick = item.onClick,
                     anchor = itemAnchors[index],
                     // 本条目带着焦点消失时交给上一个条目; 它是第一个就交给默认落点 (再没有就
@@ -437,7 +376,7 @@ private fun TvRailAvatar(
     )
     Box(modifier.onFocusChanged { clusterFocused = it.hasFocus }) {
         // 头像在整列最上, 只能往上长
-        TvRailFloatingActionCluster(clusterFocused, avatarActions, above = true, onExitFocus = onExitFocus)
+        TvRailFloatingActionCluster(clusterFocused, avatarActions, onExitFocus = onExitFocus)
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -536,7 +475,6 @@ private fun TvRailIconItem(
     onExitFocus: (() -> Unit)?,
     focusRequester: FocusRequester?,
     keepFocusOnClick: Boolean,
-    floatingActions: List<TvRailItemAction>,
     onClick: () -> Unit,
     /** 本条目自己的落点, 供下一个条目在消失时把焦点交回来 (见 [fallbackFocus]). */
     anchor: FocusRequester,
@@ -545,7 +483,7 @@ private fun TvRailIconItem(
     modifier: Modifier = Modifier,
 ) {
     var focused by remember { mutableStateOf(false) }
-    // 本簇 (条目 + 下方浮现的动作按钮) 任一有焦点: 决定那些按钮在不在场
+    // 本条目 (含子节点) 有没有焦点 —— 只用于下面那条"带着焦点消失时交接"的判断
     var clusterFocused by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
     // 条目会来去 ("正在播放"被自己的关闭按钮关掉, "一起看"退出房间, 会话在后台结束…), 而焦点
@@ -603,31 +541,25 @@ private fun TvRailIconItem(
                 )
             }
         }
-        // 带动作的条目排在整列最下, 只能往下长
-        TvRailFloatingActionCluster(clusterFocused, floatingActions, above = false, onExitFocus = onExitFocus)
     }
 }
 
 /**
- * **一簇浮出按钮**: 焦点进入所属簇时从锚点 (头像 / 条目) 的一侧浮现, 离开即隐藏.
+ * **头像的那簇浮出按钮**: 焦点进入头像簇时从头像上方浮现, 离开即隐藏.
  *
- * 头像那簇往上长、条目那簇往下长, 除此之外完全一样 —— 原本是两段各写一遍的
- * `AnimatedVisibility + layout(0,0) + Column`, 而它们的高度还要与 [floatingActionsStackHeight]
- * 手工对齐 (那里的 KDoc 写着"改那边要改这里"). 现在排布与高度算法都只有一份, 对不上不再可能.
+ * 曾经条目也有一簇往下长的 (给"正在播放"的关闭用), 所以这里带过一个 `above` 参数; 那个条目
+ * 2026-08-16 删掉之后只剩往上长这一种, 参数一并去掉 —— 再要往下长的话, 除了在这里加回方向,
+ * 还要把整列的**下端预留**加回去 (见 topReserve 附近的注释).
  *
  * ## 为什么要 `layout(0, 0)`
  *
- * 按钮**不能占布局**: 占了会撑高所属簇, 让垂直居中的整栏重新居中, 表现为头像莫名上移.
- * 所以测量后一律向父级上报 0 尺寸, 再把内容摆到锚点外侧 —— 往上长时 `y = -自身高度`,
- * 往下长时对齐到下缘的零尺寸盒子原点就在锚点下缘, 按 `y = 0` 摆即可.
- *
- * @param above true = 长在锚点上方 (头像). false = 下方 (条目).
+ * 按钮**不能占布局**: 占了会撑高头像簇, 让垂直居中的整栏重新居中, 表现为头像莫名上移.
+ * 所以测量后一律向父级上报 0 尺寸, 再把内容摆到头像上方 (`y = -自身高度`).
  */
 @Composable
 private fun BoxScope.TvRailFloatingActionCluster(
     visible: Boolean,
-    actions: List<TvRailItemAction>,
-    above: Boolean,
+    actions: List<TvRailAvatarAction>,
     onExitFocus: (() -> Unit)?,
 ) {
     if (actions.isEmpty()) return
@@ -636,19 +568,15 @@ private fun BoxScope.TvRailFloatingActionCluster(
         enter = fadeIn(),
         exit = fadeOut(),
         modifier = Modifier
-            .align(if (above) Alignment.TopStart else Alignment.BottomStart)
+            .align(Alignment.TopStart)
             .layout { measurable, constraints ->
                 val placeable = measurable.measure(constraints)
-                layout(0, 0) { placeable.place(0, if (above) -placeable.height else 0) }
+                layout(0, 0) { placeable.place(0, -placeable.height) }
             },
     ) {
         Column(
-            // 与锚点之间的间距挂在朝向锚点的那一侧
-            if (above) {
-                Modifier.padding(bottom = TV_RAIL_FLOATING_ACTION_SPACING)
-            } else {
-                Modifier.padding(top = TV_RAIL_FLOATING_ACTION_SPACING)
-            },
+            // 与头像之间的间距挂在朝向它的那一侧
+            Modifier.padding(bottom = TV_RAIL_FLOATING_ACTION_SPACING),
             verticalArrangement = Arrangement.spacedBy(TV_RAIL_FLOATING_ACTION_SPACING),
         ) {
             for (action in actions) {

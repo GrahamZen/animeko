@@ -50,8 +50,10 @@ const val LONG_PRESS_KEY_DOWN_COUNT = 2
  * 也给带 `readyToFire` 闸门的调用方一个确定的下限 (闸门只推迟触发, 不重新计时).
  *
  * 略小于系统首个连发的间隔: 免得在连发首发偏早的设备上把正常长按推迟到第二发.
+ *
+ * internal: 返回键长按 ([TvBackLongPressHost]) 与本文件同一套判定参数.
  */
-private val LONG_PRESS_MIN_HOLD = 350.milliseconds
+internal val LONG_PRESS_MIN_HOLD = 350.milliseconds
 
 /** 确认键: 遥控器 OK / 键盘回车. */
 val TV_CONFIRM_KEYS = setOf(Key.DirectionCenter, Key.Enter, Key.NumPadEnter)

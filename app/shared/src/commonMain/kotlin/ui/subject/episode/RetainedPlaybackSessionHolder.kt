@@ -31,13 +31,16 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import me.him188.ani.app.domain.player.VideoLoadingState
 import me.him188.ani.app.ui.foundation.playback.LocalPlaybackSessionEntry
+import me.him188.ani.app.ui.foundation.playback.PlaybackProgress
 import me.him188.ani.app.ui.foundation.playback.PlaybackSessionEntry
+import me.him188.ani.app.ui.foundation.playback.PlaybackSessionStatus
 import me.him188.ani.app.ui.foundation.playback.RetainedPlaybackSessionInfo
 import me.him188.ani.app.ui.mediaselect.summary.MediaSelectorSummary
 import me.him188.ani.utils.logging.info
@@ -155,6 +158,18 @@ class RetainedPlaybackSessionHolder : ViewModel(), PlaybackSessionEntry {
 
     override val session: RetainedPlaybackSessionInfo? get() = currentSession?.info
 
+    /**
+     * 见 [PlaybackProgress]. 由 [guard] 每秒更新一次, 只有动作面板在读.
+     */
+    override var progress: PlaybackProgress? by mutableStateOf(null)
+        private set
+
+    /**
+     * 见 [PlaybackSessionStatus]. 由 [guard] 第 7 条维护.
+     */
+    override var status: PlaybackSessionStatus? by mutableStateOf(null)
+        private set
+
     /** 播放页此刻是否在前台. 由导航状态驱动 ([setPlayerPageVisible]). */
     private val playerPageVisible = MutableStateFlow(true)
 
@@ -194,15 +209,16 @@ class RetainedPlaybackSessionHolder : ViewModel(), PlaybackSessionEntry {
      * 调用方必须把结果 remember 住: 同一个页面每次重组都要拿到同一个 [Session], 见 [Session].
      */
     fun openSession(subjectId: Int, episodeId: Int): Session {
-        val wanted = RetainedPlaybackSessionInfo(subjectId, episodeId)
-        sessions.firstOrNull { it.info == wanted }?.let { existing ->
+        // 只比身份字段: info 上还挂着随条目信息补上的展示字段 (剧名/封面/集号), 拿刚构造的
+        // 空壳整体 == 必然不等 -> 每次回播放页都会把热好的会话销毁重建. 见 RetainedPlaybackSessionInfo
+        sessions.firstOrNull { it.info.isSameEpisodeAs(subjectId, episodeId) }?.let { existing ->
             makeCurrent(existing)
             return existing
         }
         // 先销后建: 界面还在场的会话不能动 (它的页面会拿着已 release 的播放器继续渲染),
         // 其余的一律清掉, 不让两个播放器同时占着解码器
         sessions.filter { it !in composedSessions }.forEach { destroy(it) }
-        return Session(wanted).also {
+        return Session(RetainedPlaybackSessionInfo(subjectId, episodeId)).also {
             sessions += it
             makeCurrent(it)
         }
@@ -254,6 +270,12 @@ class RetainedPlaybackSessionHolder : ViewModel(), PlaybackSessionEntry {
         guardedVm = vm
         // 攒着的提示是上一个会话的, 换了会话就作废
         pendingNotice = null
+        // 进度同理: 留着的话换会话那一瞬间面板会显示上一集的进度条
+        progress = null
+        // 新会话的初值就是"在准备": 第 7 条要等 debounce 才发第一个值, 那段时间面板不该还写着
+        // 上一个会话的状态 (更不该是空的 —— 那一行会空掉半秒)
+        status = vm?.let { PlaybackSessionStatus.Preparing }
+        logger.info { "Guarded session changed: vm=${vm?.let { "ep${currentSession?.info?.episodeId}" } ?: "none"}" }
         guardJob = vm?.let { viewModelScope.launch { guard(it) } }
     }
 
@@ -466,19 +488,80 @@ class RetainedPlaybackSessionHolder : ViewModel(), PlaybackSessionEntry {
         //    代价是换集后要等条目信息加载出来才更新 —— 在那之前 pageState 是 placeholder
         //    (episodeId = -1), 这里跳过, 会话暂时还记着上一集. 那段时间用户正在播放页上, 不会
         //    从入口回来, 影响有限.
+        //
+        //    展示字段 (剧名/封面/集号) 顺着同一条流取: 入口面板要显示"后台在播什么", 而这些值
+        //    此刻就在内存里, 不产生任何额外请求 (见 RetainedPlaybackSessionInfo).
         launch {
             vm.pageState
-                .map { it?.episodePresentation?.episodeId ?: -1 }
-                .filter { it > 0 }
+                .map { state ->
+                    val ep = state?.episodePresentation?.takeIf { it.episodeId > 0 }
+                        ?: return@map null
+                    // subjectId 不从这里取: 播放器内换集不会换条目, 而 subjectPresentation 在
+                    // 条目信息到达前是 placeholder (info = SubjectInfo.Empty), 取到的会是 0
+                    Triple(ep.episodeId, ep.sort, state.subjectPresentation)
+                }
+                .filterNotNull()
                 .distinctUntilChanged()
-                .collect { episodeId -> onEpisodeSwitched(vm, episodeId) }
+                .collect { (episodeId, sort, subject) ->
+                    onSessionInfoUpdated(vm, episodeId, sort, subject)
+                }
+        }
+
+        // 6. 播放进度: 动作面板要显示"看到哪儿了". 读的是播放器自己维护的 StateFlow, 不是去调
+        //    ExoPlayer 的方法 (那必须在主线程, 见 PlaybackSpeedExtension 的教训); 本作用域是
+        //    viewModelScope, 本来就在主线程上.
+        //
+        //    取整到秒 + distinctUntilChanged: 位置每 100ms 变一次, 面板上只显示到秒, 没必要
+        //    一秒失效十次. 会话在后台是暂停的, 所以实际几乎不发射.
+        launch {
+            combine(
+                vm.player.currentPositionMillis.map { it / 1000 }.distinctUntilChanged(),
+                vm.player.mediaProperties.map { it?.durationMillis ?: 0L }.distinctUntilChanged(),
+            ) { seconds, duration -> PlaybackProgress(seconds * 1000, duration) }
+                .collect { progress = it }
+        }
+
+        // 7. 面板要显示的**状态**. 判据与第 3/4 条同源 (见 statusOf), 区别在于:
+        //    - 是状态不是事件: 前台后台一律更新, 不管 playerPageVisible;
+        //    - Ready/Buffering/Preparing 这些"没出问题"的中间态也要有值 —— 用户打开面板正是想
+        //      知道"进行到哪了", 只在出事时才有话说等于没做.
+        //
+        //    debounce 的理由与第 4 条一样 (自动换源必然路过 Failed), 只是短得多: 这里不打扰用户,
+        //    晚两秒说实话比闪一下"加载失败"好, 但也不该像提示那样压六秒才更新.
+        launch {
+            combine(
+                vm.videoStatisticsFlow.map { it.videoLoadingState }.distinctUntilChanged(),
+                vm.player.state,
+                vm.pageState.map { selectionProblemOf(it) }.distinctUntilChanged(),
+            ) { loading, playerState, selection -> statusOf(loading, playerState, selection) }
+                .distinctUntilChanged()
+                .debounce(STATUS_SETTLE_DELAY)
+                .collect {
+                    // 每次变化打一行: 面板上"这行字与播放页里写的不是一回事"这类问题, 事后完全
+                    // 无法从日志还原 —— 分不清是这条没跑、判据算错, 还是界面没读到 (与上面
+                    // notify 里那条日志同一个理由). 状态变化很少, 不吵
+                    logger.info { "Session status -> $it" }
+                    status = it
+                }
         }
     }
 
-    private fun onEpisodeSwitched(vm: EpisodeViewModel, episodeId: Int) {
+    private fun onSessionInfoUpdated(
+        vm: EpisodeViewModel,
+        episodeId: Int,
+        episodeSort: String,
+        subject: SubjectPresentation,
+    ) {
         val session = sessions.firstOrNull { it.vm === vm } ?: return
-        if (session.info.episodeId == episodeId) return
-        session.info = session.info.copy(episodeId = episodeId)
+        val updated = session.info.copy(
+            episodeId = episodeId,
+            episodeSort = episodeSort,
+            // placeholder 期间别把已有的剧名/封面覆盖成空
+            subjectTitle = subject.title.takeIf { !subject.isPlaceholder } ?: session.info.subjectTitle,
+            coverUrl = subject.info.imageLarge.ifBlank { session.info.coverUrl },
+        )
+        if (session.info == updated) return
+        session.info = updated
     }
 
     private companion object {
@@ -486,6 +569,9 @@ class RetainedPlaybackSessionHolder : ViewModel(), PlaybackSessionEntry {
 
         /** 问题状态要持续这么久才提示, 见 [guard] 第 4 条. */
         private val PROBLEM_SETTLE_DELAY = 6.seconds
+
+        /** 面板上那行状态要稳定这么久才更新, 见 [guard] 第 7 条. */
+        private val STATUS_SETTLE_DELAY = 2.seconds
 
         /** 解析成功后最多等这么久的"真的开播", 到点仍然提示就绪, 见 [guard] 第 3 条. */
         private val PLAYBACK_START_WAIT = 25.seconds
@@ -525,6 +611,42 @@ private fun selectionProblemOf(state: EpisodePageState?): SelectionProblem {
     if (results.list.isEmpty() || results.anyLoading) return SelectionProblem.None
     return if (results.list.any { it.totalCount > 0 }) SelectionProblem.NeedsManualSelection
     else SelectionProblem.NoMedia
+}
+
+/**
+ * 面板那行状态. 与 [problemOf] 同一套判据 (出了问题先说问题), 只是把"没出问题"的那几步也分了
+ * 出来 —— 那正是这行字的用处.
+ *
+ * **播放器状态 ([playerState]) 只在 [VideoLoadingState.Succeed] 之后才作数**, 这是本函数唯一的
+ * 讲究处: 播放器实例是**跨换集/换源复用**的 (保留会话的整个前提), 所以在新的播放地址交给它之前,
+ * `mediaStatus` 报的还是**上一集**那次的 `Ready`. 按它判断的话, "换完集正在解析下一集"会被写成
+ * "正在播放" —— 面板上说在播, 点进去播放页写着"正在解析资源链接", 正是 2026-08-16 实测到的那个
+ * 不一致. 第 3 条等就绪时先 `filterIsInstance<Succeed>` 再看播放器, 是同一个道理.
+ */
+private fun statusOf(
+    loading: VideoLoadingState,
+    playerState: PlayerState,
+    selection: SelectionProblem,
+): PlaybackSessionStatus = when {
+    // Cancelled 不是问题: 它是"换源"的中间态, 紧接着就会重新开始解析 (与 problemOf 同)
+    loading is VideoLoadingState.Failed && loading != VideoLoadingState.Cancelled ->
+        PlaybackSessionStatus.LoadFailed(loading)
+
+    selection == SelectionProblem.NeedsManualSelection -> PlaybackSessionStatus.NeedsSelection
+    selection == SelectionProblem.NoMedia -> PlaybackSessionStatus.NoMedia
+
+    // 地址已经交给播放器: 这时候播放器说的才是这一集的事
+    loading is VideoLoadingState.Succeed -> when {
+        playerState.mediaStatus is MediaStatus.Error -> PlaybackSessionStatus.PlayerError
+        // 与第 3 条的"就绪"同一个判据: 媒体开好了且当前位置不缺数据. 不含 playWhenReady ——
+        // 后台会话是被按住暂停的, 要求时钟在走的话永远到不了这一档
+        playerState.mediaStatus == MediaStatus.Ready && !playerState.isBuffering ->
+            PlaybackSessionStatus.Ready
+        // 取容器头 / 建解码器 / 缓冲首帧, 以及播放中途的重新缓冲
+        else -> PlaybackSessionStatus.Buffering
+    }
+
+    else -> PlaybackSessionStatus.Preparing
 }
 
 private fun problemOf(

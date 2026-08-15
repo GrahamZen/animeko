@@ -31,7 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import me.him188.ani.app.ui.foundation.dialogs.DialogWindowDimAmount
-import me.him188.ani.app.ui.foundation.tvPlayPauseKey
+import me.him188.ani.app.ui.foundation.tvOverlayWindowKeys
 
 /**
  * 半透明居中大面板弹窗: 按窗口比例定尺寸, 下层内容 (视频画面 / 页面) 经系统遮罩隐约透出.
@@ -83,7 +83,7 @@ fun AniCenteredPanelDialog(
             Modifier
                 // 盖在播放画面上时 (播放器的二级页/一起看/详情弹窗) 遥控器播放暂停键照常可用:
                 // Dialog 是独立窗口, 按键到不了播放页的根路由, 得自己接一道. 播放页之外为空操作
-                .tvPlayPauseKey()
+                .tvOverlayWindowKeys(onDismissRequest)
                 .then(
                     if (maxWidth != Dp.Unspecified) {
                         Modifier.widthIn(max = maxWidth).fillMaxWidth()

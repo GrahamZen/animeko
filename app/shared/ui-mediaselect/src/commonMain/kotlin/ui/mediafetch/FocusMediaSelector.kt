@@ -61,6 +61,7 @@ import androidx.compose.material.icons.outlined.HorizontalRule
 import me.him188.ani.app.domain.media.selector.UnsafeOriginalMediaAccess
 import me.him188.ani.app.tools.formatDateTime
 import me.him188.ani.app.ui.foundation.LocalAniUiBehavior
+import me.him188.ani.app.ui.foundation.tvOverlayWindowKeys
 import me.him188.ani.app.ui.foundation.focus.resolveFocusRepeatedly
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.cache_unknown
@@ -471,7 +472,9 @@ private fun <T : Any> FilterOptionsGridDialog(
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
         Surface(
-            Modifier.fillMaxWidth(TV_FILTER_DIALOG_WIDTH_FRACTION)
+            // 独立窗口: 把遥控器全局键 (播放/暂停、长按返回) 接回主窗口, 见 tvOverlayWindowKeys
+            Modifier.tvOverlayWindowKeys(onDismissRequest)
+                .fillMaxWidth(TV_FILTER_DIALOG_WIDTH_FRACTION)
                 .heightIn(max = FILTER_DIALOG_MAX_HEIGHT),
             shape = RoundedCornerShape(16.dp),
             color = MaterialTheme.colorScheme.surfaceContainerHigh,

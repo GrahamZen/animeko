@@ -110,7 +110,7 @@ import me.him188.ani.app.ui.foundation.AsyncImage
 import me.him188.ani.app.ui.foundation.rememberAsyncImageRetryState
 import me.him188.ani.app.ui.foundation.rememberTvLongPressKeyState
 import me.him188.ani.app.ui.foundation.tvLongPressKey
-import me.him188.ani.app.ui.foundation.tvPlayPauseKey
+import me.him188.ani.app.ui.foundation.tvOverlayWindowKeys
 import me.him188.ani.app.ui.foundation.focus.TvScrollAnimator
 import me.him188.ani.app.ui.foundation.focus.tvAnchorBringIntoViewSpec
 import me.him188.ani.app.ui.foundation.focus.resolveFocusRepeatedly
@@ -1476,7 +1476,7 @@ fun FocusEpisodeGridDropdown(
         Surface(
             // Popup 是独立窗口, 按键到不了播放页的根路由 —— 播放器选集条长按开的这个网格
             // 盖在画面上, 遥控器播放暂停键仍该管用. 播放页之外为空操作
-            Modifier.tvPlayPauseKey().width(560.dp).heightIn(max = 480.dp),
+            Modifier.tvOverlayWindowKeys(onDismissRequest).width(560.dp).heightIn(max = 480.dp),
             shape = RoundedCornerShape(16.dp),
             // 半透明容器 (详情页所有弹出菜单统一), 隐约透出下层内容
             color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = MENU_CONTAINER_ALPHA),

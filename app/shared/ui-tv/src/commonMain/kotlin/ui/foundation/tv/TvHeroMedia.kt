@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
@@ -45,6 +46,7 @@ import me.him188.ani.app.data.models.episode.EpisodeCollectionInfo
 import me.him188.ani.app.data.models.subject.SubjectCollectionInfo
 import me.him188.ani.app.data.models.subject.SubjectInfo
 import me.him188.ani.app.data.repository.subject.SubjectCollectionRepository
+import me.him188.ani.app.domain.settings.NetworkTroubleBeacon
 import me.him188.ani.app.data.network.BangumiSummaryService
 import me.him188.ani.app.data.network.TmdbImageService
 import me.him188.ani.app.data.network.matchToEpisodes
@@ -302,6 +304,23 @@ object TvHeroPrefetch {
         }
     }
 
+    /**
+     * 跑一次解析链并封顶.
+     *
+     * 异常不外泄: `await()` 的调用方只关心"跑完了", 失败与否看缓存里有没有值.
+     * 硬上限的理由见类文档 —— 挂死的任务不能永远赖在表里.
+     *
+     * **等满上限那一下要亮网络故障信标**: 那正是"用户在浏览时撞上等待超时"的现场, 而他接下来
+     * 打开动作面板多半就是想知道是不是网络的问题 (见 [NetworkTroubleBeacon]). 只认超时而不认
+     * 一般失败: 后者包含"TMDB 上确实没这部作品"之类的正常结果.
+     */
+    private suspend fun runLoadCapped(subjectId: Int, load: suspend () -> Unit) {
+        val result = runCatching { withTimeout(LOAD_TIMEOUT_MILLIS) { load() } }
+        if (result.exceptionOrNull() is TimeoutCancellationException) {
+            NetworkTroubleBeacon.report("tv hero load timed out after ${LOAD_TIMEOUT_MILLIS}ms (subject=$subjectId)")
+        }
+    }
+
     /** 只在 [mutex] 里调用. */
     private fun start(subjectId: Int, promoted: Boolean, load: suspend () -> Unit): Task {
         val flag = MutableStateFlow(promoted)
@@ -317,13 +336,13 @@ object TvHeroPrefetch {
                 // withTimeout 的硬上限见类文档 —— 挂死的任务不能永远赖在表里
                 if (flag.value) {
                     markStarted(subjectId, self) // 开工了, 不再占排队名额, 也可以被合流了
-                    runCatching { withTimeout(LOAD_TIMEOUT_MILLIS) { load() } }
+                    runLoadCapped(subjectId, load)
                 } else {
                     backgroundSlot.withPermit {
                         // 拿到槽再查一次闸门: 排队等槽的这段时间里前台可能已经来了
                         combine(foregroundCount, flag) { fg, p -> p || fg == 0 }.first { it }
                         markStarted(subjectId, self)
-                        runCatching { withTimeout(LOAD_TIMEOUT_MILLIS) { load() } }
+                        runLoadCapped(subjectId, load)
                     }
                 }
                 Unit

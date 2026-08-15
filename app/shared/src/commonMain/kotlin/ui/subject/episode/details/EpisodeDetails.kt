@@ -106,7 +106,7 @@ import me.him188.ani.app.platform.LocalContext
 import me.him188.ani.app.platform.navigation.LocalBrowserNavigator
 import me.him188.ani.app.ui.foundation.LocalAniUiBehavior
 import me.him188.ani.app.ui.foundation.ifThen
-import me.him188.ani.app.ui.foundation.tvPlayPauseKey
+import me.him188.ani.app.ui.foundation.tvOverlayWindowKeys
 import me.him188.ani.app.ui.foundation.ProvideCompositionLocalsForPreview
 import me.him188.ani.app.ui.foundation.widgets.AniBottomSheetDefaults
 import me.him188.ani.app.ui.foundation.widgets.dismissDialogButton
@@ -744,7 +744,7 @@ fun DanmakuTimeShiftDialog( // public: 播放页变体 (遥控器形态) 的弹�
         },
         // 对话框是独立窗口, 按键到不了 TV 播放页的根按键路由 —— 它从播放器的弹幕面板开出来,
         // 画面就在后面放着, 遥控器播放暂停键仍该管用. 播放页之外为空操作
-        modifier = Modifier.tvPlayPauseKey(),
+        modifier = Modifier.tvOverlayWindowKeys(onDismissRequest),
         dismissButton = dismissDialogButton(cancelText, onDismissRequest),
         title = { Text(titleText) },
         text = {

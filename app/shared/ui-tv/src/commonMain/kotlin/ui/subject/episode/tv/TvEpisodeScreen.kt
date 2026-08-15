@@ -44,6 +44,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -83,6 +84,7 @@ import me.him188.ani.app.ui.danmaku.PlayerDanmakuHost
 import me.him188.ani.app.ui.foundation.LocalImageViewerHandler
 import me.him188.ani.app.ui.foundation.LocalTvPlayPauseHandler
 import me.him188.ani.app.ui.foundation.TV_PLAY_PAUSE_KEYS
+import me.him188.ani.app.ui.foundation.TvBackLongPressHandler
 import me.him188.ani.app.ui.foundation.consumeHeldConfirmKey
 import me.him188.ani.app.ui.foundation.animation.AniAnimatedVisibility
 import me.him188.ani.app.ui.foundation.theme.AniTheme
@@ -221,6 +223,26 @@ fun TvEpisodeScreenContent(
     val togglePlayPause: () -> Unit = remember(vm) { { vm.player.togglePlayWhenReady() } }
 
     SideEffect { vm.onUIReady() }
+
+    // 暂停那一刻截一张画面留给动作面板的"正在播放"卡 (见 TvRetainedFrameStore).
+    // 挂在**暂停**上而不是"离开页面"上: 退出播放页必然伴随一次自动暂停 (保留会话的宿主按的),
+    // 那时组合还在、Surface 还活着; 而组合销毁之后就再也取不到画面了.
+    // 手动暂停也顺带更新一张 —— 语义同样是"停在哪儿".
+    //
+    // **必须直接收这条 StateFlow, 不能套 snapshotFlow**: `StateFlow.value` 不是快照状态,
+    // snapshotFlow 里读它不会登记任何依赖 —— 首次发射之后就再也不会重跑, 于是这条永远等不到
+    // 暂停 (2026-08-16 第一版就是这么写的, 表现为退出后缩略图始终是 TMDB 图).
+    LaunchedEffect(vm) {
+        vm.player.state
+            .map { it.playWhenReady }
+            .distinctUntilChanged()
+            .collect { playWhenReady ->
+                if (!playWhenReady) {
+                    val episodeId = vm.pageState.value?.episodePresentation?.episodeId ?: return@collect
+                    TvRetainedFrameStore.capture(vm.player, vm.episodeDetailsState.subjectId, episodeId)
+                }
+            }
+    }
 
     // 预载条目详情 (TMDB 剧照/时长/简介, 详情层内容): 详情层与选集条的增量信息共用同一 loader
     // (有"已加载"守卫, 不会重复请求). 分集列表本身不等它, 见 EpisodeViewModel.episodeListUiStateFlow.
@@ -378,6 +400,38 @@ fun TvEpisodeScreenContent(
             progressSliderState.cancelPreview()
             overlay.hideAll()
         }
+    }
+
+    // 返回键长按: 把盖在画面上的东西一步收干净 (评论弹窗/表情选择器/大图/弹幕输入/面板/
+    // 控制层/内嵌详情层/拖拽预览), 直接回纯视频 —— 这些层分层返回要按好几下, 长按给一条近路.
+    // 纯视频态且无叠层时不认领: 那里返回本来就是退出播放器, 长按保持与短按一致.
+    //
+    // 语义上这属于根路由的一档, 但长按的计数/认领/吞残余由 app 根部的统一跟踪器做 (preview
+    // 阶段祖先先行, 它比本路由先收到事件; 见 TvBackLongPressHost 的 KDoc), 这里只注册
+    // "认领之后做什么". 侧边 sheet / 下拉菜单是独立窗口, 按键到不了本窗口的跟踪器 ——
+    // 它们的返回先关自己那一层, 关掉后再长按才轮到这里 (可接受的分层).
+    TvBackLongPressHandler {
+        // 判据 = "画面上还盖着东西吗", 要**列全**: 少一样就会出现"长按之后还剩一层"的怪状.
+        // 弹幕层与 OP/ED 提示按钮不在此列 —— 前者是内容不是叠层, 后者的存亡只由
+        // PlayerSkipOpEdState 决定 (任何键都按不没它, 见 TvSkipOpEdTipButton)
+        val anythingOpen = imageViewer.viewing.value || overlay.danmakuInputExpanded ||
+                overlay.replyingComment != null || overlay.showPlayerStats ||
+                anySheetVisible || overlay.layer != TvPlayerLayer.HIDDEN
+        if (!anythingOpen) return@TvBackLongPressHandler false
+        overlay.markInteraction()
+        if (imageViewer.viewing.value) imageViewer.clear()
+        // 表情选择器是评论弹窗之上的第二层, 弹窗随 hideAll 整个卸载, 这个标志得单独收 ——
+        // 留着的话下次打开评论弹窗会带着选择器一起冒出来
+        if (vm.commentEditorState.showStickerPanel) vm.commentEditorState.toggleStickerPanelState(false)
+        // 侧边 sheet (数据源/弹幕设置/正则/选集) 是独立窗口: 它自己那层由弹层上的
+        // tvOverlayWindowKeys 关掉, 但那只关**当前这一页** (goBack), 而 sheet 可以嵌套
+        // (弹幕设置 → 正则过滤). 这里连锅端, 免得收干净之后底下还压着上一级
+        if (anySheetVisible) sheetsController.close()
+        overlay.showPlayerStats = false
+        // 刻意不走 overlay.dismissReply(): 它会把焦点还给面板条目, 而面板马上随控制层一起收掉.
+        // replyingComment/弹幕输入由 hideAll() 清, 焦点统一落回根节点 (经 exitScrub 内部)
+        exitScrub(commit = false) // 拖拽预览就地取消 + hideAll
+        true
     }
 
     val rootFocusRequester = remember { FocusRequester() }

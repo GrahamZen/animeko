@@ -16,6 +16,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import me.him188.ani.android.tv.InstallTvPageVariants
 import me.him188.ani.android.tv.TvHomeChannels
+import me.him188.ani.app.navigation.AniNavigator
 import me.him188.ani.app.ui.foundation.AniUiBehavior
 import me.him188.ani.app.ui.tv.TvAniUiBehavior
 import org.koin.android.ext.android.getKoin
@@ -28,9 +29,10 @@ import org.koin.android.ext.android.getKoin
 /** 遥控器设备的界面行为. */
 internal val formFactorUiBehavior: AniUiBehavior get() = TvAniUiBehavior
 
-/** 把遥控器形态的页面实现注入共享页面的变体插槽. */
+/** 把遥控器形态的页面实现注入共享页面的变体插槽. [aniNavigator] 供「长按返回回主页」兜底用. */
 @Composable
-internal fun InstallFormFactorUi(content: @Composable () -> Unit) = InstallTvPageVariants(content)
+internal fun InstallFormFactorUi(aniNavigator: AniNavigator, content: @Composable () -> Unit) =
+    InstallTvPageVariants(aniNavigator, content)
 
 /** 主屏预览频道 (热门动画 / 继续观看): 每进程只跑一次, 延迟到启动高峰之后. */
 internal fun onFormFactorActivityCreated(activity: ComponentActivity) {

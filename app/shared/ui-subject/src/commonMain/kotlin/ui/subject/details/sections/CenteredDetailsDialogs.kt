@@ -57,7 +57,7 @@ import me.him188.ani.app.tools.formatDateTime
 import me.him188.ani.app.ui.comment.UIComment
 import me.him188.ani.app.ui.foundation.avatar.AvatarImage
 import me.him188.ani.app.ui.foundation.ifThen
-import me.him188.ani.app.ui.foundation.tvPlayPauseKey
+import me.him188.ani.app.ui.foundation.tvOverlayWindowKeys
 import me.him188.ani.app.ui.foundation.focus.resolveFocusRepeatedly
 import me.him188.ani.app.ui.rating.FiveRatingStars
 
@@ -98,7 +98,7 @@ internal fun <T : Any> ViewAllGridDialog(
     ) {
         Surface(
             // 独立窗口收不到播放页的根按键路由, 播放器内嵌详情页开的弹窗要自己接播放/暂停键
-            Modifier.tvPlayPauseKey()
+            Modifier.tvOverlayWindowKeys(onDismissRequest)
                 .fillMaxWidth(TV_DETAILS_DIALOG_WIDTH_FRACTION)
                 .fillMaxHeight(TV_DETAILS_DIALOG_HEIGHT_FRACTION),
             shape = RoundedCornerShape(16.dp),

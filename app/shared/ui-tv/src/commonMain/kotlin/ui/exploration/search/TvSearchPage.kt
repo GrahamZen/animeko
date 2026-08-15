@@ -123,6 +123,7 @@ import me.him188.ani.app.domain.search.SubjectSearchQuery
 import me.him188.ani.app.domain.usecase.GlobalKoin
 import me.him188.ani.app.navigation.LocalNavigator
 import me.him188.ani.app.ui.foundation.consumeHeldConfirmKey
+import me.him188.ani.app.ui.foundation.tvOverlayWindowKeys
 import me.him188.ani.app.ui.foundation.ifThen
 import me.him188.ani.app.ui.foundation.navigation.BackHandler
 import me.him188.ani.app.ui.foundation.session.TvNavigationRailDefaults
@@ -1306,7 +1307,9 @@ private fun TvSearchFilterDialog(
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
         Surface(
-            Modifier.fillMaxWidth(TV_SEARCH_FILTER_DIALOG_WIDTH_FRACTION)
+            // 独立窗口: 遥控器全局键接回主窗口 (长按返回一步弹快捷菜单, 见 tvOverlayWindowKeys)
+            Modifier.tvOverlayWindowKeys(onDismiss)
+                .fillMaxWidth(TV_SEARCH_FILTER_DIALOG_WIDTH_FRACTION)
                 .fillMaxHeight(TV_SEARCH_FILTER_DIALOG_HEIGHT_FRACTION),
             shape = RoundedCornerShape(16.dp),
             color = MaterialTheme.colorScheme.surfaceContainerHigh,

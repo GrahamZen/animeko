@@ -181,7 +181,7 @@ class MainActivity : AniComponentActivity() {
                     }
                     Box(rootModifier) {
                         // 本形态特有的页面变体装配 (见各 Local*Variant 插槽)
-                        InstallFormFactorUi {
+                        InstallFormFactorUi(aniNavigator) {
                             AniAppContent(aniNavigator)
                         }
                     }

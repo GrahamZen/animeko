@@ -9,37 +9,118 @@
 
 package me.him188.ani.app.ui.main
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Login
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.PowerSettingsNew
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.SyncAlt
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.intl.Locale
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import me.him188.ani.app.data.network.TmdbImageService
+import me.him188.ani.app.data.network.matchToEpisodes
+import me.him188.ani.app.data.network.newestAiredDateStringOrNull
+import me.him188.ani.app.data.network.tmdbStillCardSizeUrl
+import me.him188.ani.app.data.network.toTmdbLanguage
+import me.him188.ani.app.data.repository.user.SettingsRepository
+import me.him188.ani.app.domain.usecase.GlobalKoin
 import me.him188.ani.app.navigation.AniNavigator
 import me.him188.ani.app.navigation.MainScreenPage
 import me.him188.ani.app.navigation.SettingsTab
+import me.him188.ani.app.ui.foundation.AsyncImage
+import me.him188.ani.app.ui.foundation.FOCUS_REQ_DELAY_MILLIS
+import me.him188.ani.app.ui.foundation.LocalTvBackLongPressHost
+import me.him188.ani.app.ui.foundation.LocalTvPageRefreshHost
+import me.him188.ani.app.ui.foundation.TvPageRefreshHost
+import me.him188.ani.app.ui.foundation.focus.resolveFocusRepeatedly
 import me.him188.ani.app.ui.foundation.navigation.BackHandler
+import me.him188.ani.app.ui.foundation.playback.LocalPlaybackSessionEntry
+import me.him188.ani.app.ui.foundation.playback.PlaybackProgress
+import me.him188.ani.app.ui.foundation.playback.PlaybackSessionEntry
+import me.him188.ani.app.ui.foundation.playback.PlaybackSessionStatus
+import me.him188.ani.app.ui.foundation.playback.RetainedPlaybackSessionInfo
 import me.him188.ani.app.ui.foundation.session.TvNavigationRailDefaults
 import me.him188.ani.app.ui.foundation.session.TvNavigationSideRail
 import me.him188.ani.app.ui.foundation.session.TvRailAvatarAction
 import me.him188.ani.app.ui.foundation.session.buildTvRailItems
 import me.him188.ani.app.ui.foundation.theme.AniThemeDefaults
+import me.him188.ani.app.ui.foundation.theme.LocalThemeSettings
+import me.him188.ani.app.ui.foundation.theme.glassContainerColor
+import me.him188.ani.app.ui.foundation.tv.TV_CAPSULE_SIZE_LARGE
+import me.him188.ani.app.ui.foundation.tv.TV_ICON_GLYPH_SIZE_LARGE
+import me.him188.ani.app.ui.foundation.tv.TvCapsuleButton
+import me.him188.ani.app.ui.foundation.tv.TvHeroMediaCache
+import me.him188.ani.app.ui.foundation.watchtogether.LocalWatchTogetherEntry
+import me.him188.ani.app.ui.foundation.watchtogether.WatchTogetherEntryState
+import me.him188.ani.app.ui.foundation.widgets.LocalToaster
+import me.him188.ani.app.ui.foundation.widgets.centeredPanelColor
 import me.him188.ani.app.ui.lang.Lang
+import me.him188.ani.app.ui.lang.exit_app_back_to_playback
+import me.him188.ani.app.ui.lang.exit_app_close_playback
+import me.him188.ani.app.ui.lang.exit_app_title
+import me.him188.ani.app.ui.lang.playback_history_episode_label
 import me.him188.ani.app.ui.lang.playback_history_title
 import me.him188.ani.app.ui.lang.settings_account_popup_edit_profile
 import me.him188.ani.app.ui.lang.settings_account_popup_login_register
 import me.him188.ani.app.ui.lang.settings_account_popup_logout
+import me.him188.ani.app.ui.lang.tv_force_refresh_toast
+import me.him188.ani.app.ui.lang.tv_quick_menu_home
+import me.him188.ani.app.ui.lang.tv_quick_menu_refresh
+import me.him188.ani.app.ui.lang.tv_service_check_hint
+import me.him188.ani.app.ui.lang.watch_together_title
+import me.him188.ani.app.ui.subject.episode.PlaybackSessionStatusSeverity
+import me.him188.ani.app.ui.subject.episode.playbackSessionStatusText
+import me.him188.ani.app.ui.subject.episode.tv.TvRetainedFrameStore
 import me.him188.ani.app.ui.user.SelfInfoUiState
 import org.jetbrains.compose.resources.stringResource
 
@@ -58,6 +139,8 @@ fun TvMainScreenLayout(
     onNavigateToSettings: (tab: SettingsTab?) -> Unit,
     onNavigateToSearch: () -> Unit,
     onLogout: () -> Unit,
+    /** 真正退出应用 (Android 侧 = AppTerminator: 收掉 torrent 服务再退进程), 由装配处注入. */
+    onExitApp: () -> Unit,
     modifier: Modifier = Modifier,
     pageContent: @Composable () -> Unit,
 ) {
@@ -68,9 +151,42 @@ fun TvMainScreenLayout(
     // 里主动按左键进入. 切页/丢焦点不在此单独补丁: 侧边栏点击后 clearFocus, 由 AniAppContent
     // 的全局兜底反复 requestFocus, 经此处 onEnter 稳定落进内容区.
     val contentFocus = remember { FocusRequester() }
-    // TV 返回键: 只有探索页可直接退出; 收藏/缓存等其它页按返回统一回到探索页
+    // TV 返回键: 收藏/缓存等其它页按返回统一回到探索页; 探索页上的"最后一次返回"默认不直接
+    // 退出, 改为弹退出确认 (参考 Prime Video; 可在设置-界面里关掉, 关掉后本处理器不启用 ->
+    // 返回穿到系统, 就是老的"直接退出"). 只有焦点在 hero 按钮行时才走得到这里 —— 卡片区的
+    // 返回被探索页自己的分层 BackHandler 拦下 (注册更深, 优先), 侧边栏把返回消费成回内容区
+    var showExitDialog by remember { mutableStateOf(false) }
+    val exitConfirmation = LocalThemeSettings.current.tvExitConfirmation
     BackHandler(enabled = page != MainScreenPage.Exploration) {
         onNavigateToPage(MainScreenPage.Exploration)
+    }
+    BackHandler(enabled = page == MainScreenPage.Exploration && exitConfirmation) {
+        showExitDialog = true
+    }
+    if (showExitDialog) {
+        TvExitAppDialog(
+            navigator = navigator,
+            onDismissRequest = { showExitDialog = false },
+            onExitApp = onExitApp,
+        )
+    }
+    // 「回到主界面」(快捷菜单发起, 见 TvQuickActionMenu) 的主壳篇: 看到回主页标志而当前
+    // 不在探索 tab, 就补一步切过去 —— 从独立目的地回来时 pop 落回的 Main 停在离开时的 tab 上
+    // (popBackOrNavigateToMain 只管 pop, 不换 tab); 在 Main 的收藏/缓存页里点「回到主界面」
+    // 更是没有任何 pop, 全靠这里. 标志本身不在这里清, 它的消费者是探索页 (拿去聚焦轮播主按钮).
+    // 必须 snapshotFlow 盯标志而不是 LaunchedEffect(page): 后者只在换 tab 时重跑, 而"在
+    // 收藏页打开菜单点回主页"整个过程 page 根本没变过, 标志置位时不会有人看它
+    val backLongPressHost = LocalTvBackLongPressHost.current
+    val currentPage by rememberUpdatedState(page)
+    val currentOnNavigateToPage by rememberUpdatedState(onNavigateToPage)
+    if (backLongPressHost != null) {
+        LaunchedEffect(backLongPressHost) {
+            snapshotFlow { backLongPressHost.pendingHomeFocus }.collect { pending ->
+                if (pending && currentPage != MainScreenPage.Exploration) {
+                    currentOnNavigateToPage(MainScreenPage.Exploration)
+                }
+            }
+        }
     }
     Box(
         // 全屏背景由本外层 Box 统一绘制, 主壳内各页 (探索/收藏/缓存) 在 TV 上把自身 Scaffold
@@ -144,3 +260,703 @@ fun TvMainScreenLayout(
         )
     }
 }
+
+/**
+ * 退出确认弹窗 —— 与长按返回的快捷菜单是**同一个面板** ([TvActionPanelDialog]).
+ *
+ * 两者只差两点: 本弹窗不出「回到主界面」(它只在探索页 hero 上弹得出来, 那时按它是空操作),
+ * 初始焦点落「退出应用」(保住加确认框之前"返回 + 确定 = 退出"的手感 —— 确认框防的是**单次
+ * 误按返回**, 而乱按返回只会关掉面板).
+ *
+ * 面板长得一样而默认焦点不同, 唯一的风险是"用惯快捷菜单的人条件反射按确定"; 「退出应用」
+ * 因此是全面板仅有的两处错误色之一, 焦点落在一颗明显不同的按钮上本身就是提示.
+ */
+@Composable
+private fun TvExitAppDialog(
+    navigator: AniNavigator,
+    onDismissRequest: () -> Unit,
+    onExitApp: () -> Unit,
+) {
+    TvActionPanelDialog(
+        navigator = navigator,
+        playback = LocalPlaybackSessionEntry.current,
+        refreshHost = LocalTvPageRefreshHost.current,
+        watchTogether = LocalWatchTogetherEntry.current,
+        // 退出确认里不出服务连通那一行: 这个弹窗只回答"要不要退出", 多一行状态就是多一个
+        // 让人停下来读的东西, 而它与该不该退出没有关系
+        connectivity = null,
+        onGoHome = null,
+        onExitApp = onExitApp,
+        onDismissRequest = onDismissRequest,
+        defaultFocus = TvActionPanelDefaultFocus.EXIT,
+    )
+}
+
+/**
+ * 长按返回弹出的快捷菜单 (播放器之外全局同一个, 由应用根部组合, 见 TvPageVariants).
+ *
+ * 与退出确认弹窗共用 [TvActionPanelDialog]; 本入口多一颗「回到主界面」, 初始焦点落它.
+ *
+ * @param onGoHome 回到主界面: pop 到 Main + 置 pendingHomeFocus, 由调用方 (根部) 实现 ——
+ *   切 tab 与聚焦轮播主按钮分别由主壳和探索页看着标志接力完成.
+ * @param refreshHost 当前页注册的强制刷新动作 (没人注册就不显示「刷新本页」).
+ * @param watchTogether 「一起看」入口把手; 本入口由调用方传进来而不是读
+ *   [LocalWatchTogetherEntry] —— 本菜单组合在 AniAppContent **外面**, 那个 CompositionLocal
+ *   在这里读到的是默认空实例 (见 [WatchTogetherEntryState]).
+ */
+@Composable
+fun TvQuickActionMenu(
+    navigator: AniNavigator,
+    playback: PlaybackSessionEntry,
+    refreshHost: TvPageRefreshHost,
+    watchTogether: WatchTogetherEntryState?,
+    onGoHome: () -> Unit,
+    onExitApp: () -> Unit,
+    onDismissRequest: () -> Unit,
+) {
+    TvActionPanelDialog(
+        navigator = navigator,
+        playback = playback,
+        refreshHost = refreshHost,
+        watchTogether = watchTogether,
+        // 在这里 (而不是根部) 建: 本菜单只在打开的那一瞬间被组合, 所以整个探测子系统在用户第一次
+        // 长按返回之前根本不存在 —— 挂在根部就等于每次冷启动都多跑五个请求
+        connectivity = viewModel { TvServiceConnectivityState() },
+        onGoHome = onGoHome,
+        onExitApp = onExitApp,
+        onDismissRequest = onDismissRequest,
+        defaultFocus = TvActionPanelDefaultFocus.FIRST,
+    )
+}
+
+/** [TvActionPanelDialog] 打开时焦点落哪一颗. */
+private enum class TvActionPanelDefaultFocus { FIRST, EXIT }
+
+/**
+ * **全局动作面板**: 上面一张"正在播放"卡, 下面一排圆钮, 再下面一行固定标签.
+ * 条目按上下文出现, **每一颗按下去都关面板**.
+ *
+ * ## 为什么是这个形状
+ *
+ * 按**作用对象**分两层: 卡片管这个会话 (整块按下去 = 回去接着看, 右端 = 关掉它),
+ * 圆钮那排管整个应用 (回主页 / 刷新 / 退出). 原先是"小封面 + 五条全宽按钮"的一列, 毛病不在
+ * 封面小, 而在**媒体块与操作块视觉上互不属于彼此** —— 把媒体做成操作本身, 这个问题就没有了,
+ * 面板也从 380×393 的竖条变成 460×232 的横条, 更像电视上的控制条而不是手机上的菜单.
+ *
+ * 顶上这块同时让面板变成**状态显示**: 忘了自己有没有开着播放, 长按一次返回就知道
+ * (没有卡片 = 没有会话). 这是刻意不再往各页面散布提示与入口的选择 —— 遥控器上要记的特殊操作
+ * 已经不少, 与其到处加一句话, 不如让一个面板既是入口又是状态.
+ *
+ * ## 焦点
+ *
+ * 只有上下 + 卡片内一次左右, 没有网格. 默认焦点**恒定**落圆钮那排的第一颗 (或退出变体的最后
+ * 一颗), 不随有没有会话变化 —— 否则"长按返回 + 确定"这组按键会因为一个用户看不见的状态而做
+ * 两件不同的事, 而遥控器上位置就是肌肉记忆.
+ *
+ * 面板每一颗都关自己, 除了统一之外还避免一件事: 会话按钮会随会话结束从布局里消失, 焦点跟着
+ * 节点没了而面板还开着, 方向键就全失效了.
+ */
+@Composable
+private fun TvActionPanelDialog(
+    navigator: AniNavigator,
+    playback: PlaybackSessionEntry,
+    refreshHost: TvPageRefreshHost?,
+    watchTogether: WatchTogetherEntryState?,
+    connectivity: TvServiceConnectivityState?,
+    onGoHome: (() -> Unit)?,
+    onExitApp: () -> Unit,
+    onDismissRequest: () -> Unit,
+    defaultFocus: TvActionPanelDefaultFocus,
+) {
+    val focusRequester = remember { FocusRequester() }
+    var focusArrived by remember { mutableStateOf(false) }
+    val session = playback.session
+
+    // 圆钮先列出来再渲染: 默认焦点按"第一颗 / 最后一颗"定位, 而哪些颗在场是上下文决定的
+    val actions = buildList {
+        onGoHome?.let { goHome ->
+            add(
+                TvActionPanelAction(Icons.Rounded.Home, stringResource(Lang.tv_quick_menu_home)) {
+                    onDismissRequest()
+                    goHome()
+                },
+            )
+        }
+        // 「一起看」: 只在设置里打开了功能时出现. 原先是侧边栏最底那颗常驻图标, 2026-08-17 挪到
+        // 这里 —— 侧边栏那颗要"按左 + 一路往下", 而这个面板是一个手势就到; 播放器内够不到面板,
+        // 但那里本来就有胶囊行末尾那颗常驻入口, 覆盖不缺.
+        //
+        // 不放第一颗: 默认焦点恒定落第一颗 (见本函数文档), 位置就是肌肉记忆, 新增条目不该把它挪走.
+        watchTogether?.takeIf { it.enabled }?.let { entry ->
+            add(
+                TvActionPanelAction(Icons.Rounded.SyncAlt, stringResource(Lang.watch_together_title)) {
+                    onDismissRequest()
+                    // 面板压在普通页面上 (播放器里长按返回是收叠层, 弹不出本面板), 不是深色背景
+                    entry.open()
+                },
+            )
+        }
+        refreshHost?.current?.let { refresh ->
+            val toast = LocalToaster.current
+            val refreshingText = stringResource(Lang.tv_force_refresh_toast)
+            add(
+                TvActionPanelAction(Icons.Rounded.Refresh, stringResource(Lang.tv_quick_menu_refresh)) {
+                    onDismissRequest()
+                    // 刷新本身可能没有可见变化 (数据没变时界面一模一样), 必须给一句反馈
+                    toast.toast(refreshingText)
+                    refresh()
+                },
+            )
+        }
+        // 退出恒在最后一颗: 下面按 lastIndex 定位默认焦点, 且危险动作不该夹在中间
+        add(
+            TvActionPanelAction(
+                Icons.Rounded.PowerSettingsNew,
+                stringResource(Lang.exit_app_title),
+                danger = true,
+                onClick = onExitApp,
+            ),
+        )
+    }
+    val focusIndex = when (defaultFocus) {
+        TvActionPanelDefaultFocus.FIRST -> 0
+        TvActionPanelDefaultFocus.EXIT -> actions.lastIndex
+    }
+    // 服务连通那一条上只有末尾那颗刷新钮吃焦点, 而它在卡片正下方、圆钮右上方 —— 默认的方向搜索
+    // 会把它当成"卡片↕圆钮"路上的中间站. 下面四条改道把它挪出这条主路: 只能从最后一颗圆钮
+    // **向右**进去, 圆钮与它自己按"上"都回卡片, 卡片按"下"直落圆钮那排.
+    //
+    // 首尾两颗圆钮的落点复用默认焦点那个 requester (焦点索引恒为 0 或 lastIndex), 避免同一个
+    // 节点上挂两个 requester
+    val altFirstCapsule = remember { FocusRequester() }
+    val altLastCapsule = remember { FocusRequester() }
+    val firstCapsuleFocus = if (focusIndex == 0) focusRequester else altFirstCapsule
+    val lastCapsuleFocus = if (focusIndex == actions.lastIndex) focusRequester else altLastCapsule
+    val cardFocus = remember { FocusRequester() }
+    val refreshFocus = remember { FocusRequester() }
+
+    // 标签行显示当前聚焦项的名字. 失焦时**保持上一次的值**而不是清空: 焦点在两个目标之间移动
+    // 时会有一帧谁都没有焦点, 清空就会闪一下
+    var focusedLabel by remember { mutableStateOf(actions.getOrNull(focusIndex)?.label.orEmpty()) }
+    var focusedDanger by remember { mutableStateOf(actions.getOrNull(focusIndex)?.danger == true) }
+
+    // 弹窗是独立窗口, 焦点驱动的界面必须显式请求. 但**光靠这条 effect 会看见焦点跳一次**:
+    // 弹窗一开, 焦点系统先把焦点给到布局顺序里第一个可聚焦项 (有会话时是卡片, 退出变体是第一颗
+    // 圆钮), 300ms 之后这里才把它挪到该去的地方. 旧版是一列按钮、目标恰好就是第一个, 所以看不出来;
+    // 现在目标是圆钮行的第一颗 (卡片在它上面) 或最后一颗 (退出), 那一跳就露出来了.
+    //
+    // 真正的修法是下面 Column 上的 onEnter: 任何"进入本面板"的焦点请求直接改道到目标, 一次到位.
+    // 本 effect 退化成兜底 —— onEnter 那一下若因节点还没附着而失败 (requestFocus 对未附着节点
+    // 静默失败), 仍有人把焦点补上, 不至于整个面板一个焦点都没有.
+    LaunchedEffect(Unit) {
+        delay(FOCUS_REQ_DELAY_MILLIS)
+        resolveFocusRepeatedly(arrived = { focusArrived }) {
+            runCatching { focusRequester.requestFocus() }
+        }
+    }
+
+    Dialog(onDismissRequest = onDismissRequest) {
+        Surface(
+            Modifier.width(TV_ACTION_PANEL_WIDTH),
+            shape = RoundedCornerShape(16.dp),
+            // 与其他 TV 弹窗同一底色 (半透明玻璃), 内容色显式给 —— 半透明底查不到 "on" 色,
+            // 不给会退回 LocalContentColor 的默认纯黑 (见 AniCenteredPanelDialog 的注释)
+            color = centeredPanelColor,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+        ) {
+            Column(
+                Modifier
+                    // 进入本面板的焦点一律改道到默认落点, 不让它先落在布局顺序第一个可聚焦项上
+                    // (见上面那条 effect 的说明). 失败就放行默认进组, 由那条 effect 纠正 ——
+                    // 这里刻意不 cancelFocus(): 那会让面板一个焦点都没有, 方向键全失效.
+                    .focusProperties {
+                        onEnter = { runCatching { focusRequester.requestFocus() } }
+                    }
+                    // onEnter 只在**焦点组**节点上生效
+                    .focusGroup()
+                    .padding(horizontal = 24.dp, vertical = 20.dp),
+            ) {
+                session?.let { retained ->
+                    TvNowPlayingCard(
+                        session = retained,
+                        progress = { playback.progress },
+                        status = { playback.status },
+                        // 按"下"跳过刷新钮直落圆钮那排 (左半→第一颗, 右半的 ✕→最后一颗);
+                        // 左半同时是圆钮与刷新钮按"上"的落点
+                        mainModifier = Modifier
+                            .focusRequester(cardFocus)
+                            .focusProperties { down = firstCapsuleFocus },
+                        closeModifier = Modifier
+                            .focusProperties { down = lastCapsuleFocus },
+                        onResume = {
+                            onDismissRequest()
+                            // force: 回到**已经在播的这一集**, 跳过一起看跟随模式的导航守卫 ——
+                            // 那道守卫只在目标与房主已发布的播放位置一字不差时放行, 跟随者退出
+                            // 播放页后连回自己的会话都会被挡住. 跟随该拦的是"播别的", 不是"回去接着看"
+                            navigator.navigateEpisodeDetails(
+                                retained.subjectId,
+                                retained.episodeId,
+                                force = true,
+                            )
+                        },
+                        onClose = {
+                            onDismissRequest()
+                            playback.close()
+                        },
+                        onFocusLabel = { label, danger ->
+                            focusedLabel = label
+                            focusedDanger = danger
+                        },
+                    )
+                    Spacer(Modifier.height(if (connectivity != null) 12.dp else 18.dp))
+                }
+                // 服务连通那一行在圆钮那排**上面**: 它是状态, 归上半部分 (卡片那一块也是状态);
+                // 圆钮那排是动作, 下面紧跟着的标签行是它的说明 —— 中间插一行会把说明和它说明的
+                // 东西分开. 焦点顺序也因此是 卡片 → 这一行 → 圆钮.
+                connectivity?.let { state ->
+                    val refreshLabel = stringResource(Lang.tv_service_check_hint)
+                    TvServiceConnectivityRow(
+                        state = state,
+                        // 焦点在这里时标签行照样写: 那颗光看图标只知道"刷新", 不知道刷新什么,
+                        // 更不知道还能长按 —— 与圆钮那排是同一条理由 (见标签行的注释)
+                        onFocused = {
+                            focusedLabel = refreshLabel
+                            focusedDanger = false
+                        },
+                        onOpenProxySettings = {
+                            onDismissRequest()
+                            navigator.navigateSettings(SettingsTab.PROXY)
+                        },
+                        refreshFocusRequester = refreshFocus,
+                        refreshFocusProperties = {
+                            // 左/下回圆钮那排 (它就在最后一颗的右上方), 上回卡片
+                            left = lastCapsuleFocus
+                            down = lastCapsuleFocus
+                            if (session != null) up = cardFocus
+                            // 向右到头就停: 它是"圆钮那排最右边一颗", 右边没有下一站.
+                            // 不拦的话默认的方向搜索会往右上方爬到卡片右端那颗 ✕ 上 (那颗有一
+                            // 部分确实在它右边), 长按右键就表现成"按到头忽然跳上去了"
+                            right = FocusRequester.Cancel
+                        },
+                        // 宽度由内容决定 (见那边的注释), 所以要在这里居中
+                        modifier = Modifier.align(Alignment.CenterHorizontally),
+                    )
+                    Spacer(Modifier.height(12.dp))
+                }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(24.dp, Alignment.CenterHorizontally),
+                ) {
+                    actions.forEachIndexed { index, action ->
+                        TvCapsuleButton(
+                            onClick = action.onClick,
+                            icon = { Icon(action.icon, contentDescription = null) },
+                            size = TV_CAPSULE_SIZE_LARGE,
+                            glyphSize = TV_ICON_GLYPH_SIZE_LARGE,
+                            danger = action.danger,
+                            onFocusChanged = { focused ->
+                                if (focused) {
+                                    focusedLabel = action.label
+                                    focusedDanger = action.danger
+                                }
+                            },
+                            modifier = Modifier
+                                .focusProperties {
+                                    // 上恒定回卡片: 卡片是常用目标 (回去接着看), 不能因为中间
+                                    // 多了一条状态就变成两步
+                                    if (session != null) up = cardFocus
+                                    // 刷新钮的唯一入口
+                                    if (connectivity != null && index == actions.lastIndex) {
+                                        right = refreshFocus
+                                    }
+                                }
+                                .then(
+                                    when {
+                                        index == 0 -> Modifier.focusRequester(firstCapsuleFocus)
+                                        index == actions.lastIndex ->
+                                            Modifier.focusRequester(lastCapsuleFocus)
+
+                                        else -> Modifier
+                                    },
+                                )
+                                .then(
+                                    if (index == focusIndex) {
+                                        Modifier.onFocusChanged { focusArrived = it.isFocused }
+                                    } else {
+                                        Modifier
+                                    },
+                                ),
+                        )
+                    }
+                }
+                // 固定一行标签: 圆钮是纯图标, 而「关闭正在播放」「退出应用」两颗光看图标猜不出来
+                // (前者"关掉什么?", 后者容易读成"关电视"), 换成图标就等于把信息从界面上拿走, 这一行
+                // 是把它放回去. 用固定行而不是详情页那种聚焦浮出: 永远只有一个标签, 没有多个标签
+                // 同时淡入淡出的时序问题, 且用户不必先把焦点挪过去才知道这排是干什么的.
+                Text(
+                    focusedLabel,
+                    Modifier.fillMaxWidth().padding(top = 8.dp).height(TV_ACTION_PANEL_LABEL_HEIGHT),
+                    color = if (focusedDanger) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                    textAlign = TextAlign.Center,
+                    style = MaterialTheme.typography.labelLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+private class TvActionPanelAction(
+    val icon: ImageVector,
+    val label: String,
+    val danger: Boolean = false,
+    val onClick: () -> Unit,
+)
+
+/**
+ * **正在播放卡**: 左边一块 16:9 缩略图 + 剧名/集号/时间, 右端一颗关闭; 底缘压一条播放进度线.
+ *
+ * 整块 (除右端那一条) 就是「回到正在播放」这个动作 —— 媒体信息不是按钮上方的附属块, 它**就是**
+ * 那个按钮. 关闭长在卡片右端而不是排进下面那排圆钮, 是因为单独一颗 ✕ 没人知道它关的是什么
+ * (最容易读成"关掉这个面板"); 挪到卡片上之后, 指代对象由位置本身给出.
+ *
+ * **两块的聚焦表现刻意不同**: 主体是**玻璃高亮** (半透明主题色渐亮, 见下), 关闭是错误色实底.
+ * 两种不同处理, 一眼看得出焦点在哪一半. 关闭未聚焦时压到次要色 —— 它是逃生口不是主角, 但
+ * **不能藏起来只在聚焦时出现**: 侧边栏那颗浮出式的关闭按钮刚被删掉, 原因之一就是没有视觉提示
+ * 的东西在遥控器上没人猜得到.
+ *
+ * 主体不用描边: 卡片里有一张图, 描边贴着图边缘显得脏, 而且这块的圆角与内容之间没有卡片那种
+ * 留白 (见 `TvFocusRing.Gap` 的约定 —— 竖版卡是内容常驻内缩一圈才好看). 半透明填充压在图**下面**,
+ * 既不盖住缩略图, 又与面板本身的玻璃底色是同一种材质.
+ *
+ * 顶上那行小字**不是固定的"正在播放"**, 而是会话此刻的状态 (在找源 / 在缓冲 / 需要手选 /
+ * 加载失败……), 出问题时还会变色. 慢的源要十几秒, 中途可能自动换源、最后卡在等手选 —— 用户退出
+ * 播放页正是为了不干等, 那就该让他打开面板的这一刻直接看到进行到哪了, 而不是只能等一声就绪提示,
+ * 或者等一个永远不会来的就绪 (见 [PlaybackSessionStatus]).
+ *
+ * @param progress lambda 而非值: 进度每秒变一次, 收值会把那次读记在调用方 (整个面板) 身上.
+ * @param status 同上; 它变得少 (还压了 2 秒 debounce), 但一样不该让整个面板跟着失效.
+ * @param onFocusLabel 上报给面板的固定标签行.
+ * @param mainModifier 加在左半 (回去接着看) 那块上: 面板用它挂焦点落点与方向改道.
+ * @param closeModifier 同上, 加在右端 ✕ 那块上.
+ */
+@Composable
+private fun TvNowPlayingCard(
+    session: RetainedPlaybackSessionInfo,
+    progress: () -> PlaybackProgress?,
+    status: () -> PlaybackSessionStatus?,
+    onResume: () -> Unit,
+    onClose: () -> Unit,
+    onFocusLabel: (label: String, danger: Boolean) -> Unit,
+    mainModifier: Modifier = Modifier,
+    closeModifier: Modifier = Modifier,
+) {
+    val resumeLabel = stringResource(Lang.exit_app_back_to_playback)
+    val closeLabel = stringResource(Lang.exit_app_close_playback)
+    var mainFocused by remember { mutableStateOf(false) }
+    var closeFocused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(10.dp)
+    // 玻璃高亮: 平时是面板同款的玻璃底 (glassContainerColor), 聚焦时换成半透明主题色 ——
+    // 材质不变只是"亮起来", 而不是加一圈线. 动画让它是渐亮而不是硬切
+    val mainContainer by animateColorAsState(
+        if (mainFocused) {
+            MaterialTheme.colorScheme.primary.copy(alpha = TV_NOW_PLAYING_FOCUSED_ALPHA)
+        } else {
+            glassContainerColor()
+        },
+    )
+    // Box 套 Row: 进度线要横跨整张卡, 所以它是两半的兄弟而不是左半里的孩子.
+    // clip 提到最外层, 两半与进度线一起被同一个圆角裁掉
+    Box(Modifier.fillMaxWidth().clip(shape).height(TV_NOW_PLAYING_CARD_HEIGHT)) {
+        Row(Modifier.fillMaxSize()) {
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .then(mainModifier)
+                    .background(mainContainer)
+                    .onFocusChanged {
+                        mainFocused = it.isFocused
+                        if (it.isFocused) onFocusLabel(resumeLabel, false)
+                    }
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onResume,
+                    ),
+            ) {
+                Row(
+                    Modifier.fillMaxSize().padding(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TvNowPlayingThumbnail(session)
+                    Column(
+                        Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        val statusText = playbackSessionStatusText(status())
+                        Text(
+                            statusText.text,
+                            color = when (statusText.severity) {
+                                // 要用户处理才会继续的那一档单独一个颜色: 它不是错误 (再等也不会好,
+                                // 但也没坏), 用 error 会吓人, 用次要色又会被当成"正在进行中"
+                                PlaybackSessionStatusSeverity.Attention -> MaterialTheme.colorScheme.tertiary
+                                PlaybackSessionStatusSeverity.Error -> MaterialTheme.colorScheme.error
+                                PlaybackSessionStatusSeverity.Normal -> MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (session.subjectTitle.isNotBlank()) {
+                            Text(
+                                session.subjectTitle,
+                                style = MaterialTheme.typography.titleSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        // 进度读在本 lambda 里: 每秒变一次, 只让这一行失效
+                        Text(
+                            buildString {
+                                if (session.episodeSort.isNotBlank()) {
+                                    append(renderEpisodeLabel(session.episodeSort))
+                                }
+                                progress()?.let { p ->
+                                    if (isNotEmpty()) append(" · ")
+                                    append(renderPlaybackTime(p.positionMillis))
+                                    if (p.durationMillis > 0) {
+                                        append(" / ")
+                                        append(renderPlaybackTime(p.durationMillis))
+                                    }
+                                }
+                            },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+            // 关闭那一条: 未聚焦与主体同一块玻璃 (卡片看起来是一整块), 聚焦时错误色实底 ——
+            // 与主体的半透明高亮是两种材质, 焦点在哪一半一眼可辨
+            val closeContainer by animateColorAsState(
+                if (closeFocused) MaterialTheme.colorScheme.error else glassContainerColor(),
+            )
+            Box(
+                Modifier
+                    .width(TV_NOW_PLAYING_CLOSE_WIDTH)
+                    .fillMaxHeight()
+                    .then(closeModifier)
+                    .background(closeContainer)
+                    .onFocusChanged {
+                        closeFocused = it.isFocused
+                        if (it.isFocused) onFocusLabel(closeLabel, true)
+                    }
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onClose,
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Rounded.Close,
+                    contentDescription = closeLabel,
+                    tint = if (closeFocused) {
+                        MaterialTheme.colorScheme.onError
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
+        }
+        // 进度线**横跨整张卡**, 不是只压左半那块的底缘: 右端关闭区是同一张卡的一部分
+        // (同一块玻璃、同一个圆角), 线到左半就断的话, 关闭区那 56dp 露出来的玻璃底比轨道色
+        // 暗, 正好被读成"还没播的部分" —— 一张 74% 的卡看起来像 87%.
+        val bar = progress()
+        if (bar != null && bar.durationMillis > 0) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .height(TV_NOW_PLAYING_BAR_HEIGHT)
+                    // 轨道用半透明而不是 surfaceVariant: 它现在要跨过两种材质 —— 左半的玻璃
+                    // (聚焦时半透明主题色) 与右端关闭区 (聚焦时错误色实底). 不透明的灰在红底上
+                    // 是一道突兀的暗痕, 半透明则始终读作"同一条线压在底下的东西上"
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = TV_NOW_PLAYING_BAR_TRACK_ALPHA)),
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxHeight()
+                        .fillMaxWidth(
+                            (bar.positionMillis.toFloat() / bar.durationMillis).coerceIn(0f, 1f),
+                        )
+                        .background(MaterialTheme.colorScheme.primary),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 卡片左边那块 16:9, 按可得性逐级回退 —— 三档都是 16:9, 所以版式不会因为回退而跳动:
+ *
+ * 1. **最后停在的那一帧** ([TvRetainedFrameStore]): 永远是当前这一集, 而且是"我刚才看的画面缩到
+ *    了这里"的空间连续性. 帧在**暂停那一刻**由播放页截好存着, 不是这里现取 —— 现取要另起一路
+ *    解码器, 后台会话正握着硬解实例, 那是 issue #10 的引信.
+ * 2. **TMDB 单集图**: 那一集自己的剧照.
+ * 3. **整部 backdrop**: 进程内热表同步可读, 且它是进详情页的门控条件, 几乎必然有.
+ *
+ * 兜底的**主题色渐变 + 大号半透明集号不是第四档, 而是一直铺在最底下**的底色, 上面三档谁到位谁盖
+ * 上去. 这样"URL 还没解析出来""图正在下载""图下载失败"三种情况自动都是渐变, 一个状态判断都不用
+ * 写 —— [AsyncImage] 在这里没有 placeholder 也没有 error painter, 加载中和失败都是**什么都不画**,
+ * 底下没东西垫着就是一块空白 (慢网上肉眼可见地空好几秒). 也**不出占位图**: 一张灰底破图片图标会
+ * 让整个面板看起来是坏的, 而渐变加集号看起来像是刻意设计的.
+ *
+ * 用横版而不是竖版封面: 卡片是横的, 竖封面塞进来要么被裁成一条要么把卡片撑高.
+ */
+@Composable
+private fun TvNowPlayingThumbnail(session: RetainedPlaybackSessionInfo) {
+    val tmdb = remember { GlobalKoin.get<TmdbImageService>() }
+    val frame = TvRetainedFrameStore.frameFor(session.subjectId, session.episodeId)
+    val stillUrl = rememberTvPlayingEpisodeStill(session)
+    val imageUrl = stillUrl ?: tmdb.peekBackdropUrl(session.subjectId)
+    val shape = RoundedCornerShape(6.dp)
+    Box(
+        Modifier
+            .width(TV_NOW_PLAYING_THUMB_WIDTH)
+            .height(TV_NOW_PLAYING_THUMB_WIDTH * 9 / 16)
+            .clip(shape)
+            .background(
+                Brush.linearGradient(
+                    listOf(
+                        MaterialTheme.colorScheme.primaryContainer,
+                        MaterialTheme.colorScheme.surfaceContainerHighest,
+                    ),
+                ),
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (session.episodeSort.isNotBlank()) {
+            Text(
+                session.episodeSort,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.22f),
+                style = MaterialTheme.typography.headlineMedium,
+            )
+        }
+        if (frame != null) {
+            Image(
+                frame,
+                contentDescription = null,
+                Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+        } else if (imageUrl != null) {
+            AsyncImage(
+                imageUrl,
+                contentDescription = null,
+                Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+        }
+    }
+}
+
+/**
+ * **正在播放那一集**自己的 TMDB 剧照; null = 没有/还没解析出来 (调用方退回整部 backdrop).
+ *
+ * 走的是各页早就在用的那条链 (`getEpisodeStills` + `matchToEpisodes`), 服务层有持久缓存, 而详情页
+ * 进去时通常已经按整季拉过一次, 所以多数情况下这里是缓存命中、不产生请求.
+ *
+ * **不写进 `TvHeroMediaCache.nextEpisodeMedia`**: 那张表按 subjectId 存"下一集"的剧照, 给"继续
+ * 观看"那一行的 hero 用. 往里塞"正在播的这一集"会和它互相覆盖 —— 两边的 episodeId 判据不同,
+ * 结果是 hero 时不时显示错集的剧照. 面板自己拿着这一个值就够了.
+ *
+ * 拿不到条目信息 (进程缓存里没有这部) 就直接放弃: 那说明用户不是从卡片走进来的, 为一张缩略图
+ * 现拉一整条链不值得.
+ */
+@Composable
+private fun rememberTvPlayingEpisodeStill(session: RetainedPlaybackSessionInfo): String? {
+    val tmdb = remember { GlobalKoin.get<TmdbImageService>() }
+    val settings = remember { GlobalKoin.get<SettingsRepository>() }
+    var url by remember(session.subjectId, session.episodeId) { mutableStateOf<String?>(null) }
+    LaunchedEffect(session.subjectId, session.episodeId) {
+        val info = TvHeroMediaCache.peekSubjectInfo(session.subjectId) ?: return@LaunchedEffect
+        url = runCatching {
+            val language = (settings.uiSettings.flow.first().appLanguage ?: Locale.current).toTmdbLanguage()
+            tmdb.getEpisodeStills(
+                session.subjectId,
+                info.subjectInfo.name,
+                language,
+                newestWantedAirDate = info.episodes.newestAiredDateStringOrNull(),
+            )
+                ?.matchToEpisodes(info.episodes)
+                ?.get(session.episodeId)
+                ?.stillUrl
+                // 缩略图只有 128dp, 原图档偶有 4K 级. 用**选集卡片那一档** (w780, ~40KB) 而不是
+                // hero 档 (w1280): 尺寸上仍是三倍富余, 且进播放器最常见的路子是"详情页选集卡 ->
+                // 播放", 那张卡刚刚就在屏幕上按这个档下载过 —— 同一个 URL 即同一个 Coil 缓存键,
+                // 命中就没有下载这一步了
+                ?.let { tmdbStillCardSizeUrl(it) }
+        }.getOrNull()
+    }
+    return url
+}
+
+/** `12` -> `第 12 集`; 复用播放记录那条文案, 不再单开一条. */
+@Composable
+private fun renderEpisodeLabel(sort: String): String =
+    stringResource(Lang.playback_history_episode_label, sort)
+
+/** 毫秒 -> `mm:ss` / `h:mm:ss`. 面板上只显示到秒. */
+private fun renderPlaybackTime(millis: Long): String {
+    val total = (millis / 1000).coerceAtLeast(0)
+    val h = total / 3600
+    val m = (total % 3600) / 60
+    val s = total % 60
+    return if (h > 0) {
+        "$h:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}"
+    } else {
+        "${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}"
+    }
+}
+
+/**
+ * 动作面板宽度. 原为 320dp 的一列全宽按钮, 改成"正在播放卡 + 圆钮行"之后放宽一档:
+ * 卡片右侧文字要留得下剧名, 而缩略图 + 关闭已经占掉 190dp.
+ */
+private val TV_ACTION_PANEL_WIDTH = 460.dp
+
+/** 正在播放卡的高度: 缩略图 72dp + 上下各 12dp. */
+private val TV_NOW_PLAYING_CARD_HEIGHT = 96.dp
+
+/** 卡片左边那块 16:9 缩略图的宽度. */
+private val TV_NOW_PLAYING_THUMB_WIDTH = 128.dp
+
+/** 卡片右端关闭区的宽度. */
+private val TV_NOW_PLAYING_CLOSE_WIDTH = 56.dp
+
+/** 卡片底缘那条进度线的粗细. */
+private val TV_NOW_PLAYING_BAR_HEIGHT = 3.dp
+
+/** 进度线轨道的不透明度, 见用处的注释 (要同时压在玻璃与错误色实底上). */
+private const val TV_NOW_PLAYING_BAR_TRACK_ALPHA = 0.22f
+
+/**
+ * 卡片主体聚焦时那层半透明主题色的不透明度.
+ *
+ * 0.3 是"明显亮起来但仍看得出是玻璃"的一档: 再低在 10 英尺距离上分不清有没有焦点, 再高就变成
+ * 实底、把缩略图周围压成一块色板, 与面板其余部分的材质也对不上.
+ */
+private const val TV_NOW_PLAYING_FOCUSED_ALPHA = 0.30f
+
+/** 固定标签行的高度: 写死免得空文案时整个面板抖一下. */
+private val TV_ACTION_PANEL_LABEL_HEIGHT = 20.dp
