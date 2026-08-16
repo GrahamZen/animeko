@@ -216,13 +216,19 @@ object ServiceConnectionTesters {
     const val ID_ANI = "ANI"
     const val ID_TMDB = "TMDB"
 
+    /**
+     * 图片 CDN 单独一项: 与接口是两个域名, 在墙内各自独立被墙且方向常常相反
+     * (接口不通、图床却通). 合成一项的话用户分不清该不该挂代理, 见 [TmdbImageService].
+     */
+    const val ID_TMDB_IMAGE = "TMDB_IMAGE"
+
     /** 单项探测的时间上限, 见 [withTestTimeout]. 能连通的服务握手远用不到 5 秒. */
     internal const val DEFAULT_TEST_TIMEOUT_MILLIS = 5_000L
 
     /** TMDB 那项内部串了两三个请求, 单独给更宽的上限, 见调用处. */
     internal const val TMDB_TEST_TIMEOUT_MILLIS = 15_000L
 
-    val DefaultServiceIds = setOf(ID_BANGUMI, ID_BANGUMI_NEXT, ID_ANI, ID_TMDB)
+    val DefaultServiceIds = setOf(ID_BANGUMI, ID_BANGUMI_NEXT, ID_ANI, ID_TMDB, ID_TMDB_IMAGE)
 
     fun createDefault(
         bangumiClient: BangumiClient,
@@ -253,12 +259,18 @@ object ServiceConnectionTesters {
                         }.getOrElse { false }
                     }
                 },
-                // 详情页背景图与选集卡片剧照的来源; 接口与图片 CDN 两个域名都探, 见 testConnection
+                // 详情页背景图与选集卡片剧照的来源. 接口与图片 CDN 是两个域名, 分成两项各自
+                // 出结果 —— 墙内两者常常一通一不通, 合成一项会让用户无从判断, 见 TmdbImageService
                 Service(ID_TMDB) {
-                    // 它内部要依次探接口与图片 CDN, 接口还可能回退备用域名, 实测总耗时 4 秒
-                    // 出头 —— 给的上限比别人宽, 否则通的网络也会被判超时
+                    // 可能要依次试主备两个域名, 给的上限比别人宽, 否则通的网络也会被判超时
                     withTestTimeout(TMDB_TEST_TIMEOUT_MILLIS) {
-                        tmdbImageService.testConnection()
+                        tmdbImageService.testApiConnection()
+                    }
+                },
+                Service(ID_TMDB_IMAGE) {
+                    // 只有一个域名一次 HEAD, 用默认上限就够
+                    withTestTimeout {
+                        tmdbImageService.testImageConnection()
                     }
                 },
             ).filter { it.id in serviceIds },

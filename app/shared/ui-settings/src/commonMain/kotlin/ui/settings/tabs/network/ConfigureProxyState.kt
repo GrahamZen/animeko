@@ -82,6 +82,7 @@ enum class ProxyTestCaseEnums {
     BANGUMI,
     BANGUMI_NEXT,
     TMDB,
+    TMDB_IMAGE,
 }
 
 @Immutable
@@ -110,6 +111,13 @@ sealed class ProxyTestCase(
 
     data object TmdbApi : ProxyTestCase(
         name = ProxyTestCaseEnums.TMDB,
+        icon = Icons.Default.Movie,
+        color = TmdbIconColor,
+    )
+
+    /** 图片 CDN 与接口分开: 两个域名在墙内各自独立被墙, 见 ServiceConnectionTesters.ID_TMDB_IMAGE. */
+    data object TmdbImage : ProxyTestCase(
+        name = ProxyTestCaseEnums.TMDB_IMAGE,
         icon = Icons.Default.Movie,
         color = TmdbIconColor,
     )

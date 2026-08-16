@@ -59,6 +59,7 @@ import me.him188.ani.utils.platform.currentTimeMillis
 import kotlin.concurrent.Volatile
 import kotlin.coroutines.CoroutineContext
 import kotlin.time.Clock
+import kotlin.time.TimeSource
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.days
 
@@ -222,26 +223,32 @@ class TmdbImageService(
     private val resolveScope = CoroutineScope(SupervisorJob() + ioDispatcher)
 
     /**
-     * 代理设置页的连通性探测.
+     * 代理设置页的连通性探测 —— **接口那一半**.
      *
-     * 接口和图片本体是两个域名 (`api.themoviedb.org` / `image.tmdb.org`), 在墙内各自独立
-     * 被墙 —— 只探一个会漏判 (常见情况是接口通、图片超时, 表现为详情页背景一直空着),
-     * 所以两个都通才算通.
+     * 接口与图片本体是两个域名 (`api.tmdb.org` / `image.tmdb.org`), 在墙内**各自独立被墙**,
+     * 而且方向常常相反: `api.themoviedb.org` 对大陆默认不通, 图床走 CDN 却正常 (issue #7 定论).
+     * 所以这两半**分成两项各自出结果** —— 合成一个红叉的话, 用户分不清"挂代理只需覆盖接口"
+     * 和"整个 TMDB 都不通", 而电视上导不出日志, 设置页那一行是唯一的自助反馈途径.
      *
      * 未配置 `ani.tmdb.api.token` 时直接算失败: 那种情况下整个功能本来就是关的
      * ([getBackdropUrl] 直接返回 null), 报"通"只会让人以为图马上就要出来了.
+     *
+     * 逐个域名试, 通的那个记进 [activeApiBaseIndex], 之后取图直接走它.
+     *
+     * **一次探测把该说的都写进日志**: 每个域名各自的耗时与失败原因、最终用了哪个 —— 用户点一次
+     * 测试, 能导日志的场合就不必再来第二轮 (见 [logApiOutcome]).
      */
-    suspend fun testConnection(): Boolean = withContext(ioDispatcher) {
+    suspend fun testApiConnection(): Boolean = withContext(ioDispatcher) {
         val token = currentAniBuildConfig.tmdbApiToken
         if (token.isBlank()) {
             // 不打这条的话, "这个包没配 token" 和 "网络不通" 在日志里长得一模一样 (都是静默失败)
-            logger.warn { "TMDB connection test failed: no API token in this build" }
+            logger.warn { "TMDB API test: FAILED — no API token in this build" }
             return@withContext false
         }
-        // 逐个域名试: 主域名在墙内连不上时备用域名往往是通的 (见 [API_BASE_URLS]).
-        // 结果记进 activeApiBaseIndex, 用户点完测试之后取图就直接走通的那个
+        val attempts = mutableListOf<String>()
         val reachableIndex = API_BASE_URLS.indices.firstOrNull { index ->
             val base = API_BASE_URLS[index]
+            val mark = TimeSource.Monotonic.markNow()
             try {
                 // /configuration 是最轻的鉴权端点, 顺带验证 token 有效 (token 不对是 401)
                 val status = client.use {
@@ -251,31 +258,51 @@ class TmdbImageService(
                         expectSuccess = false
                     }.status
                 }
-                if (!status.isSuccess()) logger.warn { "TMDB connection test: $base returned $status" }
+                attempts += "$base ${if (status.isSuccess()) "ok" else "$status"} in ${mark.elapsedNow().inWholeMilliseconds}ms"
                 status.isSuccess()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                logger.warn(e) { "TMDB connection test: $base unreachable" }
+                attempts += "$base ${e::class.simpleName ?: "error"} in ${mark.elapsedNow().inWholeMilliseconds}ms"
                 false
             }
-        } ?: return@withContext false
+        }
+        if (reachableIndex == null) {
+            logger.warn { "TMDB API test: FAILED — ${attempts.joinToString("; ")}" }
+            return@withContext false
+        }
         activeApiBaseIndex = reachableIndex
+        // 用到备用域名时明确说出来: 主用的 api.tmdb.org 是 TMDB 不宣传的历史别名, 哪天下线或
+        // 被墙, 这行日志是唯一能看出来的地方
+        logger.info {
+            "TMDB API test: ok via ${API_BASE_URLS[reachableIndex]}" +
+                    "${if (reachableIndex > 0) " (fallback)" else ""} — ${attempts.joinToString("; ")}"
+        }
+        true
+    }
 
+    /**
+     * 代理设置页的连通性探测 —— **图片 CDN 那一半**, 与 [testApiConnection] 各自独立出结果.
+     *
+     * 只看能否拿到 HTTP 响应, 不看状态码 (见 [IMAGE_PROBE_URL]); 被墙的表现是连不上或超时.
+     * 不检查 token: 图床是公开 CDN, 没 token 也该照常通 —— 这样"没配 token"就只让接口那项变红,
+     * 两项一对照就能看出是配置问题而不是网络问题.
+     */
+    suspend fun testImageConnection(): Boolean = withContext(ioDispatcher) {
+        val mark = TimeSource.Monotonic.markNow()
         try {
-            // 图片 CDN 只看能否拿到 HTTP 响应, 不看状态码 (见 [IMAGE_PROBE_URL]);
-            // 被墙的表现是连不上或超时, 会抛到下面的 catch
             client.use {
                 head(IMAGE_PROBE_URL) {
                     shortConnectTimeout()
                     expectSuccess = false
                 }
             }
+            logger.info { "TMDB image CDN test: ok in ${mark.elapsedNow().inWholeMilliseconds}ms" }
             true
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            logger.warn(e) { "TMDB connection test: image CDN unreachable" }
+            logger.warn(e) { "TMDB image CDN test: FAILED in ${mark.elapsedNow().inWholeMilliseconds}ms" }
             false
         }
     }
