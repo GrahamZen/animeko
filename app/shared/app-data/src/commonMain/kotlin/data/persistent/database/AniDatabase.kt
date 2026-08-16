@@ -87,7 +87,7 @@ import me.him188.ani.utils.httpdownloader.DownloadState
         PlaybackHistoryRecordEntity::class,
         PlaybackHistoryPendingOpEntity::class,
     ],
-    version = 22,
+    version = 23,
     autoMigrations = [
         AutoMigration(from = 1, to = 2, spec = Migrations.Migration_1_2::class),
         AutoMigration(from = 2, to = 3, spec = Migrations.Migration_2_3::class),
@@ -108,7 +108,7 @@ import me.him188.ani.utils.httpdownloader.DownloadState
         AutoMigration(from = 17, to = 18, spec = Migrations.Migration_17_18::class),
         AutoMigration(from = 18, to = 19, spec = Migrations.Migration_18_19::class),
         AutoMigration(from = 20, to = 21, spec = Migrations.Migration_20_21::class),
-        AutoMigration(from = 21, to = 22, spec = Migrations.Migration_21_22::class),
+        AutoMigration(from = 22, to = 23, spec = Migrations.Migration_22_23::class),
     ],
     exportSchema = true,
 )
@@ -441,10 +441,16 @@ internal object Migrations {
     /**
      * Web 源搜索缓存改用新表 [WebSearchSessionCacheEntity] (播放 session 级缓存, 完整复合唯一键),
      * 删除旧的 `web_search_subject` / `web_search_episode`.
+     *
+     * **上游把这一步放在 21 -> 22, fork 挪到了 22 -> 23**: fork 的 22 已经发出去了 (那一版是
+     * 按集拆分 torrent 缓存, 见 [MIGRATION_21_22]), 两边的 22 内容不同. 若把上游这步也塞进 22,
+     * 已装 fork 的用户升级后库版本没变而 schema 变了, Room 校验 identityHash 直接抛
+     * "Room cannot verify the data integrity" —— 开都开不起来. 推到 23 就都对得上:
+     * 21 的用户走 fork 的手写 21->22 再走这条, 22 的用户直接走这条.
      */
     @DeleteTable("web_search_episode")
     @DeleteTable("web_search_subject")
-    class Migration_21_22 : AutoMigrationSpec {
+    class Migration_22_23 : AutoMigrationSpec {
         override fun onPostMigrate(connection: SQLiteConnection) {
         }
     }
