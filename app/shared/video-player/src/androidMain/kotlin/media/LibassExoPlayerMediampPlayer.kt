@@ -184,6 +184,10 @@ private class LibassMediaSourcePipeline(
     private val subtitleParserFactory = AssSubtitleParserFactory(assHandler)
     private val extractorsFactory = DefaultExtractorsFactory()
         .withAssMkvSupport(subtitleParserFactory, assHandler)
+        // 容器没写 Colour 元素时, 从 HEVC SPS 把色彩信息补回来. 不补的话 ACodec 不会去设
+        // 视频层的 dataspace, 那个字段会留着没初始化的垃圾 —— 撞上 ST2084 位就变成假 HDR.
+        // 详见 HevcColorInfoRepair.kt
+        .withHevcColorInfoRepair()
 
     fun intercept(defaultSource: MediaSource, data: MediaData): MediaSource =
         createLibassMediaSource(data) ?: defaultSource
