@@ -431,6 +431,7 @@ private fun Map<String, ServiceConnectionTester.TestState>.toUIState(): List<Pro
                 ServiceConnectionTesters.ID_BANGUMI -> ProxyTestCase.BangumiApi
                 ServiceConnectionTesters.ID_BANGUMI_NEXT -> ProxyTestCase.BangumiNextApi
                 ServiceConnectionTesters.ID_TMDB -> ProxyTestCase.TmdbApi
+                ServiceConnectionTesters.ID_TMDB_IMAGE -> ProxyTestCase.TmdbImage
                 else -> return@forEach
             }
             val result = when (state) {

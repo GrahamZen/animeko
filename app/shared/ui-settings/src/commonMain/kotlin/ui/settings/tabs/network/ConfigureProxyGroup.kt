@@ -79,6 +79,7 @@ import me.him188.ani.app.ui.lang.settings_network_proxy_service_collection
 import me.him188.ani.app.ui.lang.settings_network_proxy_service_comment
 import me.him188.ani.app.ui.lang.settings_network_proxy_service_danmaku
 import me.him188.ani.app.ui.lang.settings_network_proxy_service_tmdb
+import me.him188.ani.app.ui.lang.settings_network_proxy_service_tmdb_image
 import me.him188.ani.app.ui.lang.settings_network_proxy_system
 import me.him188.ani.app.ui.lang.settings_network_proxy_test_failed
 import me.him188.ani.app.ui.lang.settings_network_proxy_test_success
@@ -204,6 +205,7 @@ private fun renderTestCaseName(case: ProxyTestCase): String {
         ProxyTestCaseEnums.BANGUMI -> "Bangumi"
         ProxyTestCaseEnums.BANGUMI_NEXT -> "Bangumi"
         ProxyTestCaseEnums.TMDB -> "TMDB"
+        ProxyTestCaseEnums.TMDB_IMAGE -> "TMDB"
     }
 }
 
@@ -214,6 +216,7 @@ private fun renderTestCaseDescription(case: ProxyTestCase): String {
         ProxyTestCaseEnums.BANGUMI -> stringResource(Lang.settings_network_proxy_service_collection)
         ProxyTestCaseEnums.BANGUMI_NEXT -> stringResource(Lang.settings_network_proxy_service_comment)
         ProxyTestCaseEnums.TMDB -> stringResource(Lang.settings_network_proxy_service_tmdb)
+        ProxyTestCaseEnums.TMDB_IMAGE -> stringResource(Lang.settings_network_proxy_service_tmdb_image)
     }
 }
 
