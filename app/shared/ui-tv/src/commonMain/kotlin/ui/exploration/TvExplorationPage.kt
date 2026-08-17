@@ -645,6 +645,19 @@ fun TvExplorationPage(
         if (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0) {
             listState.requestScrollToItem(0)
         }
+        // 之后持续钉住. 下面那条结构 effect 是"数据一变就看一眼位置", 而它读到的是**上一次
+        // 布局**的位置: 效果体跑在插入 item 后的 measure 之前时读到的还是 0, 于是一次
+        // requestScrollToItem 都不发 (键锚点也就没被清掉), 紧接着的 measure 把列表顶下去,
+        // 而 hasFollowed/rowCount 此后不再变 —— 没有任何东西会再来纠正, 列表就永久停在非 0,
+        // hero 按钮永久 alpha=0 (节点还在, 所以"看不见但确定键照常进详情", 退出重进才好).
+        // 跑在 measure 之前还是之后不确定, 所以是偶发. 这里不再赌顺序, 改成对实际位置反应.
+        // 滚动中不插手 (回顶动画/校正本身), 钉回后新位置是 (0,0), 不会自激.
+        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+            .collect { (index, offset) ->
+                if ((index != 0 || offset != 0) && !listState.isScrollInProgress) {
+                    listState.requestScrollToItem(0)
+                }
+            }
     }
     // 列表头部插入 item 后重新钉回 0. hero 态的行位置全靠"列表停在 0", 而"继续观看"分页比
     // 推荐晚到, 到达时往列表头部插入两个 item (标题 + 行) —— LazyColumn 默认保持**首个可见
