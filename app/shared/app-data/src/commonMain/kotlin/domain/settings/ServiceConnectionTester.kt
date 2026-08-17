@@ -31,6 +31,8 @@ import me.him188.ani.datasources.api.source.ConnectionStatus
 import me.him188.ani.datasources.bangumi.BangumiClient
 import me.him188.ani.utils.coroutines.SingleTaskExecutor
 import me.him188.ani.utils.ktor.ApiInvoker
+import me.him188.ani.utils.logging.logger
+import me.him188.ani.utils.logging.warn
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Duration
@@ -206,9 +208,19 @@ class ServiceConnectionTester(
  * `TestState.Idle` —— 那样这一行会永远停在转圈上, 比现在还糟.
  */
 private suspend fun withTestTimeout(
+    id: String,
     timeoutMillis: Long = ServiceConnectionTesters.DEFAULT_TEST_TIMEOUT_MILLIS,
     block: suspend () -> Boolean,
-): Boolean = withTimeoutOrNull(timeoutMillis) { block() } ?: false
+): Boolean = withTimeoutOrNull(timeoutMillis) { block() } ?: run {
+    // 超时这条路径**必须自己留一行日志**: 到点了 withTimeoutOrNull 取消里面那个协程, 探测函数
+    // 自己的 catch 会把 CancellationException 重抛而不打日志 —— 于是"探测报红但 app.log 里
+    // 关于它一个字都没有"就成了唯一症状, 事后完全无法区分"真的连不上"和"只是没跑完"
+    // (2026-08-17 用户报告图床自动探测失败、手动重试就好, 正是这种情形).
+    logger.warn { "Service '$id' test timed out after ${timeoutMillis}ms, reporting as failed" }
+    false
+}
+
+private val logger = logger("ServiceConnectionTesters")
 
 object ServiceConnectionTesters {
     const val ID_BANGUMI = "BANGUMI"
@@ -222,11 +234,25 @@ object ServiceConnectionTesters {
      */
     const val ID_TMDB_IMAGE = "TMDB_IMAGE"
 
-    /** 单项探测的时间上限, 见 [withTestTimeout]. 能连通的服务握手远用不到 5 秒. */
-    internal const val DEFAULT_TEST_TIMEOUT_MILLIS = 5_000L
+    /**
+     * 单项探测的时间上限, 见 [withTestTimeout].
+     *
+     * **原来是 5 秒, 2026-08-17 放到 10 秒**: 真机日志显示冷启动后第一轮探测里, bgm 两项与
+     * Animeko 那项会各自恰好被 5000ms 整掐掉 (`CANCELLED in 4.99s`, 从没拿到响应), 而几秒后
+     * 第二三轮同样的域名 200、只要 200~500ms. 原因是**探测用的客户端是新建的**:
+     * [ProxyTester] 为 bgm 与 Ani 各建一个 HttpClient (只有 TMDB 那两项复用应用单例), 新客户端
+     * 有自己的连接池, 首轮要自己走一遍 DNS + TCP + TLS; 而那一刻应用启动的请求风暴 (实测 17 个
+     * 并发 subject 请求, 耗时从 350ms 爬到 1.46s) 还在占着带宽.
+     *
+     * 于是 5 秒的代价不是"慢", 是**把好的网络报成红叉** —— 而这一行是用户判断"要不要挂代理"的
+     * 唯一依据, 误报比多等几秒有害得多. 10 秒仍然远小于加封顶之前的病态情形 (全局 30 秒连接超时
+     * × IPv4/IPv6 各一次 = 一分钟).
+     */
+    internal const val DEFAULT_TEST_TIMEOUT_MILLIS = 10_000L
 
     /** TMDB 那项内部串了两三个请求, 单独给更宽的上限, 见调用处. */
     internal const val TMDB_TEST_TIMEOUT_MILLIS = 15_000L
+
 
     val DefaultServiceIds = setOf(ID_BANGUMI, ID_BANGUMI_NEXT, ID_ANI, ID_TMDB, ID_TMDB_IMAGE)
 
@@ -240,17 +266,17 @@ object ServiceConnectionTesters {
         return ServiceConnectionTester(
             listOf(
                 Service(ID_BANGUMI) {
-                    withTestTimeout {
+                    withTestTimeout(ID_BANGUMI) {
                         bangumiClient.testConnectionMaster() == ConnectionStatus.SUCCESS
                     }
                 },
                 Service(ID_BANGUMI_NEXT) {
-                    withTestTimeout {
+                    withTestTimeout(ID_BANGUMI_NEXT) {
                         bangumiClient.testConnectionNext() == ConnectionStatus.SUCCESS
                     }
                 },
                 Service(ID_ANI) {
-                    withTestTimeout {
+                    withTestTimeout(ID_ANI) {
                         runCatching {
                             // Note, we may have `expectSuccess = true` so on failure it will throw an exception.
                             aniClient.invoke {
@@ -263,13 +289,15 @@ object ServiceConnectionTesters {
                 // 出结果 —— 墙内两者常常一通一不通, 合成一项会让用户无从判断, 见 TmdbImageService
                 Service(ID_TMDB) {
                     // 可能要依次试主备两个域名, 给的上限比别人宽, 否则通的网络也会被判超时
-                    withTestTimeout(TMDB_TEST_TIMEOUT_MILLIS) {
+                    withTestTimeout(ID_TMDB, TMDB_TEST_TIMEOUT_MILLIS) {
                         tmdbImageService.testApiConnection()
                     }
                 },
                 Service(ID_TMDB_IMAGE) {
-                    // 只有一个域名一次 HEAD, 用默认上限就够
-                    withTestTimeout {
+                    // 只有一个域名一次 HEAD, 用默认上限就够 —— 而且它是五项里最不容易超时的那个:
+                    // 走的是应用的单例客户端 (见 tmdbImageService 那行的注释), 连接在启动那波
+                    // 请求里早就热了, 实测每轮都是 170~530ms
+                    withTestTimeout(ID_TMDB_IMAGE) {
                         tmdbImageService.testImageConnection()
                     }
                 },
