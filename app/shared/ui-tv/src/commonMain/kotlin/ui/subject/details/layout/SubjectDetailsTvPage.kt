@@ -227,14 +227,24 @@ fun SubjectDetailsTvLoadingPlaceholder(
 ) {
     val tmdbImageService = remember { GlobalKoin.get<TmdbImageService>() }
     // 三态: resolved=false 还没解析过 (等), resolved=true 且 url=null 确认无图 (回退封面)
-    val heroBackdropUrl = subjectInfo?.let { info ->
-        remember(info.subjectId) {
-            tmdbImageService.peekBackdropUrl(info.subjectId)
-                ?: info.imageLarge.takeIf {
-                    tmdbImageService.peekBackdropResolved(info.subjectId) && it.isNotBlank()
-                }
+    //
+    // **必须是 derivedStateOf 而不是 remember 收值**: peek 读的是进程内热表, 那是一张
+    // SnapshotStateMap —— 解析结果落表时组合会被唤醒, 但 remember 在 subjectId 没变时不会重跑
+    // 里面的读, 于是首次读到 null 之后, 稍后到达的 backdrop 永远显示不出来 (进详情页有门控,
+    // 但门控超时先放行的慢网络下正好落在这个窗口里, 表现成占位页只有标题).
+    // 用 derived 而不是直接裸读: 那张表按 subjectId 存**所有**条目, 邻居预取的任意写入都会
+    // 让读过它的作用域失效; derived 只在这一条的值真的变了才往下传播.
+    val heroBackdrop = subjectInfo?.let { info ->
+        remember(info.subjectId, info.imageLarge) {
+            derivedStateOf {
+                tmdbImageService.peekBackdropUrl(info.subjectId)
+                    ?: info.imageLarge.takeIf {
+                        tmdbImageService.peekBackdropResolved(info.subjectId) && it.isNotBlank()
+                    }
+            }
         }
     }
+    val heroBackdropUrl = heroBackdrop?.value
 
     var slowLoad by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {

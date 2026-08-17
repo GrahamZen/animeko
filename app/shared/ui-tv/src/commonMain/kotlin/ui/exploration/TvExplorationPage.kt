@@ -1457,13 +1457,24 @@ private fun TvExplorationHeroOverlay(
                     // 简介占满信息块剩余高度: 行数由 TV_HERO_BLOCK_HEIGHT 决定; 宽度用单独的
                     // HERO_SUMMARY_WIDTH_FRACTION, 调小让右边留给 backdrop 清晰区.
                     // 继续观看: 优先展示下一集的 TMDB 单集简介, 缺失回退整部简介
-                    val nextEpOverview = target?.takeIf { it.fromFollowed }
-                        ?.let { episodeStillCache[it.subjectId]?.overview }
-                        ?.takeIf { it.isNotBlank() }
+                    // 两次查表收进 derivedStateOf: 这两张表是**进程级共享**的
+                    // (TvHeroMediaCache), 邻居预取会为用户还没看到的条目写入, 而
+                    // SnapshotStateMap 没有按键订阅粒度 —— 直接在这里读的话, 一次聚焦最多
+                    // 8 次邻居写入全都会重组这个文字块, 正好抵消掉预取想换来的流畅
+                    // (同一份顾虑见 TvHeroMediaCache.subjectInfos 处的说明).
+                    // derived 之后写入只重算这个字符串, 值没变就不往下传播.
+                    val summaryText by remember(target, info) {
+                        derivedStateOf {
+                            val nextEpOverview = target?.takeIf { it.fromFollowed }
+                                ?.let { episodeStillCache[it.subjectId]?.overview }
+                                ?.takeIf { it.isNotBlank() }
+                            nextEpOverview
+                                ?: info.subjectInfo.summary.trim()
+                                    .ifBlank { target?.let { summaryFallbackCache[it.subjectId] }.orEmpty() }
+                        }
+                    }
                     Text(
-                        nextEpOverview
-                            ?: info.subjectInfo.summary.trim()
-                                .ifBlank { target?.let { summaryFallbackCache[it.subjectId] }.orEmpty() },
+                        summaryText,
                         Modifier.weight(1f).fillMaxWidth(TV_HERO_SUMMARY_WIDTH_FRACTION),
                         color = tvHeroContentColor(),
                         style = MaterialTheme.typography.bodyMedium,
