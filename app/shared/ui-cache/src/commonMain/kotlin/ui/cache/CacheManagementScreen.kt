@@ -128,6 +128,8 @@ import me.him188.ani.app.ui.lang.cache_episode_pause_download
 import me.him188.ani.app.ui.lang.cache_episode_resume_download
 import me.him188.ani.app.ui.lang.cache_management_delete_cache_confirmation
 import me.him188.ani.app.ui.lang.cache_management_delete_cache_title
+import me.him188.ani.app.ui.lang.cache_management_delete_summary
+import me.him188.ani.app.ui.lang.cache_management_delete_summary_item
 import me.him188.ani.app.ui.lang.cache_management_downloading_count
 import me.him188.ani.app.ui.lang.cache_management_enter_selection_mode
 import me.him188.ani.app.ui.lang.cache_management_episode_label
@@ -268,10 +270,6 @@ fun CacheManagementScreen(
     }
     // 当前选中的 entries 数量
     val selectionCount = selectionState.selectedIds.size
-    // 是否已经全选
-    val allSelected = remember(selectionEntries, selectionCount) {
-        selectionEntries.isNotEmpty() && selectionCount == selectionEntries.size
-    }
 
     // 当 list detail pane 的类型改变并且在编辑模式时, 需要确保 selectedIds 只能是当前可见的 entries
     LaunchedEffect(state.entries, selectionState.inSelection) {
@@ -297,10 +295,34 @@ fun CacheManagementScreen(
         state.groups.firstOrNull { it.key == currentViewingGroupKey }
     }
 
+    /**
+     * 「全选」作用的范围.
+     *
+     * **两栏形态下只作用于右边正在看的那一部作品**, 而不是整页所有条目: 左边是作品列表、右边是
+     * 那一部的剧集, 顶栏那颗按钮长在右边这一栏的上方, 读起来就是"选中这一部的全部剧集".
+     * 原先它选的是 [selectionEntries] (两栏下 = 全部作品的全部剧集) —— 2026-08-17 真机上
+     * 用户在第二季那一组按全选, 连着另外两部作品共 10 条缓存一起删掉了, 而且删除确认框
+     * 不报条数也不报是谁, 弹窗长得和只删两条时一模一样.
+     *
+     * 单栏形态没有这个歧义 (列表本来就是全部剧集), 维持原样.
+     */
+    val selectAllEntries = if (listDetailLayoutParameters.preferSinglePane) {
+        selectionEntries
+    } else {
+        currentViewingGroup?.entries ?: selectionEntries
+    }
+    // 「全选」这颗按钮此刻是不是"取消全选": 只看它自己的范围
+    val allSelected = remember(selectAllEntries, selectionState.selectedIds) {
+        selectAllEntries.isNotEmpty() && selectAllEntries.all { it.cacheId in selectionState.selectedIds }
+    }
+
     // 确认删除的对话框
     if (deleteSelectedCacheDialog) {
         DeleteActionDialog(
             onDismiss = { deleteSelectedCacheDialog = false },
+            // 删除不可撤销, 而选中集合可能跨作品 (左边列表也能整组选), 所以必须把"到底要删什么"
+            // 摊开写: 几条, 哪几部, 各几条
+            summary = rememberCacheDeleteSummary(selectedEntries),
             onConfirm = {
                 selectionEntries.filter { it.cacheId in selectionState.selectedIds }
                     .forEach { onDelete(it) }
@@ -323,12 +345,16 @@ fun CacheManagementScreen(
                 selectionMode = selectionState.inSelection,
                 selectionCount = selectionCount,
                 allSelected = allSelected,
-                hasEntries = selectionEntries.isNotEmpty(),
+                hasEntries = selectAllEntries.isNotEmpty(),
                 onEnterSelection = { selectionState.enterSelectionWith(emptySet()) },
                 onExitSelection = { selectionState.clear() },
                 onToggleSelectAll = {
+                    // 加减自己范围内的 id, 而不是整体覆盖: 两栏下用户可能已经在左边列表里整组选过
+                    // 别的作品, 那份选择不该被这颗按钮悄悄抹掉 (反过来取消全选也只取消自己这部)
+                    val ids = selectAllEntries.map { it.cacheId }
                     selectionState.enterSelectionWith(
-                        if (allSelected) emptySet() else selectionEntries.map { it.cacheId }.toSet(),
+                        if (allSelected) selectionState.selectedIds - ids.toSet()
+                        else selectionState.selectedIds + ids,
                     )
                 },
                 selfInfo = selfInfo,
@@ -746,16 +772,28 @@ object CacheManagementTestTags {
     const val DELETE_CONFIRM_BUTTON = "cache_management_delete_confirm_button"
 }
 
+/**
+ * @param summary 「到底要删什么」的明细 (几条 / 哪几部 / 各几条); `null` = 单条删除, 用户点的就是
+ *   那一行, 不需要复述. 见 [rememberCacheDeleteSummary].
+ */
 @Composable
 internal fun DeleteActionDialog(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
+    summary: String? = null,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Rounded.Delete, null, tint = MaterialTheme.colorScheme.error) },
         title = { Text(stringResource(Lang.cache_management_delete_cache_title)) },
-        text = { Text(stringResource(Lang.cache_management_delete_cache_confirmation)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(stringResource(Lang.cache_management_delete_cache_confirmation))
+                if (summary != null) {
+                    Text(summary, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
         confirmButton = {
             TextButton(
                 onClick = onConfirm,
@@ -765,6 +803,29 @@ internal fun DeleteActionDialog(
         dismissButton = dismissDialogButton(stringResource(Lang.cache_subject_cancel), onDismiss),
     )
 }
+
+/**
+ * 批量删除前那句明细: `将删除 10 项缓存` + 按作品分行的 `作品名（7 项）`.
+ *
+ * 按作品分行而不是一行列完: 电视上一行放不下几个中文剧名, 而"跨了几部作品"恰恰是这句话要传达的
+ * 关键信息 —— 用户以为只在删眼前这一部时, 多出来的那几行就是刹车. 超过 [MAX_TITLES] 部只列前几部
+ * 加省略号 (真到那个量级, "跨了很多部"这个事实已经传达到了).
+ */
+@Composable
+private fun rememberCacheDeleteSummary(entries: List<CacheEpisodeState>): String? {
+    if (entries.isEmpty()) return null
+    val header = stringResource(Lang.cache_management_delete_summary, entries.size)
+    val byTitle = entries.groupBy { it.subjectName }
+    // 逐条取资源 (stringResource 只能在组合里调), 所以先在组合里把每一行拼好
+    val lines = byTitle.entries.take(MAX_DELETE_SUMMARY_TITLES).map { (title, list) ->
+        stringResource(Lang.cache_management_delete_summary_item, title, list.size)
+    }
+    val more = if (byTitle.size > MAX_DELETE_SUMMARY_TITLES) "\n…" else ""
+    return header + "\n" + lines.joinToString("\n") + more
+}
+
+/** 删除明细里最多列几部作品, 见 [rememberCacheDeleteSummary]. */
+private const val MAX_DELETE_SUMMARY_TITLES = 4
 
 @Composable
 private fun CacheSubjectListItem(
