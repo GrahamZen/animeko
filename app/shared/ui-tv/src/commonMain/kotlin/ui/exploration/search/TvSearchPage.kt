@@ -1026,8 +1026,14 @@ private fun TvSearchHeroInfoBlock(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+                // 进程级共享表 (TvHeroMediaCache.summaryFallbacks), 邻居预取会为用户还没看到的
+                // 条目写入; SnapshotStateMap 没有按键订阅粒度, 直接读会让每次邻居写入都重组这个
+                // 文字块. derived 之后值没变就不往下传播 (见 TvHeroMediaCache.subjectInfos 的说明)
+                val summary by remember(hero.subjectId) {
+                    derivedStateOf { summaryCache[hero.subjectId].orEmpty() }
+                }
                 Text(
-                    summaryCache[hero.subjectId].orEmpty(),
+                    summary,
                     Modifier.weight(1f).fillMaxWidth(TV_HERO_SUMMARY_WIDTH_FRACTION),
                     color = tvHeroContentColor(),
                     style = MaterialTheme.typography.bodyMedium,

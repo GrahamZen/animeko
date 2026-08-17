@@ -1037,12 +1037,24 @@ private fun TvCollectionHeroBlock(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (hero != null) {
+                // 两张表都是进程级共享的 (TvHeroMediaCache), 邻居预取会为用户还没看到的条目
+                // 写入, 而 SnapshotStateMap 没有按键订阅粒度 —— 直接读的话每次邻居写入都重组
+                // 这个文字块. derived 之后写入只重算这两个值, 没变就不往下传播 (同一份顾虑见
+                // TvHeroMediaCache.subjectInfos 处的说明)
+                val nextEpisodeOverview by remember(hero) {
+                    derivedStateOf {
+                        hero.stillEpisodeIdOrNull()
+                            ?.let { episodeStillCache[hero.subjectId]?.overview }
+                            ?.takeIf { it.isNotBlank() }
+                    }
+                }
+                val summaryFallback by remember(hero) {
+                    derivedStateOf { summaryFallbackCache[hero.subjectId] }
+                }
                 TvCollectionHeroInfo(
                     info = hero,
-                    nextEpisodeOverview = hero.stillEpisodeIdOrNull()
-                        ?.let { episodeStillCache[hero.subjectId]?.overview }
-                        ?.takeIf { it.isNotBlank() },
-                    summaryFallback = summaryFallbackCache[hero.subjectId],
+                    nextEpisodeOverview = nextEpisodeOverview,
+                    summaryFallback = summaryFallback,
                     remainingMinutesOf = remainingMinutesOf,
                 )
             }
