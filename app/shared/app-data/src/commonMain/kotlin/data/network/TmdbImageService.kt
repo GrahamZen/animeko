@@ -58,6 +58,8 @@ import me.him188.ani.utils.logging.logger
 import me.him188.ani.utils.logging.warn
 import me.him188.ani.utils.platform.currentTimeMillis
 import kotlin.concurrent.Volatile
+import kotlin.concurrent.atomics.AtomicInt
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlin.coroutines.CoroutineContext
 import kotlin.time.Clock
 import kotlin.time.TimeSource
@@ -195,8 +197,14 @@ class TmdbImageService(
      *
      * 这种不通是持续状态而不是偶发, 一直重试没有意义. 成功一次就清零 —— 临时抖动不该永久
      * 关掉这条兜底路径; 冷启动也重新计数, 免得用户换了网络还被上次的判定卡着.
+     *
+     * **原子量而不是普通 `var`**: 不同条目的解析是并发的 (只有同条目才合流, 见
+     * [backdropInFlight]), 两个并发失败各读到 0 各写回 1 就丢掉一次计数, 熔断要多等一轮失败
+     * 才跳; 非原子读还没有跨线程可见性保证. 清零与递增之间仍是"后写的赢" —— 那正是
+     * "连续失败"该有的语义 (成功一次就该清零), 这里要修的只是别丢递增.
      */
-    private var lineageFailureStreak = 0
+    @OptIn(ExperimentalAtomicApi::class)
+    private val lineageFailureStreak = AtomicInt(0)
 
     /**
      * 在途的 backdrop 解析, **精确按 subjectId 合流** (single-flight).
@@ -821,11 +829,12 @@ class TmdbImageService(
      * 直接调 Bangumi v0 公开 API 而非 Ani API: 后者服务端会过滤掉「主线故事」关系
      * (实测 getRelatedSubjects 对 Re:ゼロ休憩時間只返回续集). 失败返回 null, 不影响兜底.
      */
+    @OptIn(ExperimentalAtomicApi::class)
     private suspend fun resolveLineageOrNull(subjectId: Int, originalName: String): BgmLineage? {
         // 先走 Ani 的关系索引: 墙内可直连, 一次请求直接拿到名字 (见 [resolveLineageViaAni]).
         // 它给不出系列主条目时才回落到下面的 Bangumi 逐跳回溯.
         resolveLineageViaAni(subjectId, originalName)?.let { return it }
-        if (lineageFailureStreak >= LINEAGE_FAILURE_LIMIT) return null
+        if (lineageFailureStreak.load() >= LINEAGE_FAILURE_LIMIT) return null
         return try {
             var currentId = subjectId
             var rootName: String? = null
@@ -850,7 +859,7 @@ class TmdbImageService(
                 if (next.name.isNotBlank()) rootName = next.name
                 hops++
             }
-            lineageFailureStreak = 0
+            lineageFailureStreak.store(0)
             BgmLineage(
                 rootName = rootName?.takeIf { it != originalName },
                 isDerivative = sawMainStoryEdge,
@@ -863,12 +872,13 @@ class TmdbImageService(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            lineageFailureStreak++
+            // 递增的结果留住自己用: 再 load 一次可能已经被别的条目改过, 日志与判定就对不上了
+            val streak = lineageFailureStreak.fetchAndAdd(1) + 1
             logger.warn(e) {
                 "Failed to resolve lineage via Bangumi relations for subject $subjectId " +
-                    "($lineageFailureStreak/$LINEAGE_FAILURE_LIMIT consecutive failures)"
+                    "($streak/$LINEAGE_FAILURE_LIMIT consecutive failures)"
             }
-            if (lineageFailureStreak >= LINEAGE_FAILURE_LIMIT) {
+            if (streak >= LINEAGE_FAILURE_LIMIT) {
                 logger.warn { "Bangumi relation lookups disabled for this session (api.bgm.tv unreachable)" }
             }
             null
