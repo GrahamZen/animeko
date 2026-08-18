@@ -563,7 +563,7 @@ fun TvCollectionPage(
 
     // 播放键: 短按播聚焦条目的下一集, 长按强制重拉当前 tab 的收藏列表 (默认只在进页/一小时
     // 定时同步时刷新). 挂在页面根上而不是网格上: 焦点在 tab 行时也能刷
-    // 快捷菜单「刷新本页」= 强制重拉当前分类 (播放键长按已改为全局的「回到正在播放」)
+    // 动作面板「刷新本页」= 强制重拉当前分类 (播放键长按已改为全局的「打开动作面板」)
     TvPageRefreshHandler { state.refreshSelectedPage() }
     val playKeyModifier = tvPlayKeyShortPress(
         onPlay = {
@@ -815,10 +815,6 @@ fun TvCollectionPage(
                                     onTopRowUp = {
                                         focusSelectedTab()
                                     },
-                                    // 播放键由页面根节点接管 (短按续播 / 长按强制刷新, 见
-                                    // tvPlayKeyShortPress): 短按要靠 KeyUp 才能确定 (可能是长按的开头),
-                                    // 而本路由只处理 KeyDown
-                                    onPlayKey = { false },
                                     enabled = { isActiveTab },
                                     extraKeys = { event, focused, cols, count ->
                                         val tvIndex = TV_COLLECTION_TABS.indexOf(selectedType)

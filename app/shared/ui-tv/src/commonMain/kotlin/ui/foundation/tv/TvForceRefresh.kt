@@ -17,7 +17,8 @@ import me.him188.ani.app.ui.foundation.tvLongPressKey
 /**
  * 遥控器播放键**短按 = [onPlay]** (直达播放); 长按刻意不在这里处理.
  *
- * 播放键长按是全局手势「回到正在播放」, 由应用根部的统一跟踪器认领 (见 TvPageVariants 与
+ * 播放键长按是全局手势「打开动作面板」(2026-08-18 之前是"直接跳回正在播放"), 由应用根部的统一
+ * 跟踪器认领 (见 TvPageVariants 与
  * [TvKeyLongPressHost][me.him188.ani.app.ui.foundation.TvKeyLongPressHost] 的并存规则):
  * 根部拦截器先收到事件, 认领那一刻起本节点再也看不到后续连发与 KeyUp, 所以这里的
  * onLongPress 永远到不了阈值 (传空只为占位). 旧的「长按 = 强制刷新」挪进了长按返回的

@@ -47,7 +47,7 @@ data class RetainedPlaybackSessionInfo(
 /**
  * 后台会话的播放进度.
  *
- * **故意不放进 [RetainedPlaybackSessionInfo]**: 那个对象被"长按播放键回到正在播放"等路径读着,
+ * **故意不放进 [RetainedPlaybackSessionInfo]**: 那个对象被侧边栏"正在播放"条目等路径读着,
  * 而进度每秒变一次 —— 混在一起会让那些与进度无关的读者每秒重组一次. 单独一个状态, 只有
  * 动作面板在读, 面板不开就没人订阅.
  *

@@ -11,6 +11,12 @@ package me.him188.ani.app.ui.foundation.session
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
@@ -31,6 +37,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccountCircle
+import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Icon
@@ -66,14 +73,18 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import me.him188.ani.app.navigation.LocalNavigator
 import me.him188.ani.app.navigation.MainScreenPage
 import me.him188.ani.app.navigation.getIcon
 import me.him188.ani.app.navigation.getText
 import me.him188.ani.app.ui.foundation.avatar.AvatarImage
+import me.him188.ani.app.ui.foundation.playback.LocalPlaybackSessionEntry
+import me.him188.ani.app.ui.foundation.playback.PlaybackSessionStatus
 import me.him188.ani.app.ui.foundation.theme.AniThemeDefaults
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.exploration_search
 import me.him188.ani.app.ui.lang.login_sign_in
+import me.him188.ani.app.ui.lang.playback_session_now_playing
 import me.him188.ani.app.ui.lang.settings
 import me.him188.ani.app.ui.user.SelfInfoUiState
 import org.jetbrains.compose.resources.stringResource
@@ -92,6 +103,15 @@ object TvNavigationRailDefaults {
 data class TvNavRailItem(
     val icon: ImageVector,
     val label: String,
+    /**
+     * 非空时替代 [icon] 画字形 (容器与聚焦底色仍由 [TvRailGlyphBox] 统一负责, 内容色经
+     * `LocalContentColor` 下发, 照着它画就自动跟随聚焦态; 要自己按聚焦与否换色的用参数里那个
+     * `focused`, 不要拿 `LocalContentColor` 去比对颜色值).
+     *
+     * 给"图标本身要表达状态"的条目用 (目前只有"正在播放"的均衡条). 状态**读在这个 lambda 里面**,
+     * 不要读在 [buildTvRailItems] 的 body 里 —— 那会让状态每变一次就重组整个侧边栏.
+     */
+    val iconContent: (@Composable (focused: Boolean) -> Unit)? = null,
     /** true 时焦点进入侧边栏总是落到该条目上 (整栏至多标记一个, 如"探索"). */
     val defaultFocus: Boolean = false,
     /** 非 null 时把此 FocusRequester 挂到该条目 (如初始/切页后把焦点落到当前项). */
@@ -156,14 +176,132 @@ fun buildTvRailItems(
     // 这里曾经还有一颗"一起看", 2026-08-17 挪进长按返回的动作面板 (与播放器胶囊行末尾那颗一起
     // 承担悬浮气泡原本的入口作用). 侧边栏那颗的路径是"按左 + 一路往下按到最底", 而面板是一个
     // 手势就到; 播放器内够不到面板, 但那里本来就有胶囊行那颗.
+
+    // **"正在播放"**: 2026-08-16 删掉过一次 (理由是"一个看起来能点的东西会把导航吸过去", 而
+    // 状态与入口都收进了动作面板), 2026-08-18 加回来 —— 真机用下来"界面上看得出后台在播"这件事
+    // 值得那点注意力成本, 而面板要一个手势才看得到.
     //
-    // 这里曾经还有一颗"正在播放"(回到 / 关闭后台保留的播放会话), 2026-08-16 删掉.
+    // 与删掉之前有三处不同:
     //
-    // 它与长按返回的动作面板功能完全重复, 却是四个入口里最难够到的那个: 为了不让会话来去推动
-    // 其余条目的位置, 它被钉在整列最后 —— 于是路径是"按左 + 往下按到底", 而长按返回是一个手势.
-    // 更要命的是**一个看起来能点的东西会把导航吸过去**: 即使用户记得手势, 也容易慢慢挪过来点它.
-    // 状态显示与两个动作现已一并收进那个面板 (见 TvActionPanelDialog 的会话信息块).
+    // 1. **不再提供"关闭"** (那套往下浮出的按钮机制没有跟着回来): 关会话不常用, 面板里有;
+    //    没有浮出按钮也就不必把整列居中的**下端预留高度**加回来 (见 TvNavigationSideRail 的 topReserve).
+    // 2. **图标本身就是状态** (见 [TvNowPlayingRailGlyph]): 静态的 PlayCircle 只说明"有个入口",
+    //    而这颗要回答的是"后台那一集怎么样了".
+    // 3. 它现在是**冗余入口**而不是唯一入口 —— 长按播放键/长按返回都能开面板, 所以即使用户
+    //    真的被它吸过去, 也只是走了条稍慢的路, 不像以前那样是"手势没人知道"的补救.
+    //
+    // 仍然放在整列**最后**: 会话来去是动态的, 夹在中间会让其余条目的位置随之上下移动 (遥控器上
+    // 位置就是肌肉记忆), 而且不能放头像那一簇上方 —— 头像聚焦时本来就会在其上方浮出动作按钮.
+    val playback = LocalPlaybackSessionEntry.current
+    val playbackNavigator = LocalNavigator.current
+    playback.session?.let { retained ->
+        add(
+            TvNavRailItem(
+                icon = Icons.Rounded.PlayCircle,
+                label = stringResource(Lang.playback_session_now_playing),
+                // 状态读在 lambda 里面, 不读在这里: 否则每次状态变化 (换源/缓冲完成…) 都会重组
+                // 整个侧边栏与它所在的页面
+                iconContent = { focused -> TvNowPlayingRailGlyph(focused, status = { playback.status }) },
+                onClick = {
+                    // force: 这不是"去开另一集", 而是回到**已经在播的这一集**, 所以跳过跟随房主时
+                    // 那道导航守卫 (WatchTogetherManager.observeFollowerMode). 那道守卫只在目标与
+                    // 房主已发布的播放位置一字不差时放行 —— 房主还没发布 (还在选源/详情页) 时是
+                    // null, 一律拒绝, 于是跟随者退出播放页后连回自己的会话都被挡住. 跟随该拦的是
+                    // "播别的", 不是"回去接着看".
+                    playbackNavigator.navigateEpisodeDetails(
+                        retained.subjectId,
+                        retained.episodeId,
+                        force = true,
+                    )
+                },
+            ),
+        )
+    }
 }
+
+/**
+ * **"正在播放"条目的字形**: 三根竖条的均衡条 —— 后台还在忙 (找源/缓冲) 时跳动, 就绪后静止,
+ * 出问题时静止并变色.
+ *
+ * 为什么不是一颗静态 PlayCircle: 那只说明"这里有个入口", 而这颗条目存在的理由是**让人一眼看出
+ * 后台那一集怎么样了** —— 慢的源要十几秒, 中途还可能自动换源、最后卡在等手选. 一列单色图标里
+ * 一个会动的东西正好承担"有东西在进行中"这句话, 而静止 = "停在那儿等你回来".
+ *
+ * **动的判据是"还在加载", 不是"时钟在走"**: 退出播放页必然把会话按成暂停 (见
+ * RetainedPlaybackSessionHolder), 所以按 isPlaying 画的话它永远静止, 动画等于白做.
+ *
+ * 颜色: 平时跟随 `LocalContentColor` (聚焦时 [TvRailGlyphBox] 已经把它换成 onPrimary 反色);
+ * **只在未聚焦时**才用状态色染 —— 聚焦时底已经是主题色实底, 再把字形换成警示色, 两种色压在一起
+ * 既脏又看不清, 而"出了问题"这件事在焦点已经落上去的时候, 按一下就能在面板里读到整句话.
+ *
+ * @param status lambda 而非值: 见 [TvNavRailItem.iconContent].
+ */
+@Composable
+private fun TvNowPlayingRailGlyph(focused: Boolean, status: () -> PlaybackSessionStatus?) {
+    val current = status()
+    val busy = current is PlaybackSessionStatus.Preparing || current is PlaybackSessionStatus.Buffering
+    val content = LocalContentColor.current
+    val color = if (focused) {
+        content
+    } else {
+        when (playbackSessionStatusSeverityOf(current)) {
+            TvRailStatusSeverity.Error -> MaterialTheme.colorScheme.error
+            TvRailStatusSeverity.Attention -> MaterialTheme.colorScheme.tertiary
+            TvRailStatusSeverity.Normal -> content
+        }
+    }
+    val transition = rememberInfiniteTransition()
+    Row(
+        Modifier.size(TV_RAIL_ICON_GLYPH_SIZE),
+        horizontalArrangement = Arrangement.spacedBy(TV_RAIL_EQUALIZER_GAP, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        repeat(TV_RAIL_EQUALIZER_BARS) { index ->
+            // 每根一个自己的周期: 相同周期会让三根齐涨齐落, 看起来像一整块在缩放而不是均衡条.
+            // 用**互质**的毫秒数而不是给同一个动画加相位延迟 —— 后者要 initialStartOffset, 而
+            // 三根各跑各的周期天然永不重合
+            // 动画**只在 busy 时才注册**: infiniteRepeatable 一挂上就每帧推进一次, 而这颗图标
+            // 绝大多数时间是静止的 (会话退到后台就绪之后), 常挂着等于白烧一条帧回调
+            val fraction = if (busy) {
+                val animated by transition.animateFloat(
+                    initialValue = TV_RAIL_EQUALIZER_MIN,
+                    targetValue = TV_RAIL_EQUALIZER_MAX,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(TV_RAIL_EQUALIZER_PERIODS[index], easing = LinearEasing),
+                        repeatMode = RepeatMode.Reverse,
+                    ),
+                )
+                animated
+            } else {
+                // 静止态: 中间那根高、两边矮 —— 一个"停住的均衡条"的形状, 而不是三根等高的方块
+                // (那会读成进度条或别的什么)
+                TV_RAIL_EQUALIZER_IDLE[index]
+            }
+            Box(
+                Modifier
+                    .width(TV_RAIL_EQUALIZER_BAR_WIDTH)
+                    .fillMaxHeight(fraction)
+                    .clip(RoundedCornerShape(TV_RAIL_EQUALIZER_BAR_WIDTH / 2))
+                    .background(color),
+            )
+        }
+    }
+}
+
+/** [TvNowPlayingRailGlyph] 的状态分档 (与动作面板里那行状态字用同一套判据, 只是这里不需要文案). */
+private enum class TvRailStatusSeverity { Normal, Attention, Error }
+
+private fun playbackSessionStatusSeverityOf(status: PlaybackSessionStatus?): TvRailStatusSeverity =
+    when (status) {
+        // 要用户处理才会继续的那一档: 不是错误 (再等也不会好, 但也没坏)
+        is PlaybackSessionStatus.NeedsSelection -> TvRailStatusSeverity.Attention
+        is PlaybackSessionStatus.NoMedia,
+        is PlaybackSessionStatus.PlayerError,
+        is PlaybackSessionStatus.LoadFailed,
+            -> TvRailStatusSeverity.Error
+
+        else -> TvRailStatusSeverity.Normal
+    }
 
 /**
  * TV 可展开左侧导航栏 (主页与详情页共用同一实现):
@@ -284,6 +422,7 @@ fun TvNavigationSideRail(
                 TvRailIconItem(
                     icon = item.icon,
                     label = item.label,
+                    iconContent = item.iconContent,
                     expanded = expanded,
                     onExitFocus = onExitFocus,
                     focusRequester = if (item.defaultFocus) {
@@ -313,6 +452,8 @@ private fun TvRailGlyphBox(
     focused: Boolean,
     icon: ImageVector,
     modifier: Modifier = Modifier,
+    /** 非空时替代 [icon]; 见 [TvNavRailItem.iconContent]. */
+    iconContent: (@Composable (focused: Boolean) -> Unit)? = null,
 ) {
     val background by animateColorAsState(
         if (focused) MaterialTheme.colorScheme.primary else Color.Transparent,
@@ -329,7 +470,7 @@ private fun TvRailGlyphBox(
             },
         ) {
             Box(Modifier.size(TV_RAIL_ICON_GLYPH_SIZE), contentAlignment = Alignment.Center) {
-                Icon(icon, null)
+                if (iconContent != null) iconContent(focused) else Icon(icon, null)
             }
         }
     }
@@ -471,6 +612,7 @@ private fun TvRailFloatingActionButton(
 private fun TvRailIconItem(
     icon: ImageVector,
     label: String,
+    iconContent: (@Composable (focused: Boolean) -> Unit)?,
     expanded: Boolean,
     onExitFocus: (() -> Unit)?,
     focusRequester: FocusRequester?,
@@ -531,7 +673,7 @@ private fun TvRailIconItem(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            TvRailGlyphBox(focused, icon)
+            TvRailGlyphBox(focused, icon, iconContent = iconContent)
             if (expanded) {
                 Text(
                     label,
@@ -614,3 +756,25 @@ private val TV_RAIL_AVATAR_IMAGE_SIZE = 24.dp
 
 /** 图标字形尺寸 (32dp 容器 / 20dp 字形). */
 private val TV_RAIL_ICON_GLYPH_SIZE = 20.dp
+
+/** [TvNowPlayingRailGlyph] 的竖条数. */
+private const val TV_RAIL_EQUALIZER_BARS = 3
+
+/** 竖条宽度 (3 根 + 2 道间隙 = 14dp, 居中放进 20dp 的字形格子里). */
+private val TV_RAIL_EQUALIZER_BAR_WIDTH = 3.dp
+
+private val TV_RAIL_EQUALIZER_GAP = 2.5.dp
+
+/** 跳动区间: 不从 0 起跳 —— 条完全消失会让人以为图标在闪烁/坏了. */
+private const val TV_RAIL_EQUALIZER_MIN = 0.3f
+
+private const val TV_RAIL_EQUALIZER_MAX = 0.95f
+
+/**
+ * 三根各自的周期 (ms). 取互质值而不是给同一个动画加相位偏移: 相同周期会让三根齐涨齐落, 看起来
+ * 像一整块在缩放而不是均衡条; 互质则永不重合, 也不必用 initialStartOffset.
+ */
+private val TV_RAIL_EQUALIZER_PERIODS = intArrayOf(620, 830, 730)
+
+/** 静止态的高度: 中间高两边矮 = "停住的均衡条", 而不是三根等高的方块 (那会读成进度条). */
+private val TV_RAIL_EQUALIZER_IDLE = floatArrayOf(0.45f, 0.75f, 0.5f)

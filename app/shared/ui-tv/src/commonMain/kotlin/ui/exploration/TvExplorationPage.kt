@@ -748,7 +748,7 @@ fun TvExplorationPage(
     TvPageRefreshHandler { state.refreshFollowedSubjects() }
 
     // hero 的播放键: 短按直接播当前轮播条目 (按钮本身走确认键进详情, 同卡片的约定).
-    // 长按不在这里: 播放键长按是全局手势「回到正在播放」, 由根部统一跟踪器认领
+    // 长按不在这里: 播放键长按是全局手势「打开动作面板」, 由根部统一跟踪器认领
     val heroPlayKeyModifier = tvPlayKeyShortPress(
         onPlay = {
             carouselItem()?.let {
@@ -1145,22 +1145,23 @@ fun TvExplorationPage(
                                     reportFocus()
                                 },
                                 modifier = Modifier.width(TV_PAGE_CARD_WIDTH)
-                                    // 播放/暂停键: 直接进播放器 (无进度从第一集; 信息未加载退化为详情)
-                                    .onPreviewKeyEvent { event ->
-                                        if (event.type == KeyEventType.KeyDown &&
-                                            (event.key == Key.MediaPlayPause || event.key == Key.MediaPlay)
-                                        ) {
-                                            item?.let {
-                                                navigateToPlay(
-                                                    it.bangumiId, it.nameCn, it.imageLarge,
-                                                    "home_recommendation_play",
-                                                )
-                                                true
-                                            } ?: false
-                                        } else {
-                                            false
-                                        }
-                                    },
+                                    // 播放键**短按**: 直接进播放器 (无进度从第一集; 信息未加载退化为详情).
+                                    // 必须走 tvPlayKeyShortPress 而不是自己判 KeyDown —— 播放键按下
+                                    // 那一刻还分不出短按还是长按, 自己在 KeyDown 处理会把全局的长按手势
+                                    // (打开动作面板) 整个吃掉. 这里原先正是那么写的
+                                    .then(
+                                        tvPlayKeyShortPress(
+                                            onPlay = {
+                                                item?.let {
+                                                    navigateToPlay(
+                                                        it.bangumiId, it.nameCn, it.imageLarge,
+                                                        "home_recommendation_play",
+                                                    )
+                                                    true
+                                                } ?: false
+                                            },
+                                        ),
+                                    ),
                                 // 聚焦框由卡片区固定锚位的 TvPortraitCardFocusRing 统一画
                                 showFocusRing = false,
                                 menu = item?.let { collectionMenuFor(it.bangumiId) },

@@ -288,8 +288,13 @@ private val GRID_TRANSIT_ANCHOR_SWALLOWED_KEYS = setOf(
  *   前一个 item (上一行最后一张), 焦点必然斜跳; 吸顶滚动进行中方向搜索又按瞬时几何位置挑
  *   候选, 偶尔斜跳到别的列. 顶行上键交 [onTopRowUp]; 末行不满时同列下方没有卡则落到最后
  *   一张; 已是最后一行则消费掉防斜跳.
- * - 播放/暂停键交 [onPlayKey] (聚焦卡直达播放).
  * - 其余 KeyDown 交 [extraKeys] (如追番页跨 tab 左右导航), 返回 false 走默认焦点搜索.
+ *
+ * **这里刻意不处理播放键** (曾经有个 `onPlayKey` 参数, 2026-08-18 删掉): 本路由只看 KeyDown, 而
+ * 播放键**按下那一刻还不知道是短按还是长按** —— 长按是全局手势 (打开动作面板, 见 TvPageVariants),
+ * 在 KeyDown 就把它当短按用掉, 长按就再也不会发生了. 搜索页正是这么漏的: 卡片上长按播放键直接
+ * 进了播放器. 页面要"聚焦卡直达播放"就在**页面根**挂 `tvPlayKeyShortPress` (它等 KeyUp 才算短按,
+ * 且与根部宿主有明确的并存规则), 别在这条路由里加回来.
  */
 fun Modifier.gridKeyNavigation(
     controller: GridFocusController,
@@ -297,7 +302,6 @@ fun Modifier.gridKeyNavigation(
     itemCount: () -> Int,
     columns: () -> Int,
     onTopRowUp: () -> Boolean,
-    onPlayKey: (focusedIndex: Int) -> Boolean,
     enabled: () -> Boolean = { true },
     extraKeys: ((event: KeyEvent, focusedIndex: Int, columns: Int, itemCount: Int) -> Boolean)? = null,
 ): Modifier = onPreviewKeyEvent { event ->
@@ -336,8 +340,6 @@ fun Modifier.gridKeyNavigation(
                 else -> true
             }
         }
-
-        Key.MediaPlayPause, Key.MediaPlay -> onPlayKey(focused)
 
         else -> extraKeys?.invoke(event, focused, cols, count) ?: false
     }

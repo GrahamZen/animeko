@@ -597,7 +597,7 @@
     <string name="tv_force_refresh_toast">正在刷新…</string>
     <string name="tv_quick_menu_home">回到主界面</string>
     <string name="tv_quick_menu_refresh">刷新本页</string>
-    <string name="tv_play_resume_no_session">没有正在播放的内容</string>
+    <string name="playback_session_none">没有正在播放的内容</string>
     <string name="tv_service_check_hint">检测服务连通 · 长按打开代理设置</string>
     <string name="tv_service_check_hint_never">尚未检测 · 长按打开代理设置</string>
     <string name="tv_service_check_hint_stale">结果可能已过期 · 长按打开代理设置</string>
@@ -649,7 +649,7 @@
     <string name="settings_theme_tv_full_visual_effects">完整视觉效果</string>
     <string name="settings_theme_tv_full_visual_effects_description">切换追番分类时卡片滑动过渡、加载占位脉动、长标题持续滚动、背景剧照用原图、逐格导航即刻更换背景图与简介。默认关闭以保证低端设备流畅（两档下卡片动画都不受影响），设备性能充裕可开启</string>
     <string name="settings_theme_tv_retain_playback_session">退出播放页后保留播放状态</string>
-    <string name="settings_theme_tv_retain_playback_session_description">退出后播放器与数据源搜索都继续保留。在任意页面长按返回键弹出动作面板，那里会显示后台正在播放什么，并可一键回去或关掉；数据源在后台加载好会提示一声。关闭则退出即结束播放，每次进播放页都要重新搜索数据源</string>
+    <string name="settings_theme_tv_retain_playback_session_description">退出后播放器与数据源搜索都继续保留。在任意页面长按播放键（或返回键）弹出动作面板，那里会显示后台正在播放什么，并可一键回去或关掉；数据源在后台加载好会提示一声。关闭则退出即结束播放，每次进播放页都要重新搜索数据源</string>
     <string name="settings_theme_tv_exit_confirmation">退出前先询问</string>
     <string name="settings_theme_tv_exit_confirmation_description">在主页按返回时先弹确认框，而不是直接退出应用；后台有正在播放时还可以在框里回去继续看或关掉它。关闭则按返回直接退出</string>
     <string name="settings_theme_palette">调色板</string>

@@ -129,6 +129,7 @@ import me.him188.ani.app.ui.foundation.navigation.BackHandler
 import me.him188.ani.app.ui.foundation.session.TvNavigationRailDefaults
 import me.him188.ani.app.ui.foundation.session.TvNavigationSideRail
 import me.him188.ani.app.ui.foundation.session.buildTvRailItems
+import me.him188.ani.app.ui.foundation.tv.tvPlayKeyShortPress
 import me.him188.ani.app.ui.foundation.focus.GridFocusController
 import me.him188.ani.app.ui.foundation.focus.TvScrollAnimator
 import me.him188.ani.app.ui.foundation.tv.TvPageBackdropLayer
@@ -689,7 +690,23 @@ private fun TvSearchResultsPane(
         )
     }
 
-    Box(modifier.fillMaxSize()) {
+    // 播放键: 短按直达播放聚焦那张卡. **挂在页面根上而不是网格的键路由里** —— 那条路由只看
+    // KeyDown, 而播放键按下那一刻还分不出短按还是长按, 在那儿处理会把全局的长按手势 (打开动作
+    // 面板) 整个吃掉. 本页原先正是那么写的, 表现为卡片上长按播放键直接进了播放器
+    val playKeyModifier = tvPlayKeyShortPress(
+        onPlay = {
+            val info = lastFocusedCard.intValue.takeIf { it >= 0 }
+                ?.let { runCatching { items.peek(it) }.getOrNull() }
+            if (info != null) {
+                onIntent(SearchPageIntent.Play(info))
+                true
+            } else {
+                false
+            }
+        },
+    )
+
+    Box(modifier.fillMaxSize().then(playKeyModifier)) {
         // 背景 backdrop 层: 同追番页 (16:9 贴右上角, 恒用卡片态渐变).
         // URL 用 lambda 传入: 聚焦条目状态在组件内部才读取, 换卡只重组这一小块
         TvPageBackdropLayer(
@@ -831,16 +848,6 @@ private fun TvSearchResultsPane(
                                     (activeFilters.isNotEmpty() &&
                                             runCatching { chipsFocusRequester.requestFocus() }.isSuccess) ||
                                             runCatching { titleFocusRequester.requestFocus() }.isSuccess
-                                },
-                                // 播放键: 聚焦卡直接进播放器 (右下角有提示)
-                                onPlayKey = { focused ->
-                                    val info = runCatching { items.peek(focused) }.getOrNull()
-                                    if (info != null) {
-                                        onIntent(SearchPageIntent.Play(info))
-                                        true
-                                    } else {
-                                        false
-                                    }
                                 },
                             ),
                         state = gridState,

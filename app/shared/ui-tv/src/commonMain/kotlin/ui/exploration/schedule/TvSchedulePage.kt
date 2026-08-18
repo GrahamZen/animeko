@@ -534,7 +534,7 @@ fun TvSchedulePage(
 
     // 播放键: 短按播聚焦那一集, 长按强制重拉时间表 (数据默认一小时才刷一次).
     // 挂在页面根上而不是网格上: 焦点在日期行时也能刷
-    // 快捷菜单「刷新本页」= 重拉整张时间表 (播放键长按已改为全局的「回到正在播放」)
+    // 动作面板「刷新本页」= 重拉整张时间表 (播放键长按已改为全局的「打开动作面板」)
     TvPageRefreshHandler(onRetry)
     val playKeyModifier = tvPlayKeyShortPress(
         onPlay = {
@@ -801,10 +801,6 @@ fun TvSchedulePage(
                                     focusSelectedDate()
                                     true
                                 },
-                                // 播放键由页面根节点接管 (短按播放 / 长按强制刷新, 见
-                                // tvPlayKeyShortPress): 短按要靠 KeyUp 才能确定 (可能是长按的开头),
-                                // 而本路由只处理 KeyDown
-                                onPlayKey = { false },
                                 // 左右键按时间线性移动: 行末接下一行行首, 行首接上一行行末;
                                 // 走到全天两端再跨天 (同追番页跨 tab). 时间是一条线, 不是二维表 ——
                                 // 一路按右就能顺着播出顺序走过整周

@@ -20,7 +20,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 /**
  * 当前页面的「强制刷新」动作注册口, 给长按返回的快捷菜单里那颗「刷新本页」用.
  *
- * 强刷原本挂在播放键长按上 (tvPlayKeyForceRefresh); 播放键长按改成「回到正在播放」后,
+ * 强刷原本挂在播放键长按上 (tvPlayKeyForceRefresh); 播放键长按改成开动作面板后,
  * 刷新挪进快捷菜单 —— 菜单是全局的 (组合在应用根部), 页面的刷新动作只能自下而上注册进来
  * (CompositionLocal 只能往下流). 模式与 [TvKeyLongPressHost] 的注册栈一致: 页面在场时注册,
  * 离开组合自动注销, 菜单读栈顶; 没人注册时菜单不显示该项.

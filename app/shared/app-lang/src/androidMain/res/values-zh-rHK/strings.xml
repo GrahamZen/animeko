@@ -29,7 +29,7 @@
     <string name="exit_app_close_playback">關閉正在播放</string>
     <string name="tv_quick_menu_home">回到主介面</string>
     <string name="tv_quick_menu_refresh">刷新本頁</string>
-    <string name="tv_play_resume_no_session">沒有正在播放的內容</string>
+    <string name="playback_session_none">沒有正在播放的內容</string>
     <string name="tv_service_check_hint">檢測服務連通 · 長按開啟代理設定</string>
     <string name="tv_service_check_hint_never">尚未檢測 · 長按開啟代理設定</string>
     <string name="tv_service_check_hint_stale">結果可能已過期 · 長按開啟代理設定</string>
@@ -39,7 +39,7 @@
     <string name="tv_service_probe_tmdb">背景圖</string>
     <string name="tv_service_probe_tmdb_image">圖床</string>
     <string name="settings_theme_tv_retain_playback_session">退出播放頁後保留播放狀態</string>
-    <string name="settings_theme_tv_retain_playback_session_description">退出後播放器與數據源搜尋都繼續保留。在任意頁面長按返回鍵彈出動作面板，那裡會顯示後台正在播放什麼，並可一鍵回去或關掉；數據源在後台載入好會提示一聲。關閉則退出即結束播放，每次進播放頁都要重新搜尋數據源</string>
+    <string name="settings_theme_tv_retain_playback_session_description">退出後播放器與數據源搜尋都繼續保留。在任意頁面長按播放鍵（或返回鍵）彈出動作面板，那裡會顯示後台正在播放什麼，並可一鍵回去或關掉；數據源在後台載入好會提示一聲。關閉則退出即結束播放，每次進播放頁都要重新搜尋數據源</string>
     <string name="settings_theme_tv_exit_confirmation">退出前先詢問</string>
     <string name="settings_theme_tv_exit_confirmation_description">在主頁按返回時先彈確認框，而不是直接退出應用；後台有正在播放時還可以在框裡回去繼續看或關掉它。關閉則按返回直接退出</string>
     <string name="playback_history_title">播放記錄</string>

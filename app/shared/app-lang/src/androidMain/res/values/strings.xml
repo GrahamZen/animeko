@@ -557,7 +557,7 @@
     <string name="tv_force_refresh_toast">Refreshing…</string>
     <string name="tv_quick_menu_home">Back to Home</string>
     <string name="tv_quick_menu_refresh">Refresh This Page</string>
-    <string name="tv_play_resume_no_session">Nothing is playing</string>
+    <string name="playback_session_none">Nothing is playing</string>
     <string name="tv_service_check_hint">Check services · hold to open proxy settings</string>
     <string name="tv_service_check_hint_never">Not checked yet · hold to open proxy settings</string>
     <string name="tv_service_check_hint_stale">Results may be stale · hold to open proxy settings</string>
@@ -609,7 +609,7 @@
     <string name="settings_theme_tv_full_visual_effects">Full visual effects</string>
     <string name="settings_theme_tv_full_visual_effects_description">Slide transitions between collection categories, animated loading placeholders, endless title marquee, full-resolution hero stills, and instant backdrop/summary swaps while moving across cards. Off by default to keep low-end devices smooth (card animations are unaffected either way); turn on if your device is powerful</string>
     <string name="settings_theme_tv_retain_playback_session">Keep playback session after leaving</string>
-    <string name="settings_theme_tv_retain_playback_session_description">Leaving the player keeps the session alive (player, source search, loaded stream). Long-press Back anywhere to open the action panel — it shows what is playing in the background, with buttons to return or close it. A toast tells you when a slow source finishes loading. Off: the session is discarded on exit and every visit searches again</string>
+    <string name="settings_theme_tv_retain_playback_session_description">Leaving the player keeps the session alive (player, source search, loaded stream). Long-press Play (or Back) anywhere to open the action panel — it shows what is playing in the background, with buttons to return or close it. A toast tells you when a slow source finishes loading. Off: the session is discarded on exit and every visit searches again</string>
     <string name="settings_theme_tv_exit_confirmation">Confirm before exiting</string>
     <string name="settings_theme_tv_exit_confirmation_description">Pressing Back on the home screen asks first instead of quitting right away; the dialog also offers to return to or close the retained playback session. Off: Back quits the app directly</string>
     <string name="settings_theme_palette">Color Palette</string>
