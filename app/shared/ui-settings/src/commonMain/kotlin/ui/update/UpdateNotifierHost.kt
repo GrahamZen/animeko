@@ -129,12 +129,24 @@ fun BoxScope.UpdateNotifier(
         )
     }
 
-    // 焦点在气泡里时返回键等同点关闭按钮: 不接的话返回会穿到下层页面 (退出当前页) 而气泡还挡
-    // 在右下角 —— 遥控器上"返回 = 关掉眼前这个东西"是最强的预期.
+    // 返回键等同点关闭按钮: 不接的话返回会穿到下层页面 (退出当前页) 而气泡还挡在右下角 ——
+    // 遥控器上"返回 = 关掉眼前这个东西"是最强的预期.
     // 只对"有更新"这张卡生效: 下载中那张卡的按钮是"取消下载", 会真的中止下载,
     // 返回键不该承担破坏性动作 (让它照常穿到页面).
+    //
+    // **焦点导航形态下不看焦点在哪, 卡在场就接**: 气泡出现后要靠下面那个 resolveFocusRepeatedly
+    // 去把焦点抢过来, 那中间有一段几十到几百毫秒的窗口. 按 cardFocused 判的话, 落在这段窗口里的
+    // 一次返回不归气泡管, 而是穿到页面 —— 主页上那正好是"连按两次退出"的第一下, 于是弹出
+    // 「再按一次返回键退出」; 等气泡抢到了焦点, 第二下却被它吃掉去关气泡了, toast 就成了谎话
+    // (2026-08-18 用户实测: 冷启动撞上更新提示时必现). 卡在场就接, 这段竞态窗口整个消失,
+    // 返回键的含义也不再取决于一个用户看不见的状态.
+    //
+    // 触屏形态维持原判据: 那里没有焦点概念 (cardFocused 基本恒 false), 等于气泡不碰返回键,
+    // 与改动前一致 —— 手机上用户按返回多半是想退出当前页, 不是关这张卡.
     var cardFocused by remember { mutableStateOf(false) }
-    BackHandler(enabled = hasUpdateCard && cardFocused) { dismissed = true }
+    val backClosesCard = hasUpdateCard &&
+            (LocalAniUiBehavior.current.focusDrivenNavigation || cardFocused)
+    BackHandler(enabled = backClosesCard) { dismissed = true }
 
     // 焦点导航设备: 卡片在场期间焦点锁在卡片内, 方向键走到边界即取消这次焦点搜索.
     // 不锁的话卡片抢到初始焦点后用户随手一按方向键焦点就滑进下层页面, 而卡片还挡在右下角 ——
