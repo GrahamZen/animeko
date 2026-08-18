@@ -16,6 +16,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -40,9 +41,13 @@ import me.him188.ani.app.ui.foundation.TvKeyLongPressHandler
 import me.him188.ani.app.ui.foundation.TvKeyLongPressHost
 import me.him188.ani.app.ui.foundation.TvPageRefreshHost
 import me.him188.ani.app.ui.foundation.playback.PlaybackSessionEntry
+import me.him188.ani.app.data.models.preference.TvLongPressAction
 import me.him188.ani.app.ui.foundation.theme.LocalThemeSettings
 import me.him188.ani.app.ui.foundation.tvKeyLongPressInterceptor
 import me.him188.ani.app.ui.foundation.watchtogether.WatchTogetherEntryState
+import me.him188.ani.app.ui.foundation.widgets.LocalToaster
+import me.him188.ani.app.ui.lang.Lang
+import me.him188.ani.app.ui.lang.playback_session_none
 import me.him188.ani.app.ui.main.TvQuickActionMenu
 import me.him188.ani.app.ui.subject.episode.RetainedPlaybackSessionHolder
 import me.him188.ani.app.ui.exploration.ExplorationPageVariant
@@ -70,6 +75,7 @@ import me.him188.ani.app.ui.subject.episode.EpisodeScreenVariant
 import me.him188.ani.app.ui.subject.episode.LocalEpisodeScreenVariant
 import me.him188.ani.app.ui.subject.episode.tv.TvEpisodeScreenContent
 import me.him188.ani.app.ui.user.SelfInfoUiState
+import org.jetbrains.compose.resources.stringResource
 import org.koin.mp.KoinPlatform
 
 /**
@@ -153,26 +159,23 @@ fun InstallTvPageVariants(aniNavigator: AniNavigator, content: @Composable () ->
                     route !is NavRoutes.EmailLoginVerify &&
                     route !is NavRoutes.BangumiAuthorize
         }
-        // **两个手势开同一个动作面板**, 行为完全一致 (含默认焦点), 学一个等于学两个:
+        // **两个长按各配各的** (设置-界面, 见 [TvLongPressAction]), 默认都开动作面板:
         //
-        // - **长按播放键 = 主入口**. 播放键几乎不存在误触 (没人会按住播放键不放), 而"长按媒体键
-        //   弹出媒体面板"本身也讲得通. 原先它是"直接跳回正在播放"的盲跳, 现在换成"先看一眼再
-        //   确认": 面板一开焦点就落在正在播放卡上, 再按一下确定就回去了 —— 多一下按键, 换来
-        //   看清楚停在哪儿、加载到哪一步, 而且「关闭会话」也在旁边一步 (以前想关反而得换手势).
-        // - **长按返回 = 兜底**. 精简遥控器 (Chromecast 那类) 没有播放键, 对他们这是唯一入口.
-        //   返回键常用而退出应用不可逆, 所以让默认焦点落在卡片上很要紧: 误触之后条件反射按确定
-        //   = 回到正在播放 (完全可逆), 按返回 = 关掉面板, 默认落点方圆两步之内没有不可逆动作.
+        // - **长按播放键**几乎不存在误触 (没人会按住播放键不放), 而"长按媒体键弹出媒体面板"本身
+        //   也讲得通. 它原先是"直接跳回正在播放"的盲跳, 默认改成开面板 = "先看一眼再确认";
+        //   想要旧手感的人把它设回 [TvLongPressAction.Resume] 即可.
+        // - **长按返回**是精简遥控器 (Chromecast 那类, 没有播放键) 唯一够得到面板的入口, 所以
+        //   三档里唯独它允许 [TvLongPressAction.None] (完全不认领).
+        //
+        // 之所以按"每个键做什么"配而不是"哪些键能开面板"三选一: 后者有个空档 —— 选"只有返回键
+        // 开面板"时长按播放键就闲置了, 而那个手势本身有用. 拆开之后还多出一个组合:
+        // 返回开面板 + 播放直接回去, 两个手势分工而不是重复.
         //
         // 长按返回这条是栈底兜底 (最先注册), 播放器的"收叠层"处理器比它优先.
         var showQuickMenu by remember { mutableStateOf(false) }
-        TvBackLongPressHandler {
-            if (currentDestinationClaimable()) {
-                showQuickMenu = true
-                true
-            } else {
-                false
-            }
-        }
+        val themeSettings = LocalThemeSettings.current
+        val backLongPressAction by rememberUpdatedState(themeSettings.tvBackLongPress)
+        val playLongPressAction by rememberUpdatedState(themeSettings.tvPlayLongPress)
         // 保留的会话与 AniAppContent 里是同一个 Activity 级 ViewModel (viewModel 同 owner 同 key
         // 返回同一实例), 这里拿它只为把把手传给面板 (读 session/progress/status + close).
         val retainSession = LocalAniUiBehavior.current.retainPlaybackSession &&
@@ -184,14 +187,39 @@ fun InstallTvPageVariants(aniNavigator: AniNavigator, content: @Composable () ->
         // LocalWatchTogetherEntry 的是同一个实例 —— 本处在那个 provider 的**外面**, 读
         // CompositionLocal 只会拿到默认空实例 (见 WatchTogetherEntryState)
         val watchTogetherEntry = viewModel { WatchTogetherEntryState() }
-        // 没有会话时照样开面板 (不再 toast"没有正在播放"): 面板里那张压暗的占位卡把同一句话说了,
-        // 而且顺带把"这个手势是干什么的"演示了一遍 —— 一个只在没会话时才出现的 toast, 恰好只有
-        // 不知道这手势的人会看到, 却什么也没让他们看见
-        TvKeyLongPressHandler(playLongPress) {
-            if (!currentDestinationClaimable()) return@TvKeyLongPressHandler false
-            showQuickMenu = true
-            true
+        // 两个键的动作走同一段逻辑, 只是各读各的设置.
+        //
+        // Panel 档没有会话时照样开面板 (不 toast"没有正在播放"): 面板里那张压暗的占位卡把同一句话
+        // 说了, 还顺带演示了这手势是干什么的 —— 一个只在没会话时才冒出来的 toast, 恰好只有不知道
+        // 这手势的人会看到, 却什么也没让他们看见.
+        //
+        // Resume 档没有会话时**认领 + toast**: 那一档就是"一步跳回去", 没得跳时手势不能像死了一样.
+        val toaster = LocalToaster.current
+        val noSessionText = stringResource(Lang.playback_session_none)
+        val performLongPress: (TvLongPressAction) -> Boolean = perform@{ action ->
+            if (!currentDestinationClaimable()) return@perform false
+            when (action) {
+                TvLongPressAction.Panel -> {
+                    showQuickMenu = true
+                    true
+                }
+
+                TvLongPressAction.Resume -> {
+                    val session = playbackEntry.session
+                    if (session != null) {
+                        // force: 回到已经在播的这一集, 跳过一起看跟随模式的导航守卫
+                        aniNavigator.navigateEpisodeDetails(session.subjectId, session.episodeId, force = true)
+                    } else {
+                        toaster.toast(noSessionText)
+                    }
+                    true
+                }
+
+                TvLongPressAction.None -> false
+            }
         }
+        TvBackLongPressHandler { performLongPress(backLongPressAction) }
+        TvKeyLongPressHandler(playLongPress) { performLongPress(playLongPressAction) }
         if (showQuickMenu) {
             val context = LocalContext.current
             val appTerminator = remember { KoinPlatform.getKoin().get<AppTerminator>() }

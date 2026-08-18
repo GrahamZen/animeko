@@ -45,6 +45,8 @@ import me.him188.ani.app.data.models.preference.NsfwMode
 import me.him188.ani.app.data.models.preference.PlayerKernelConfig
 import me.him188.ani.app.data.models.preference.SkipOpEdMode
 import me.him188.ani.app.data.models.preference.NoticeSoundKind
+import me.him188.ani.app.data.models.preference.TvExitBehavior
+import me.him188.ani.app.data.models.preference.TvLongPressAction
 import me.him188.ani.app.data.models.preference.ThemeSettings
 import me.him188.ani.app.data.models.preference.UISettings
 import me.him188.ani.app.data.models.preference.UpdateSettings
@@ -132,8 +134,18 @@ import me.him188.ani.app.ui.lang.settings_player_video_enhancement_default_descr
 import me.him188.ani.app.ui.lang.video_player_off
 import me.him188.ani.app.ui.lang.video_player_performance
 import me.him188.ani.app.ui.lang.video_player_quality
-import me.him188.ani.app.ui.lang.settings_theme_tv_exit_confirmation
-import me.him188.ani.app.ui.lang.settings_theme_tv_exit_confirmation_description
+import me.him188.ani.app.ui.lang.settings_theme_tv_back_long_press
+import me.him188.ani.app.ui.lang.settings_theme_tv_back_long_press_description
+import me.him188.ani.app.ui.lang.settings_theme_tv_exit_behavior
+import me.him188.ani.app.ui.lang.settings_theme_tv_exit_behavior_description
+import me.him188.ani.app.ui.lang.settings_theme_tv_exit_direct
+import me.him188.ani.app.ui.lang.settings_theme_tv_exit_double
+import me.him188.ani.app.ui.lang.settings_theme_tv_exit_panel
+import me.him188.ani.app.ui.lang.settings_theme_tv_long_press_none
+import me.him188.ani.app.ui.lang.settings_theme_tv_long_press_panel
+import me.him188.ani.app.ui.lang.settings_theme_tv_long_press_resume
+import me.him188.ani.app.ui.lang.settings_theme_tv_play_long_press
+import me.him188.ani.app.ui.lang.settings_theme_tv_play_long_press_description
 import me.him188.ani.app.ui.lang.settings_theme_tv_retain_playback_session
 import me.him188.ani.app.ui.lang.settings_theme_tv_retain_playback_session_description
 import me.him188.ani.app.ui.lang.settings_theme_tv_ui_scale
@@ -191,6 +203,7 @@ import me.him188.ani.utils.platform.isAndroid
 import me.him188.ani.utils.platform.isDesktop
 import me.him188.ani.utils.platform.isIos
 import me.him188.ani.utils.platform.isMobile
+import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 import kotlin.math.roundToInt
 import kotlin.time.Duration.Companion.seconds
@@ -260,6 +273,13 @@ fun SettingsScope.WatchTogetherGroup(state: SettingsState<WatchTogetherSettings>
     }
 }
 
+/** 两个长按设置共用的选项文案 (见 [TvLongPressAction]). */
+private fun tvLongPressActionLabel(action: TvLongPressAction): StringResource = when (action) {
+    TvLongPressAction.Panel -> Lang.settings_theme_tv_long_press_panel
+    TvLongPressAction.Resume -> Lang.settings_theme_tv_long_press_resume
+    TvLongPressAction.None -> Lang.settings_theme_tv_long_press_none
+}
+
 @Composable
 fun SettingsScope.AppearanceGroup(
     state: SettingsState<UISettings>,
@@ -272,16 +292,45 @@ fun SettingsScope.AppearanceGroup(
     if (LocalAniUiBehavior.current.immersiveShell) {
         UiScaleSliderItem(themeSettings)
 
-        // 「退出确认」: 遥控器形态专属 —— 只有那里的返回键会一路退到"再按一下就退出应用".
+        // 以下三条都是遥控器形态专属 (只有那里有"一路退到底就退出应用"和长按手势).
         // 存在 ThemeSettings 里只是存储位置 (同界面缩放/保留播放会话)
         val themeConfig by themeSettings
-        SwitchItem(
-            checked = themeConfig.tvExitConfirmation,
-            onCheckedChange = { checked ->
-                themeSettings.update(themeConfig.copy(tvExitConfirmation = checked))
+        DropdownItem(
+            selected = { themeConfig.exitBehavior },
+            values = { TvExitBehavior.entries },
+            itemText = {
+                Text(
+                    stringResource(
+                        when (it) {
+                            TvExitBehavior.Direct -> Lang.settings_theme_tv_exit_direct
+                            TvExitBehavior.Panel -> Lang.settings_theme_tv_exit_panel
+                            TvExitBehavior.DoubleBack -> Lang.settings_theme_tv_exit_double
+                        },
+                    ),
+                )
             },
-            title = { Text(stringResource(Lang.settings_theme_tv_exit_confirmation)) },
-            description = { Text(stringResource(Lang.settings_theme_tv_exit_confirmation_description)) },
+            // 写 tvExitBehavior 而不是老的布尔: 一旦显式选过, 读取就不再看那个布尔 (见 exitBehavior)
+            onSelect = { themeSettings.update(themeConfig.copy(tvExitBehavior = it)) },
+            title = { Text(stringResource(Lang.settings_theme_tv_exit_behavior)) },
+            description = { Text(stringResource(Lang.settings_theme_tv_exit_behavior_description)) },
+        )
+        DropdownItem(
+            selected = { themeConfig.tvBackLongPress },
+            // 返回键是精简遥控器唯一够得到面板的入口, 所以三档全给 (含"不做任何事")
+            values = { TvLongPressAction.entries },
+            itemText = { Text(stringResource(tvLongPressActionLabel(it))) },
+            onSelect = { themeSettings.update(themeConfig.copy(tvBackLongPress = it)) },
+            title = { Text(stringResource(Lang.settings_theme_tv_back_long_press)) },
+            description = { Text(stringResource(Lang.settings_theme_tv_back_long_press_description)) },
+        )
+        DropdownItem(
+            selected = { themeConfig.tvPlayLongPress },
+            // 播放键不给"不做任何事": 那样这个手势就彻底空了, 没有意义
+            values = { TvLongPressAction.entries.filter { it != TvLongPressAction.None } },
+            itemText = { Text(stringResource(tvLongPressActionLabel(it))) },
+            onSelect = { themeSettings.update(themeConfig.copy(tvPlayLongPress = it)) },
+            title = { Text(stringResource(Lang.settings_theme_tv_play_long_press)) },
+            description = { Text(stringResource(Lang.settings_theme_tv_play_long_press_description)) },
         )
     }
 

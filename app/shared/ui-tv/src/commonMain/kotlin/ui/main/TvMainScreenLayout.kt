@@ -9,7 +9,12 @@
 
 package me.him188.ani.app.ui.main
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -18,6 +23,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -60,12 +66,15 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.intl.Locale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
@@ -97,6 +106,7 @@ import me.him188.ani.app.ui.foundation.session.TvNavigationSideRail
 import me.him188.ani.app.ui.foundation.session.TvRailAvatarAction
 import me.him188.ani.app.ui.foundation.session.buildTvRailItems
 import me.him188.ani.app.ui.foundation.theme.AniThemeDefaults
+import me.him188.ani.app.data.models.preference.TvExitBehavior
 import me.him188.ani.app.ui.foundation.theme.LocalThemeSettings
 import me.him188.ani.app.ui.foundation.theme.glassContainerColor
 import me.him188.ani.app.ui.foundation.tv.TV_CAPSULE_SIZE_LARGE
@@ -117,6 +127,7 @@ import me.him188.ani.app.ui.lang.playback_session_none
 import me.him188.ani.app.ui.lang.settings_account_popup_edit_profile
 import me.him188.ani.app.ui.lang.settings_account_popup_login_register
 import me.him188.ani.app.ui.lang.settings_account_popup_logout
+import me.him188.ani.app.ui.lang.tv_exit_press_again
 import me.him188.ani.app.ui.lang.tv_force_refresh_toast
 import me.him188.ani.app.ui.lang.tv_quick_menu_home
 import me.him188.ani.app.ui.lang.tv_quick_menu_refresh
@@ -155,17 +166,45 @@ fun TvMainScreenLayout(
     // 里主动按左键进入. 切页/丢焦点不在此单独补丁: 侧边栏点击后 clearFocus, 由 AniAppContent
     // 的全局兜底反复 requestFocus, 经此处 onEnter 稳定落进内容区.
     val contentFocus = remember { FocusRequester() }
-    // TV 返回键: 收藏/缓存等其它页按返回统一回到探索页; 探索页上的"最后一次返回"默认不直接
-    // 退出, 改为弹退出确认 (参考 Prime Video; 可在设置-界面里关掉, 关掉后本处理器不启用 ->
-    // 返回穿到系统, 就是老的"直接退出"). 只有焦点在 hero 按钮行时才走得到这里 —— 卡片区的
-    // 返回被探索页自己的分层 BackHandler 拦下 (注册更深, 优先), 侧边栏把返回消费成回内容区
+    // TV 返回键: 收藏/缓存等其它页按返回统一回到探索页; 探索页上的"最后一次返回"三选一
+    // (设置-界面, 见 [TvExitBehavior]). 只有焦点在 hero 按钮行时才走得到这里 —— 卡片区的
+    // 返回被探索页自己的分层 BackHandler 拦下 (注册更深, 优先), 侧边栏把返回消费成回内容区.
     var showExitDialog by remember { mutableStateOf(false) }
-    val exitConfirmation = LocalThemeSettings.current.tvExitConfirmation
+    val exitBehavior = LocalThemeSettings.current.exitBehavior
     BackHandler(enabled = page != MainScreenPage.Exploration) {
         onNavigateToPage(MainScreenPage.Exploration)
     }
-    BackHandler(enabled = page == MainScreenPage.Exploration && exitConfirmation) {
-        showExitDialog = true
+    // 「连按两次」的中间态. 判据**就是提示条的动画状态**, 没有第二个计时器:
+    //
+    //   武装 = currentState || targetState = "提示条还没完全消失"
+    //
+    // 于是"看得见 = 按下去会退出"是严格成立的, 连淡出那几十毫秒也算数 —— 只有它彻底不见了,
+    // 返回键才恢复成"什么都不做". 用 MutableTransitionState 而不是自己 delay 一个动画时长:
+    // 后者要把动画时长抄一份在计时器里, 改动画就得记得同步改, 迟早对不上.
+    //
+    // (走 LocalToaster 是不行的: Android 上那是系统 Toast, 时长写死约 3.5 秒且改不了, 与这里
+    // 的窗口对不上就会变成谎话 —— 用户看着提示按返回, 什么也没发生. 见 TvExitHintToast.)
+    val exitHintState = remember { MutableTransitionState(false) }
+    val exitArmed = exitHintState.currentState || exitHintState.targetState
+    val pressAgainText = stringResource(Lang.tv_exit_press_again)
+    // Direct 档不注册本处理器 —— 返回穿到系统, 就是老的"直接退出"
+    BackHandler(enabled = page == MainScreenPage.Exploration && exitBehavior != TvExitBehavior.Direct) {
+        when (exitBehavior) {
+            TvExitBehavior.Panel -> showExitDialog = true
+            TvExitBehavior.DoubleBack -> {
+                if (exitArmed) onExitApp() else exitHintState.targetState = true
+            }
+
+            TvExitBehavior.Direct -> Unit // 上面的 enabled 已经排除
+        }
+    }
+    // 到点收起提示条 (武装随之在淡出结束那一刻解除). 复位是必要的: 不然十分钟后的一次返回
+    // 会被凑成十分钟前那一次的第二下
+    if (exitHintState.targetState) {
+        LaunchedEffect(Unit) {
+            delay(TV_EXIT_DOUBLE_BACK_WINDOW_MILLIS)
+            exitHintState.targetState = false
+        }
     }
     if (showExitDialog) {
         TvExitAppDialog(
@@ -262,6 +301,62 @@ fun TvMainScreenLayout(
             ),
             modifier = Modifier.fillMaxHeight(),
         )
+        TvExitHintToast(state = exitHintState, text = pressAgainText)
+    }
+}
+
+/**
+ * 「再按一次退出」的提示条 —— 照着 **Android 系统 Toast** 的观感画的, 但**可见性由外部传进来的
+ * 动画状态直接驱动**, 自己不带任何计时器. 调用方拿同一个 [MutableTransitionState] 当武装判据,
+ * 所以"看得见"与"按下去会退出"严格是同一件事, 连淡出中也算.
+ *
+ * ## 为什么不直接用现成的两个
+ *
+ * - `LocalToaster.toast()`: Android 上它就是系统 `Toast.makeText(..., LENGTH_LONG)` (见
+ *   MainActivity), 时长写死约 3.5 秒且**改不了**. 而这条提示的全部意义在于"看得见 = 按下去会
+ *   退出", 时长必须等于武装窗口 (1 秒), 对不上就会变成谎话: 用户看着提示按返回, 什么也没发生.
+ *   它还是个单通道, 这一秒里任何别的提示都会把它顶掉, 而武装状态还亮着.
+ * - `widgets.Toast` 那个 composable: 时长能绑, 但它是应用自己那套样式 (surfaceContainerHigh、
+ *   距底 100dp、横向 60dp 留白、最宽 640dp), 与系统 Toast 差别明显 —— 用户要的是原来那条.
+ *
+ * 所以照系统 Toast 复刻: 底部居中、距底 [TV_EXIT_HINT_BOTTOM_DP] (framework 的 toast y offset
+ * 就是 64dp)、pill 圆角、半透明黑底白字、紧凑内边距.
+ *
+ * **颜色刻意写死而不取主题**: 系统 Toast 在深浅两种主题下都是深色条白字, 取 inverseSurface 那类
+ * 反色角色的话深色主题下会翻成白条黑字, 就不是"原来那条"了.
+ */
+@Composable
+private fun BoxScope.TvExitHintToast(state: MutableTransitionState<Boolean>, text: String) {
+    AnimatedVisibility(
+        visibleState = state,
+        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = TV_EXIT_HINT_BOTTOM_DP),
+        // 动画短促: 这条提示的角色是"刚才那下没退出, 想退就立刻再按"的闪现信号, 不是让人读的
+        // 说明; 淡出还要算进武装时间里 (见调用处), 拖长就等于偷偷延长了窗口
+        enter = fadeIn(tween(TV_EXIT_HINT_FADE_IN_MILLIS)),
+        exit = fadeOut(tween(TV_EXIT_HINT_FADE_OUT_MILLIS)),
+    ) {
+        Surface(
+            // 不是 pill (percent = 50): 系统 Toast 的角是圆的但仍看得出是个矩形.
+            // 取条高的三分之一左右
+            shape = RoundedCornerShape(TV_EXIT_HINT_CORNER),
+            color = TV_EXIT_HINT_BACKGROUND,
+            contentColor = TV_EXIT_HINT_CONTENT,
+        ) {
+            Text(
+                text,
+                Modifier.padding(
+                    horizontal = TV_EXIT_HINT_PADDING_HORIZONTAL,
+                    vertical = TV_EXIT_HINT_PADDING_VERTICAL,
+                ),
+                // 行高压到 [TV_EXIT_HINT_LINE_HEIGHT] 并关掉 font padding: 这两样决定条子有多高,
+                // 而条高又决定 pill 的半径 —— 差 4dp 就会让圆角看起来"不太一样"
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    lineHeight = TV_EXIT_HINT_LINE_HEIGHT,
+                    platformStyle = PlatformTextStyle(includeFontPadding = false),
+                ),
+                maxLines = 1,
+            )
+        }
     }
 }
 
@@ -1161,3 +1256,74 @@ private val TV_NOW_PLAYING_PLACEHOLDER_ICON_SIZE = 26.dp
 
 /** 固定标签行的高度: 写死免得空文案时整个面板抖一下. */
 private val TV_ACTION_PANEL_LABEL_HEIGHT = 20.dp
+
+/** 提示条距屏幕下缘的距离. */
+private val TV_EXIT_HINT_BOTTOM_DP = 24.dp
+
+/**
+ * 圆角 = 条高 × 0.442. **不是 pill** —— 这是照真机系统 Toast 的截图拟合出来的 (圆弧方程最小
+ * 二乘, rms 0.43px, 拟合得很干净), 而 pill 的比值是 0.5. 差这 0.06 正是之前几版"看着还是不太
+ * 一样"的地方.
+ *
+ * 条高 = 行高 16 + 上下各 [TV_EXIT_HINT_PADDING_VERTICAL] = 45dp, 故 45 × 0.442 ≈ 20dp.
+ * 改动上面任何一个都要把这里跟着重算.
+ */
+private val TV_EXIT_HINT_CORNER = 20.dp
+
+/**
+ * 提示条底色与字色: **不跟应用主题走**, 深浅主题下都是同一条 (见 [TvExitHintToast]).
+ *
+ * 按真机截图解出来的: **源色 RGB(235, 234, 237) + alpha 0.92** —— 系统 Toast 是**半透明**的.
+ *
+ * 解法: 条子上缘那一带没有文字, 拿它与正上方的背景做逐通道线性回归 —— 半透明合成是
+ * `观察值 = α·源色 + (1-α)·背景`, 所以斜率就是 `1-α`. 三个通道各自回归都落在 α ≈ 0.92,
+ * 源色 ≈ (235, 234, 237), 彼此独立却一致, 可信. 验算: 黑底上 0.92 × 235 ≈ 216, 正是肉眼在
+ * 黑色区域取到的那个 216 —— 之前把 216 直接当成不透明底色, 是把"混合结果"当成了"源色".
+ *
+ * 定死字面值而不是从主题取: 系统 Toast 不跟应用主题走, 这条要冒充它就也不能跟.
+ */
+private val TV_EXIT_HINT_BACKGROUND = Color(0xEBEBEAED)
+
+/** 字色: 同一张截图上取的 (笔画最深处均值 RGB(28,27,29)), 与底色同一路冷调. 文字不透明. */
+private val TV_EXIT_HINT_CONTENT = Color(0xFF1C1B1D)
+
+/**
+ * 内边距. 与圆角一样是从截图**按比例**反推的, 而不是量出绝对 dp —— 截图的 density 说不准
+ * (screencap 截的是 override 的 1080p 还是物理 4K, 差一倍), 但比例与 density 无关:
+ *
+ * ```
+ * 左右留白 / 汉字墨迹高 = 2.54      上下留白 / 汉字墨迹高 = 1.343
+ * ```
+ *
+ * 本条用 14sp, 汉字墨迹高约 12.3dp, 于是左右 ≈ 31dp、上下 ≈ 16.5dp. 竖直方向要扣掉行高比
+ * 墨迹高多出来的那 1.85dp (行高 16 vs 墨迹 12.3, 上下各摊一半), 所以写 14.5dp.
+ */
+private val TV_EXIT_HINT_PADDING_HORIZONTAL = 31.dp
+
+private val TV_EXIT_HINT_PADDING_VERTICAL = 14.5.dp
+
+/**
+ * 文字行高. Material 的 `bodyMedium` 是 20sp, 系统 Toast 用的是紧凑行高 —— 多出来的部分全加在
+ * 条高上, 而条高又决定圆角 (见 [TV_EXIT_HINT_CORNER]), 所以这个值必须钉住.
+ *
+ * 取 16sp: 比 14sp 的字号略高一点点 (给汉字的上下留一线), 但不像 20sp 那样把条子撑胖.
+ * 配合 `includeFontPadding = false`, 文字块高度就是这 16dp.
+ */
+private val TV_EXIT_HINT_LINE_HEIGHT = 16.sp
+
+/**
+ * 提示条**亮着**(不动) 的时长. 实际的武装窗口还要加上淡出那一段 (见调用处: 只有提示条彻底
+ * 不见了才解除), 所以总容错是 [TV_EXIT_DOUBLE_BACK_WINDOW_MILLIS] + [TV_EXIT_HINT_FADE_OUT_MILLIS]
+ * = 1 秒, 与调整前一致 —— 这次只是把其中一段从"亮着"挪给了"淡出".
+ */
+private const val TV_EXIT_DOUBLE_BACK_WINDOW_MILLIS = 700L
+
+private const val TV_EXIT_HINT_FADE_IN_MILLIS = 80
+
+/**
+ * 淡出时长. **这一段仍然算在武装窗口里**, 所以它既是视觉上的收尾, 也是最后的容错余量.
+ *
+ * 之前 100ms 看起来是"啪一下没了"而不是淡出 —— 300ms 才读得出是在消退, 而消退本身就是这个
+ * 手势的进度条: 用户看着它变淡就知道还剩多少时间.
+ */
+private const val TV_EXIT_HINT_FADE_OUT_MILLIS = 300

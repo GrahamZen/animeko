@@ -21,6 +21,44 @@ enum class DarkMode {
     AUTO, LIGHT, DARK,
 }
 
+/** TV: 在主页 (探索页 hero) 上按返回键那一下做什么. 见 [ThemeSettings.tvExitBehavior]. */
+@Serializable
+enum class TvExitBehavior {
+    /** 直接退出应用 —— 加确认之前的老行为. */
+    Direct,
+
+    /** 弹出动作面板 (焦点落「退出应用」), 顺带能看到后台在播什么. */
+    Panel,
+
+    /** 连按两次: 第一次只提示"再按一次退出", 窗口内再按一下才真退. */
+    DoubleBack,
+}
+
+/**
+ * TV: 某个键**长按**时做什么.
+ *
+ * 两个键各配各的 (见 [ThemeSettings.tvBackLongPress] / [ThemeSettings.tvPlayLongPress]), 而不是
+ * 一个"哪些键能开面板"的三选一 —— 后者有个空档: 选"只有返回键开面板"时, 长按播放键就闲置了,
+ * 而那个手势本身是有用的 (它原先就是"一步回到正在播放").
+ */
+@Serializable
+enum class TvLongPressAction {
+    /** 打开动作面板. */
+    Panel,
+
+    /** 直接回到后台正在播的那一集 (没有会话时什么都不做). */
+    Resume,
+
+    /**
+     * 不认领, 保持这个键的普通语义.
+     *
+     * 只给返回键用: 播放键长按不认领的话那个手势就彻底空了, 没有意义.
+     * 注意选它之后, 若遥控器又没有播放键 (Chromecast 那类精简遥控器), 动作面板就没有入口了 ——
+     * 设置项的说明里写着这句.
+     */
+    None,
+}
+
 @Serializable
 @Immutable
 data class ThemeSettings(
@@ -55,13 +93,34 @@ data class ThemeSettings(
      */
     val tvNoticeSound: NoticeSoundKind = NoticeSoundKind.Default,
     /**
-     * TV: 在主页按返回键 (即"再按一下就退出应用"的那一下) 先弹确认框, 而不是直接退出.
+     * **已被 [tvExitBehavior] 取代, 只留着做迁移** —— 判断行为一律用 [exitBehavior], 别读这个.
      *
-     * 默认开: 遥控器上返回键按得很随意, 一路退到底就把应用关了 —— 而这个形态下"关掉"的代价
-     * 比手机大 (保留的播放会话、正在跑的 BT 服务都跟着没). 确认框里顺带给"回到/关闭正在播放"
-     * 两个出口 (见 TvExitAppDialog). 关掉则回到"按返回直接退出"的老行为.
+     * 它原先是个布尔: 开 = 在主页按返回先弹确认框, 关 = 直接退出. 升级成三选一之后不能直接删:
+     * 这套设置的 JSON 是 `encodeDefaults = false`, 显式关过它的人存着 `{"tvExitConfirmation":false}`,
+     * 字段一没这份选择就丢了 (表现为"我明明关了确认, 更新完又回来了").
      */
     val tvExitConfirmation: Boolean = true,
+    /**
+     * TV: 在主页按返回键那一下的行为 (三选一, 见 [TvExitBehavior]).
+     *
+     * **`null` = 还没显式选过**, 这时按老的布尔开关 [tvExitConfirmation] 推导 —— 读取一律走
+     * [exitBehavior], 别直接读这个字段. 这套设置的 JSON 是 `encodeDefaults = false`, 显式关过
+     * 旧开关的人存着 `{"tvExitConfirmation":false}`, 直接换字段会把他们的选择丢掉.
+     */
+    val tvExitBehavior: TvExitBehavior? = null,
+    /**
+     * TV: **长按返回键**做什么 (见 [TvLongPressAction]).
+     *
+     * 默认开面板. 它是精简遥控器 (没有播放键) 唯一够得到面板的入口, 所以三档里唯独它允许 [TvLongPressAction.None].
+     */
+    val tvBackLongPress: TvLongPressAction = TvLongPressAction.Panel,
+    /**
+     * TV: **长按播放键**做什么 (见 [TvLongPressAction]).
+     *
+     * 默认开面板. 选 [TvLongPressAction.Resume] 就是旧行为"一步跳回正在播放" —— 与返回键配成
+     * "返回开面板 / 播放直接回去"的分工, 两个手势各司其职而不是重复.
+     */
+    val tvPlayLongPress: TvLongPressAction = TvLongPressAction.Panel,
     /**
      * TV: 完整视觉效果 (**默认关**), 即不为低端设备让步的那一档.
      *
@@ -103,6 +162,17 @@ data class ThemeSettings(
     @Transient
     val effectiveUiScale: Float =
         if (uiScale.isFinite()) uiScale.coerceIn(UI_SCALE_MIN, UI_SCALE_MAX) else 1f
+
+    /**
+     * 实际生效的"主页按返回"行为 —— **读这个, 别读 [tvExitBehavior]**.
+     *
+     * 没显式选过时 (`null`) 由老的布尔开关推导: 显式关过确认的人继续得到"直接退出", 其余人得到
+     * 新的默认 [TvExitBehavior.DoubleBack]. 之所以默认从"弹面板"改成"连按两次": 它比直接退出安全
+     * (挡住单次误按), 又比面板快 (不用看、不用挪焦点), 而面板本身并没有因此失去 —— 长按随时能开.
+     */
+    @Transient
+    val exitBehavior: TvExitBehavior =
+        tvExitBehavior ?: if (tvExitConfirmation) TvExitBehavior.DoubleBack else TvExitBehavior.Direct
 
     companion object {
         @Stable
