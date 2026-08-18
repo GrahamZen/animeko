@@ -27,7 +27,12 @@ import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.transformer.ExperimentalFrameExtractor
 import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
@@ -134,6 +139,14 @@ private const val FRAME_DEBOUNCE_MILLIS = 200L
 private const val FRAME_POSITION_GRID_MILLIS = 0L
 
 /**
+ * 离屏多久之后才真正释放取帧会话 (见 [TvFramePreviewSourceStore]).
+ *
+ * 取值权衡: 长到能盖住"退出播放页看一眼再回来"的往返 (动作面板那条路来回也就两三秒), 短到不让
+ * 第二个解码器在后台白占太久 —— 后台常驻两个解码器是 issue #10 的引信.
+ */
+private val SOURCE_RETAIN_AFTER_DETACH = 5.seconds
+
+/**
  * TV 版进度条缩略图状态: 与 `rememberMediaProgressFramePreviewState` 同形, 只是取帧源换成
  * [ExperimentalFrameExtractor] (见文件头). 返回的 state 由 `MediaProgressSlider` 消费.
  */
@@ -145,9 +158,11 @@ internal fun rememberTvFramePreviewState(
 ): MediaProgressFramePreviewState {
     val context = LocalContext.current
     val density = LocalDensity.current
-    val source = remember(context, player) { TvFramePreviewSource(context, player) }
-    // 会话持有一个 ExoPlayer 实例, 离屏必须释放
-    DisposableEffect(source) { onDispose { source.release() } }
+    // 取帧源跨组合存活 (见 [TvFramePreviewSourceStore]): 离屏不立刻销毁, 延迟一小会儿 ——
+    // 保留会话下"退出播放页看一眼再回来"是常规操作, 每次都重建要现付 ~3.5 秒, 而且旧会话的
+    // 释放是同步等播放器停, 正好卡在切页那一下
+    val source = remember(context, player) { TvFramePreviewSourceStore.acquire(context, player) }
+    DisposableEffect(source) { onDispose { TvFramePreviewSourceStore.scheduleRelease(source) } }
     val state = remember(source, density, maxWidth, maxHeight) {
         val maxWidthPx = with(density) { maxWidth.roundToPx() }
         val maxHeightPx = with(density) { maxHeight.roundToPx() }
@@ -188,6 +203,78 @@ internal fun rememberTvFramePreviewState(
         }
     }
     return state
+}
+
+/**
+ * **取帧源的跨组合缓存**: 按 player 实例认领, 离屏后延迟 [SOURCE_RETAIN_AFTER_DETACH] 才真正释放.
+ *
+ * ## 为什么要缓存
+ *
+ * 保留会话下"退出播放页 → 看一眼详情页/选集 → 回来"是常规操作 (长按播放键开动作面板再按回去也是
+ * 这条路), 而每进一次播放页就重建一次取帧会话的代价是**双份**的:
+ *
+ * - 建会话 (ExoPlayer 启动 + 远程容器解析) 实测 ~3.5 秒, 且它是**第二个 ExoPlayer**, 与主播放器
+ *   抢带宽和解码器;
+ * - [TvFramePreviewSource.release] 是主线程同步等播放器停 —— 若此刻还有取帧在飞 (慢源实测 3.4 秒),
+ *   那一下就卡在切页动画上.
+ *
+ * 2026-08-18 真机上这条被踩实了: 用户 7 秒内两进两出播放页, 于是 7 秒内建了两个取帧会话, 上一个的
+ * 取帧还没回来下一个就开工, 进程 pss 涨到 417MB 被系统当前台进程 SIGKILL (见
+ * `dumpsys activity exit-info`).
+ *
+ * ## 为什么不干脆让它跟着播放器一直活着
+ *
+ * 那正是这里**刻意不做**的: 取帧会话的 ExoPlayer 一旦 prepare 就占着一个硬解实例, 而保留的会话
+ * 可以在后台挂很久 —— 后台常驻两个解码器既是 issue #10 (第二路解码器抢占 → 换源扩展把设备侧解码
+ * 错误当成源不可用 → 逐个拉黑) 的引信, 也正是上面那次 OOM 的方向. 所以缓存**有期限**: 短暂离屏
+ * 复用, 真的走了就释放.
+ *
+ * ## 生命周期
+ *
+ * 全部在主线程上跑 (acquire/scheduleRelease 都从组合调用), 所以不需要额外同步.
+ * - 同一个 player 再次进来: 取消挂起的释放, 原样复用, 零重建;
+ * - player 换了 (换集/换会话): 旧的**立刻**释放, 不等超时;
+ * - 离屏超过期限: 释放. 那时取帧早就跑完了, 同步释放也不再卡 —— 顺带把切页那下卡顿也解决了.
+ */
+@OptIn(UnstableApi::class, ExperimentalMediampApi::class)
+private object TvFramePreviewSourceStore {
+    private var currentPlayer: MediampPlayer? = null
+    private var currentSource: TvFramePreviewSource? = null
+    private var releaseJob: Job? = null
+    private val scope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
+
+    fun acquire(context: Context, player: MediampPlayer): TvFramePreviewSource {
+        releaseJob?.cancel()
+        releaseJob = null
+        val existing = currentSource
+        if (existing != null && currentPlayer === player) return existing
+        // player 换了: 旧的不能等超时 —— 新会话马上要建自己的 ExoPlayer, 两个叠在一起正是要避免的
+        existing?.release()
+        return TvFramePreviewSource(context.applicationContext, player).also {
+            currentPlayer = player
+            currentSource = it
+        }
+    }
+
+    /**
+     * 离屏: 挂一个延迟释放. 期间若同一个 player 再进来, [acquire] 会把它取消掉.
+     *
+     * 传 source 而不是无参, 是为了认领: 组合销毁的 onDispose 排在新组合的 remember **之后**,
+     * 换会话时这里收到的可能已经是被顶掉的那一个 (它在 [acquire] 里已经释放过了).
+     */
+    fun scheduleRelease(source: TvFramePreviewSource) {
+        if (currentSource !== source) return
+        releaseJob?.cancel()
+        releaseJob = scope.launch {
+            delay(SOURCE_RETAIN_AFTER_DETACH)
+            if (currentSource === source) {
+                currentSource = null
+                currentPlayer = null
+                source.release()
+            }
+            releaseJob = null
+        }
+    }
 }
 
 @OptIn(UnstableApi::class, ExperimentalMediampApi::class)
