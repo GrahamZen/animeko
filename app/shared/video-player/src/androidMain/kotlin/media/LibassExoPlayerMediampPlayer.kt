@@ -185,8 +185,11 @@ private class LibassMediaSourcePipeline(
     private val extractorsFactory = DefaultExtractorsFactory()
         .withAssMkvSupport(subtitleParserFactory, assHandler)
 
+    // withColorInfoRepair: 色彩三项不全时 Shield 不设视频层 dataspace, 留着的垃圾撞上 ST2084 位
+    // 就变假 HDR. 包在 MediaSource 出口是为了覆盖所有入口 (progressive/HLS/兜底默认源),
+    // 详见 ColorInfoRepair.kt
     fun intercept(defaultSource: MediaSource, data: MediaData): MediaSource =
-        createLibassMediaSource(data) ?: defaultSource
+        (createLibassMediaSource(data) ?: defaultSource).withColorInfoRepair()
 
     private fun createLibassMediaSource(data: MediaData): MediaSource? {
         val dataSourceFactory = when (data) {
