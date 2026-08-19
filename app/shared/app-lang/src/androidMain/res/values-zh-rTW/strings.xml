@@ -30,6 +30,9 @@
     <string name="tv_quick_menu_home">回到主介面</string>
     <string name="tv_quick_menu_refresh">重新整理本頁</string>
     <string name="playback_session_none">沒有正在播放的內容</string>
+    <string name="playback_nothing_to_play">暫無可播放的內容</string>
+    <string name="playback_up_next_continue">繼續播放</string>
+    <string name="playback_up_next_start">接下來播放</string>
     <string name="tv_service_check_hint">檢測服務連通 · 長按開啟代理設定</string>
     <string name="tv_service_check_hint_never">尚未檢測 · 長按開啟代理設定</string>
     <string name="tv_service_check_hint_stale">結果可能已過期 · 長按開啟代理設定</string>

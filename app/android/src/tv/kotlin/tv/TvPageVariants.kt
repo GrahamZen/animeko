@@ -12,6 +12,7 @@ package me.him188.ani.android.tv
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -49,6 +50,7 @@ import me.him188.ani.app.ui.foundation.widgets.LocalToaster
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.playback_session_none
 import me.him188.ani.app.ui.main.TvQuickActionMenu
+import me.him188.ani.app.ui.main.TvUpNextStore
 import me.him188.ani.app.ui.subject.episode.RetainedPlaybackSessionHolder
 import me.him188.ani.app.ui.exploration.ExplorationPageVariant
 import me.him188.ani.app.ui.exploration.LocalExplorationPageVariant
@@ -219,6 +221,10 @@ fun InstallTvPageVariants(aniNavigator: AniNavigator, content: @Composable () ->
             }
         }
         TvBackLongPressHandler { performLongPress(backLongPressAction) }
+        // 动作面板顶上那张卡在没有会话时显示「接下来播放」, 它的目标就由这条链算.
+        // 起在根部而不是面板里: 面板要**同步**读到结果 (卡片能不能按决定了默认焦点落点),
+        // 面板打开时才现算的话, 数据晚到就会把落点挪走 —— 见 TvUpNextStore 的文档
+        LaunchedEffect(Unit) { TvUpNextStore.run() }
         TvKeyLongPressHandler(playLongPress) { performLongPress(playLongPressAction) }
         if (showQuickMenu) {
             val context = LocalContext.current

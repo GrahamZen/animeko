@@ -558,6 +558,9 @@
     <string name="tv_quick_menu_home">Back to Home</string>
     <string name="tv_quick_menu_refresh">Refresh This Page</string>
     <string name="playback_session_none">Nothing is playing</string>
+    <string name="playback_nothing_to_play">Nothing to play yet</string>
+    <string name="playback_up_next_continue">Continue watching</string>
+    <string name="playback_up_next_start">Up next</string>
     <string name="tv_service_check_hint">Check services · hold to open proxy settings</string>
     <string name="tv_service_check_hint_never">Not checked yet · hold to open proxy settings</string>
     <string name="tv_service_check_hint_stale">Results may be stale · hold to open proxy settings</string>
