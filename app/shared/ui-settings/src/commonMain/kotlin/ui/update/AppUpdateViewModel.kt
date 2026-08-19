@@ -351,11 +351,13 @@ private fun cleanReleaseBody(body: String, keepSectionHeadings: Boolean): String
         it.startsWith("**Full Changelog**: ", ignoreCase = true)
                 || it.startsWith("Full Changelog:", ignoreCase = true)
     }
-    // 引用块两种正文都要丢: 那一段是带 markdown 链接的说明
-    // (`> 遥控器使用说明, 见 [README](...)`), 纯文本显示出来就是一串方括号和网址
+    // 引用块只从**气泡**那份里丢: 气泡是逐行纯文本, 那一段带 markdown 链接
+    // (`> 遥控器使用说明, 见 [README](...)`) 显示出来就是一串方括号和网址.
+    // 详情弹窗那份留着 —— 它现在按 markdown 渲染 (见 NewVersionDetailsDialog), 引用块与链接
+    // 都画得出来, 而那一段恰恰是最该让人看到的说明
     .filterNot { line ->
         val trimmed = line.trimStart()
-        trimmed.startsWith(">") || (!keepSectionHeadings && trimmed.startsWith("#"))
+        !keepSectionHeadings && (trimmed.startsWith(">") || trimmed.startsWith("#"))
     }
     .joinToString("\n")
     // 删掉整行后留下的连续空行折叠成一个空行

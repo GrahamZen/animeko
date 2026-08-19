@@ -43,6 +43,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import me.him188.ani.app.ui.foundation.LocalAniUiBehavior
 import me.him188.ani.app.ui.foundation.focus.resolveFocusRepeatedly
@@ -50,6 +51,8 @@ import me.him188.ani.app.ui.foundation.ifThen
 import me.him188.ani.app.ui.foundation.tv.tvFieldBorder
 import me.him188.ani.app.ui.foundation.tv.tvPageScrollKeys
 import me.him188.ani.app.ui.foundation.widgets.AniCenteredPanelDialog
+import me.him188.ani.app.ui.richtext.RichText
+import me.him188.ani.app.ui.richtext.UIRichElement
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.settings_update_popup_close
 import me.him188.ani.app.ui.lang.settings_update_popup_new_version
@@ -142,10 +145,11 @@ private fun DialogActions(
 }
 
 /**
- * 更新内容正文: 按 release 说明里的小节标题 (`### 修复`) 分段, 条目前面画点.
+ * 更新内容正文: 按 release 说明里的小节标题 (`### 修复`) 分段, 条目前面画点, 正文按 markdown 渲染.
  *
- * 没有走富文本渲染: 这份文本只有"标题 / 条目"两种行, 而 release 说明里偶尔出现的行内代码与
- * 链接语法照原样显示也读得懂, 不值得为它把 markdown 渲染搬进更新弹窗.
+ * **走的是评论那套富文本** ([RichText]): release body 本来就是 markdown, 逐行纯文本显示会把
+ * `**加粗**`、`[文字](链接)` 原样糊在正文里 —— 写说明的人越用心显示得越乱. 解析见
+ * [parseChangelogBlocks]; 图片也因此能显示, 与评论区同一条加载链路.
  */
 @Composable
 private fun ChangelogBody(
@@ -153,7 +157,21 @@ private fun ChangelogBody(
     focusable: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val lines = remember(changes) { parseChangelogLines(changes) }
+    // 富文本要的字号/颜色在这里取 (解析器不是 @Composable): 正文对齐 bodyMedium, 小节对齐 titleSmall
+    val bodyStyle = ChangelogTextStyle(
+        size = MaterialTheme.typography.bodyMedium.fontSize.value,
+        linkColor = MaterialTheme.colorScheme.primary,
+    )
+    val sectionStyle = ChangelogTextStyle(
+        size = MaterialTheme.typography.titleSmall.fontSize.value,
+        color = MaterialTheme.colorScheme.primary,
+        linkColor = MaterialTheme.colorScheme.primary,
+        bold = true,
+    )
+    val blocks = remember(changes, bodyStyle, sectionStyle) {
+        parseChangelogBlocks(changes, bodyStyle, sectionStyle)
+    }
+    val uriHandler = LocalUriHandler.current
     val scrollState = rememberScrollState()
     val focusRequester = remember { FocusRequester() }
     var focused by remember { mutableStateOf(false) }
@@ -185,46 +203,56 @@ private fun ChangelogBody(
             },
     ) {
         Column(Modifier.verticalScroll(scrollState)) {
-            lines.forEachIndexed { index, line ->
-                when (line) {
-                    is ChangelogLine.Section -> Text(
-                        text = line.text,
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.primary,
+            // 链接一律交给系统浏览器: 与弹窗底部那颗「查看详情」同一个去处.
+            // 遥控器上点不到 (纯文本不吃焦点), 但至少不再是一串方括号加网址
+            val onClickUrl: (String) -> Unit = { runCatching { uriHandler.openUri(it) } }
+            blocks.forEachIndexed { index, block ->
+                when (block) {
+                    is ChangelogBlock.Section -> RichText(
+                        elements = listOf(UIRichElement.AnnotatedText(block.slice)),
                         modifier = Modifier.padding(top = if (index == 0) 0.dp else 12.dp, bottom = 4.dp),
+                        onClickUrl = onClickUrl,
                     )
 
-                    is ChangelogLine.Item -> Row(Modifier.padding(bottom = 6.dp), verticalAlignment = Alignment.Top) {
-                        Text("•", style = MaterialTheme.typography.bodyMedium)
+                    is ChangelogBlock.Item -> Row(
+                        Modifier
+                            .padding(start = (block.indent * CHANGELOG_INDENT_STEP.value).dp, bottom = 6.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        // 嵌套层用空心点, 与上一级分得开
+                        Text(if (block.indent == 0) "•" else "◦", style = MaterialTheme.typography.bodyMedium)
                         Spacer(Modifier.width(8.dp))
-                        Text(line.text, style = MaterialTheme.typography.bodyMedium)
+                        RichText(
+                            elements = listOf(UIRichElement.AnnotatedText(block.slice)),
+                            onClickUrl = onClickUrl,
+                        )
                     }
+
+                    is ChangelogBlock.Paragraph -> RichText(
+                        elements = listOf(UIRichElement.AnnotatedText(block.slice)),
+                        modifier = Modifier.padding(bottom = 6.dp),
+                        onClickUrl = onClickUrl,
+                    )
+
+                    is ChangelogBlock.Quote -> RichText(
+                        elements = listOf(UIRichElement.Quote(listOf(UIRichElement.AnnotatedText(block.slice)))),
+                        modifier = Modifier.padding(bottom = 6.dp),
+                        onClickUrl = onClickUrl,
+                    )
+
+                    is ChangelogBlock.Image -> RichText(
+                        elements = listOf(UIRichElement.Image(block.url, jumpUrl = null)),
+                        modifier = Modifier.padding(bottom = 6.dp),
+                        onClickUrl = onClickUrl,
+                    )
                 }
             }
         }
     }
 }
 
-private sealed interface ChangelogLine {
-    /** 小节标题 (`### 修复`). */
-    data class Section(val text: String) : ChangelogLine
-
-    /** 一条更新内容. */
-    data class Item(val text: String) : ChangelogLine
-}
-
-private fun parseChangelogLines(changes: String): List<ChangelogLine> =
-    changes.lineSequence()
-        .map { it.trim() }
-        .filter { it.isNotBlank() }
-        .map { line ->
-            if (line.startsWith("#")) {
-                ChangelogLine.Section(line.trimStart('#').trim())
-            } else {
-                ChangelogLine.Item(line.removePrefix("- ").removePrefix("* "))
-            }
-        }
-        .toList()
-
 /** 正文块的圆角: 边框与裁剪共用. */
 private val CHANGELOG_BLOCK_CORNER = 12.dp
+
+/** 嵌套条目每级往右让多少. */
+private val CHANGELOG_INDENT_STEP = 16.dp
