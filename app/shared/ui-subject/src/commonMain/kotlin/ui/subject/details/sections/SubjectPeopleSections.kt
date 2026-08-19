@@ -256,24 +256,47 @@ fun CharactersSection(
         }
     }
     if (showAll) {
-        val onClickCharacter = rememberPeopleClickHandler()
-        ViewAllSheet(
-            title = totalCharactersCount?.let { stringResource(Lang.subject_details_characters_with_count, it) }
-                ?: stringResource(Lang.subject_details_characters),
-            items = allCharacters,
-            onDismissRequest = { showAll = false },
-            gridColumns = VIEW_ALL_GRID_COLUMNS,
-        ) {
-            PersonCard(
-                it,
-                Modifier
-                    .clip(MaterialTheme.shapes.small)
-                    .clickable {
-                        showAll = false
-                        onClickCharacter(PeoplePreviewTarget.Character(it.character.id))
-                    },
-            )
-        }
+        CharactersViewAllDialog(allCharacters, totalCharactersCount, onDismissRequest = { showAll = false })
+    }
+}
+
+/**
+ * 角色的「查看全部」弹窗: 全量名单, TV 上是居中大网格 (见 [ViewAllSheet]).
+ *
+ * 抽成独立组合而不是留在 [CharactersSection] 里, 是因为**播放器要弹同一个弹窗而那里没有这个区块**
+ * (内嵌详情页是精简版, 角色/制作人员由胶囊面板承担). 胶囊按下确定原先只是"把焦点送进面板",
+ * 与直接按上键完全重复 —— 那一下现在给的就是这份大网格.
+ *
+ * 点卡片: 先关本弹窗再弹人物预览 (**不叠第二层弹窗**, 遥控器上两层弹窗的焦点归属没有好解法).
+ */
+@Composable
+fun CharactersViewAllDialog(
+    allCharacters: LazyPagingItems<RelatedCharacterInfo>,
+    totalCharactersCount: Int?,
+    onDismissRequest: () -> Unit,
+    /**
+     * 点卡片时在弹人物预览**之前**调用. 默认就是关掉本弹窗;
+     * TV 播放器额外要记一笔"预览是从这儿开的"(关掉预览后焦点该还给胶囊而不是面板条目).
+     */
+    onBeforeOpenPreview: () -> Unit = onDismissRequest,
+) {
+    val onClickCharacter = rememberPeopleClickHandler()
+    ViewAllSheet(
+        title = totalCharactersCount?.let { stringResource(Lang.subject_details_characters_with_count, it) }
+            ?: stringResource(Lang.subject_details_characters),
+        items = allCharacters,
+        onDismissRequest = onDismissRequest,
+        gridColumns = VIEW_ALL_GRID_COLUMNS,
+    ) {
+        PersonCard(
+            it,
+            Modifier
+                .clip(MaterialTheme.shapes.small)
+                .clickable {
+                    onBeforeOpenPreview()
+                    onClickCharacter(PeoplePreviewTarget.Character(it.character.id))
+                },
+        )
     }
 }
 
@@ -407,23 +430,36 @@ fun StaffSection(
         }
     }
     if (showAll) {
-        ViewAllSheet(
-            title = totalStaffCount?.let { stringResource(Lang.subject_details_staff_with_count, it) }
-                ?: stringResource(Lang.subject_details_staff),
-            items = allStaff,
-            onDismissRequest = { showAll = false },
-            gridColumns = VIEW_ALL_GRID_COLUMNS,
-        ) {
-            PersonCard(
-                it,
-                Modifier
-                    .clip(MaterialTheme.shapes.small)
-                    .clickable {
-                        showAll = false
-                        onClickPerson(PeoplePreviewTarget.Person(it.personInfo.id))
-                    },
-            )
-        }
+        StaffViewAllDialog(allStaff, totalStaffCount, onDismissRequest = { showAll = false })
+    }
+}
+
+/** 制作人员的「查看全部」弹窗; 与 [CharactersViewAllDialog] 同一形态与同一批调用方. */
+@Composable
+fun StaffViewAllDialog(
+    allStaff: LazyPagingItems<RelatedPersonInfo>,
+    totalStaffCount: Int?,
+    onDismissRequest: () -> Unit,
+    /** 同 [CharactersViewAllDialog] 的同名参数. */
+    onBeforeOpenPreview: () -> Unit = onDismissRequest,
+) {
+    val onClickPerson = rememberPeopleClickHandler()
+    ViewAllSheet(
+        title = totalStaffCount?.let { stringResource(Lang.subject_details_staff_with_count, it) }
+            ?: stringResource(Lang.subject_details_staff),
+        items = allStaff,
+        onDismissRequest = onDismissRequest,
+        gridColumns = VIEW_ALL_GRID_COLUMNS,
+    ) {
+        PersonCard(
+            it,
+            Modifier
+                .clip(MaterialTheme.shapes.small)
+                .clickable {
+                    onBeforeOpenPreview()
+                    onClickPerson(PeoplePreviewTarget.Person(it.personInfo.id))
+                },
+        )
     }
 }
 

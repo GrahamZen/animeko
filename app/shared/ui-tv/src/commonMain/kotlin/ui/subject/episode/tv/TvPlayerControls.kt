@@ -328,6 +328,12 @@ internal fun TvPlayerControlsOverlay(
         // 每个胶囊按钮的焦点请求器: 面板最底项按下键显式回到"打开它的那个胶囊" ——
         // 靠空间搜索会落到面板正下方的任意按钮, 落错后该按钮又把面板切成自己的 (卡片跳变)
         val pillFocusRequesters = remember { TvPlayerPanel.entries.associateWith { FocusRequester() } }
+        // 角色 / 制作人员胶囊按下确定: 弹与详情页同一个「查看全部」大网格 (见 TvPlayerPeopleViewAllDialog).
+        // 只会是 STAFF / CHARACTERS 两颗; null = 没开.
+        var peopleViewAll by remember { mutableStateOf<TvPlayerPanel?>(null) }
+        // 人物预览是从那个弹窗点开的 (弹窗先关、预览再开), 关掉之后焦点要还给**胶囊**而不是面板条目.
+        // 从面板条目点开的那条路不置这个标志, 仍旧还回条目
+        var peoplePreviewFrom by remember { mutableStateOf<TvPlayerPanel?>(null) }
         // 进度条按下键的显式落点: 图标行最左按钮 (全宽进度条交给空间搜索会落到中间按钮)
         val bottomRowFirstFocus = remember { FocusRequester() }
         Box(
@@ -350,8 +356,15 @@ internal fun TvPlayerControlsOverlay(
                         onPreviewOpenChanged = { open ->
                             overlay.onPopupExpandedChanged(open)
                             // 预览关掉后焦点还给刚点开的那张卡片: 弹窗节点被移除时 Compose 会清掉
-                            // 整棵树的焦点 (不交给祖先), 不还的话面板还在但方向键全失效
-                            if (!open) overlay.requestPanelItemFocus()
+                            // 整棵树的焦点 (不交给祖先), 不还的话面板还在但方向键全失效.
+                            //
+                            // 从「查看全部」弹窗点开的那条路除外: 那时面板里一张卡都没被点过,
+                            // 塞进面板与用户离开时的位置对不上. 只清标志, 焦点由胶囊上的
+                            // restoreFocusAfter 接手 (它等的正是"这一整段结束")
+                            if (!open) {
+                                if (peoplePreviewFrom != null) peoplePreviewFrom = null
+                                else overlay.requestPanelItemFocus()
+                            }
                         },
                     ) {
                         TvPlayerPanelHost(
@@ -364,6 +377,30 @@ internal fun TvPlayerControlsOverlay(
                             // NaN (尚未测得) 由面板侧兜底成固定高度
                             availableHeightPx = { pillsRowTopPx.floatValue - topInfoBottomPx.floatValue },
                         )
+                        // 弹窗要在 PeoplePreviewHost **之内**: 点卡片走的是 rememberPeopleClickHandler,
+                        // 拿不到 host 时它会退化成"导航去人物详情页" —— 那是直接离开播放器
+                        peopleViewAll?.let { panel ->
+                            TvPlayerPeopleViewAllDialog(
+                                vm = vm,
+                                panel = panel,
+                                onDismissRequest = { peopleViewAll = null },
+                                onOpenPreview = {
+                                    // 先记来路再关窗: 关窗那一步会触发胶囊的 restoreFocusAfter 判据,
+                                    // 而这一段还没结束 (预览马上就要开)
+                                    peoplePreviewFrom = panel
+                                    peopleViewAll = null
+                                },
+                            )
+                        }
+                    }
+                    // 弹窗是独立窗口, 按键不经根路由 -> interactionTick 不再自增, 控制层会被
+                    // 5 秒自动隐藏吃掉 (与一起看弹窗同一套引用计数上报)
+                    // 开合状态先落成本次组合的局部值: onDispose 里读 peopleViewAll 拿到的是**当前**值
+                    // (它是 snapshot state), 关窗那一次 dispose 时它已经是 null, 计数就减不回去了
+                    val viewAllOpen = peopleViewAll != null
+                    DisposableEffect(viewAllOpen) {
+                        if (viewAllOpen) overlay.onPopupExpandedChanged(true)
+                        onDispose { if (viewAllOpen) overlay.onPopupExpandedChanged(false) }
                     }
 
                     // 胶囊按钮行 (+ 弹幕发送展开框).
@@ -378,6 +415,10 @@ internal fun TvPlayerControlsOverlay(
                         vm = vm,
                         pillFocusRequesters = pillFocusRequesters,
                         onNewComment = { openNewEpisodeComment(vm, page, overlay) },
+                        onViewAllPeople = { peopleViewAll = it },
+                        // 「查看全部」这条路占着焦点的整段: 弹窗开着, 以及从它点开的人物预览还开着.
+                        // 中途还一次焦点会与正要打开的预览抢
+                        viewAllPeopleActive = peopleViewAll ?: peoplePreviewFrom,
                         trailing = pillsRowTrailing,
                         // 胶囊本体跟着控制层淡出, 末尾那颗提示按钮不跟 (它有自己的显示时长)
                         pillsModifier = chrome,
@@ -521,6 +562,10 @@ private fun TvPlayerPillsRow(
     pillFocusRequesters: Map<TvPlayerPanel, FocusRequester>,
     /** 评论胶囊按下确定: 发表本集评论 (见 [openNewEpisodeComment]). */
     onNewComment: () -> Unit,
+    /** 角色 / 制作人员胶囊按下确定: 开对应的「查看全部」弹窗. */
+    onViewAllPeople: (TvPlayerPanel) -> Unit,
+    /** 上面那条路正占着焦点的是哪一颗胶囊 (弹窗或它点开的人物预览还开着); null = 都关了. */
+    viewAllPeopleActive: TvPlayerPanel?,
     /** 行末靠右对齐的插槽 (OP/ED 提示按钮): 不受 [pillsModifier] 影响, 有自己的显示时长. */
     trailing: @Composable () -> Unit,
     /** 只作用于胶囊本体那一组 (控制层淡出), 不含 [trailing]. */
@@ -554,6 +599,14 @@ private fun TvPlayerPillsRow(
                 panel = TvPlayerPanel.STAFF,
                 overlay = overlay,
                 focusRequester = pillFocusRequesters.getValue(TvPlayerPanel.STAFF),
+                // 与评论胶囊同一个道理 (见那颗的注释): 默认的"把焦点送进面板"与直接按上键完全重复.
+                // 这一下改成弹详情页那份「查看全部」大网格 —— 聚焦时浮出的窄面板只够扫一眼,
+                // 而这两类内容在播放器里没有别的入口 (内嵌详情页是精简版, 没有这两个区块)
+                onClick = { onViewAllPeople(TvPlayerPanel.STAFF) },
+                modifier = Modifier.restoreFocusAfter(
+                    viewAllPeopleActive == TvPlayerPanel.STAFF,
+                    abandon = { overlay.layer != TvPlayerLayer.CONTROLS },
+                ),
             )
             TvPlayerPill(
                 icon = { Icon(Icons.Rounded.Face, null, Modifier.size(TV_PILL_ICON_SIZE)) },
@@ -561,6 +614,11 @@ private fun TvPlayerPillsRow(
                 panel = TvPlayerPanel.CHARACTERS,
                 overlay = overlay,
                 focusRequester = pillFocusRequesters.getValue(TvPlayerPanel.CHARACTERS),
+                onClick = { onViewAllPeople(TvPlayerPanel.CHARACTERS) },
+                modifier = Modifier.restoreFocusAfter(
+                    viewAllPeopleActive == TvPlayerPanel.CHARACTERS,
+                    abandon = { overlay.layer != TvPlayerLayer.CONTROLS },
+                ),
             )
             TvPlayerPill(
                 icon = { Icon(Icons.AutoMirrored.Rounded.Comment, null, Modifier.size(TV_PILL_ICON_SIZE)) },

@@ -122,6 +122,8 @@ import me.him188.ani.app.ui.lang.episode_send_danmaku
 import me.him188.ani.app.ui.lang.subject_episode_danmaku_list_empty
 import me.him188.ani.app.ui.richtext.UIRichElement
 import me.him188.ani.app.ui.subject.details.SubjectDetailsUIState
+import me.him188.ani.app.ui.subject.details.sections.CharactersViewAllDialog
+import me.him188.ani.app.ui.subject.details.sections.StaffViewAllDialog
 import me.him188.ani.app.ui.subject.episode.EpisodePageState
 import me.him188.ani.app.ui.subject.episode.EpisodeViewModel
 import me.him188.ani.app.ui.subject.person.PeoplePreviewTarget
@@ -1200,6 +1202,49 @@ private fun TvCharactersPanel(
                 )
             }
         }
+    }
+}
+
+/**
+ * 角色 / 制作人员胶囊按下确定弹的「查看全部」大网格 —— **与详情页独立页里那两个区块的弹窗是同一个**
+ * ([CharactersViewAllDialog] / [StaffViewAllDialog]).
+ *
+ * 胶囊聚焦时浮出的窄面板 (420dp 一列) 只够扫一眼, 而这两类内容在播放器里没有别的入口:
+ * 内嵌详情页是精简版, 角色/制作人员区块本来就不在那儿. 胶囊的点击原先是"把焦点送进面板",
+ * 与直接按上键完全重复, 等于白按 —— 与评论胶囊改成"发表评论"是同一笔账.
+ *
+ * 数据用完整名单 pager (与两个面板同源, 进屏已预载); 数据还没到时本组合直接不渲染,
+ * 那一下点击就什么也不发生 —— 与面板里"还在加载"时看到的是一回事.
+ *
+ * @param onOpenPreview 点卡片开人物预览之前调用 (关窗 + 记来路, 见调用处).
+ */
+@Composable
+internal fun TvPlayerPeopleViewAllDialog(
+    vm: EpisodeViewModel,
+    panel: TvPlayerPanel,
+    onDismissRequest: () -> Unit,
+    onOpenPreview: () -> Unit,
+) {
+    val detailsState = vm.episodeDetailsState
+    val uiState by detailsState.subjectDetailsStateLoader.state
+        .collectAsStateWithLifecycle(SubjectDetailsUIState.Placeholder(detailsState.subjectId))
+    val details = (uiState as? SubjectDetailsUIState.Ok)?.value ?: return
+    when (panel) {
+        TvPlayerPanel.CHARACTERS -> CharactersViewAllDialog(
+            allCharacters = details.charactersPager.collectAsLazyPagingItemsWithLifecycle(),
+            totalCharactersCount = details.totalCharactersCountState.value,
+            onDismissRequest = onDismissRequest,
+            onBeforeOpenPreview = onOpenPreview,
+        )
+
+        TvPlayerPanel.STAFF -> StaffViewAllDialog(
+            allStaff = details.staffPager.collectAsLazyPagingItemsWithLifecycle(),
+            totalStaffCount = details.totalStaffCountState.value,
+            onDismissRequest = onDismissRequest,
+            onBeforeOpenPreview = onOpenPreview,
+        )
+
+        else -> Unit
     }
 }
 
