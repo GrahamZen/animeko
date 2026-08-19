@@ -17,9 +17,12 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -37,6 +40,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import me.him188.ani.app.domain.player.VideoLoadingState
+import me.him188.ani.app.platform.Context
 import me.him188.ani.app.ui.foundation.playback.LocalPlaybackSessionEntry
 import me.him188.ani.app.ui.foundation.playback.PlaybackProgress
 import me.him188.ani.app.ui.foundation.playback.PlaybackSessionEntry
@@ -222,6 +226,44 @@ class RetainedPlaybackSessionHolder : ViewModel(), PlaybackSessionEntry {
             sessions += it
             makeCurrent(it)
         }
+    }
+
+    /**
+     * 不进播放页, 直接在后台把某一集起起来 (动作面板上那颗「在后台准备」; 见
+     * [PlaybackSessionEntry.startInBackground]).
+     *
+     * 与进播放页的差别**只有一处**: [EpisodeViewModel] 由这里建, 而不是由播放页的组合建. 其余
+     * 完全同源 —— 建出来的 VM 放进会话自己的 store, 用的是与播放页**同一个 key** (两边都是
+     * `ViewModelProvider` 的默认 key), 所以之后真进播放页时 `viewModel(viewModelStoreOwner = session)`
+     * 拿回的就是这一个, 不会再建第二个播放器, 热好的进度也接得上.
+     *
+     * 起来之后的一切都由 [guard] 照旧管着: 它替界面当 `pageState` 的订阅者 (流水线因此会一直跑),
+     * 后台一开播就按回暂停 (不出声), 就绪/出问题照常发提示. 也就是说这条路**没有引入任何新的
+     * 后台行为**, 只是把"会话从哪来"多开了一个口子.
+     *
+     * **不进 [composedSessions]**: 那个列表的含义是"有播放页组合在场", 后台会话没有界面 ——
+     * 混进去的话 [onPageDisposed] 会以为还有别的页面在场, 把该留下的会话当场销毁.
+     */
+    override fun startInBackground(subjectId: Int, episodeId: Int, context: Context): Boolean {
+        val session = openSession(subjectId, episodeId)
+        if (session.vm != null) return true // 已经在跑了 (回到同一集): 别碰它
+        val vm = ViewModelProvider(
+            session,
+            viewModelFactory {
+                initializer {
+                    EpisodeViewModel(
+                        subjectId = subjectId,
+                        initialEpisodeId = episodeId,
+                        initialIsFullscreen = false,
+                        context = context,
+                    )
+                }
+            },
+        )[EpisodeViewModel::class]
+        session.vm = vm
+        updateGuard()
+        logger.info { "Started background session for subject $subjectId episode $episodeId" }
+        return true
     }
 
     /** 播放页的组合建立: 上报它建出来的 VM, 本类据此监视这个会话 (见 [guard]). */

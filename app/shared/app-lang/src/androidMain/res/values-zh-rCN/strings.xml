@@ -601,6 +601,7 @@
     <string name="playback_nothing_to_play">暂无可播放的内容</string>
     <string name="playback_up_next_continue">继续播放</string>
     <string name="playback_up_next_start">接下来播放</string>
+    <string name="playback_prepare_in_background">在后台准备这一集</string>
     <string name="tv_service_check_hint">检测服务连通 · 长按打开代理设置</string>
     <string name="tv_service_check_hint_never">尚未检测 · 长按打开代理设置</string>
     <string name="tv_service_check_hint_stale">结果可能已过期 · 长按打开代理设置</string>

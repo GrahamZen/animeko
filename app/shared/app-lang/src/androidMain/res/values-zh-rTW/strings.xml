@@ -33,6 +33,7 @@
     <string name="playback_nothing_to_play">暫無可播放的內容</string>
     <string name="playback_up_next_continue">繼續播放</string>
     <string name="playback_up_next_start">接下來播放</string>
+    <string name="playback_prepare_in_background">在背景準備這一集</string>
     <string name="tv_service_check_hint">檢測服務連通 · 長按開啟代理設定</string>
     <string name="tv_service_check_hint_never">尚未檢測 · 長按開啟代理設定</string>
     <string name="tv_service_check_hint_stale">結果可能已過期 · 長按開啟代理設定</string>

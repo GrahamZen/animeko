@@ -89,6 +89,7 @@ import me.him188.ani.app.domain.usecase.GlobalKoin
 import me.him188.ani.app.navigation.AniNavigator
 import me.him188.ani.app.navigation.MainScreenPage
 import me.him188.ani.app.navigation.SettingsTab
+import me.him188.ani.app.platform.LocalContext
 import me.him188.ani.app.ui.foundation.AsyncImage
 import me.him188.ani.app.ui.foundation.FOCUS_REQ_DELAY_MILLIS
 import me.him188.ani.app.ui.foundation.LocalTvBackLongPressHost
@@ -123,6 +124,7 @@ import me.him188.ani.app.ui.lang.exit_app_title
 import me.him188.ani.app.ui.lang.playback_history_episode_label
 import me.him188.ani.app.ui.lang.playback_history_title
 import me.him188.ani.app.ui.lang.playback_nothing_to_play
+import me.him188.ani.app.ui.lang.playback_prepare_in_background
 import me.him188.ani.app.ui.lang.playback_up_next_continue
 import me.him188.ani.app.ui.lang.playback_up_next_start
 import me.him188.ani.app.ui.lang.settings_account_popup_edit_profile
@@ -454,8 +456,9 @@ private enum class TvActionPanelDefaultFocus {
 
 /**
  * **全局动作面板**: 上面一张"正在播放"卡, 下面一排圆钮, 再下面一行固定标签.
- * 条目按上下文出现. **凡是"去别处"的都关面板** (回去接着看 / 回主页 / 退出); 改本面板自己
- * 显示的东西的那两个不关 —— 卡片右端的 ✕ 与连通行的刷新钮, 它们的结果就写在面板上.
+ * 条目按上下文出现. **凡是"去别处"的都关面板** (进去看 / 回主页 / 退出); 改本面板自己显示的
+ * 东西的那两个不关 —— 卡片右端那一条 (后台会话的开关: 关掉它 / 在后台起起来) 与连通行的刷新钮,
+ * 它们的结果就写在面板上.
  *
  * ## 为什么是这个形状
  *
@@ -578,6 +581,10 @@ private fun TvActionPanelDialog(
     // 卡片那一块在三态下各说各的话 (见下面渲染处)
     val resumeLabel = stringResource(Lang.exit_app_back_to_playback)
     val nothingToPlayLabel = stringResource(Lang.playback_nothing_to_play)
+    val closeLabel = stringResource(Lang.exit_app_close_playback)
+    val prepareLabel = stringResource(Lang.playback_prepare_in_background)
+    // 后台起会话要建 ViewModel, 那需要平台 Context (见 startInBackground)
+    val context = LocalContext.current
     val upNextLabel = stringResource(
         if (upNext?.continuing == true) Lang.playback_up_next_continue else Lang.playback_up_next_start,
     )
@@ -644,21 +651,45 @@ private fun TvActionPanelDialog(
                 //  1. **正在播放**: 有后台会话;
                 //  2. **接下来播放**: 没有会话但有得播 (上次没看完的那一集, 或那一集看完了就是
                 //     下一集; 见 TvUpNextStore) —— 这一态让"没有会话"这个最常见的情形从一块
-                //     死板变成"长按播放键 + 确定"就接着看;
+                //     死板变成"长按播放键 + 确定"就接着看, 右端那一条还能只让它在后台先热起来;
                 //  3. **空**: 两样都没有. 才是那张压暗的占位卡.
-                if (session != null) {
+                val cardSubjectId = session?.subjectId ?: upNext?.subjectId
+                val cardEpisodeId = session?.episodeId ?: upNext?.episodeId
+                if (cardSubjectId != null && cardEpisodeId != null) {
+                    // 前两态**共用一个调用点**: 换态时 Compose 才认得出是同一批节点, 焦点因此
+                    // 留在原位 —— 尤其是右端那一条 (后台会话的开关), 它在两态里是同一颗按钮的
+                    // 两个方向, 按完不该把焦点甩到别处去
                     TvPlaybackCard(
-                        subjectId = session.subjectId,
-                        episodeId = session.episodeId,
-                        subjectTitle = session.subjectTitle,
-                        episodeSort = session.episodeSort,
-                        progress = { playback.progress },
-                        status = { playbackSessionStatusText(playback.status) },
-                        mainLabel = resumeLabel,
+                        subjectId = cardSubjectId,
+                        episodeId = cardEpisodeId,
+                        subjectTitle = session?.subjectTitle ?: upNext?.subjectTitle.orEmpty(),
+                        episodeSort = session?.episodeSort ?: upNext?.episodeSort.orEmpty(),
+                        // 有会话读实时进度; 没有则是播放进度表里那条记录 (上次看到哪),
+                        // 时长不知道就整条线不画 —— 与"正在播放但时长未知"同一条规矩
+                        progress = {
+                            if (session != null) {
+                                playback.progress
+                            } else {
+                                upNext?.takeIf { it.durationMillis > 0 }?.let {
+                                    PlaybackProgress(it.positionMillis, it.durationMillis)
+                                }
+                            }
+                        },
+                        // 有会话是它此刻的状态 (在找源/在缓冲/…), 没有则是固定一句
+                        status = {
+                            if (session != null) {
+                                playbackSessionStatusText(playback.status)
+                            } else {
+                                PlaybackSessionStatusText(upNextLabel, PlaybackSessionStatusSeverity.Normal)
+                            }
+                        },
+                        mainLabel = if (session != null) resumeLabel else upNextLabel,
+                        // 历史进度压暗: 那条线不是正在走的进度
+                        progressBarAlpha = if (session != null) 1f else TV_UP_NEXT_BAR_ALPHA,
                         // 按"下"的落点按**正下方是什么**给, 不按"同属一行"给:
-                        //  - 左半 (回去接着看) → 圆钮那排第一颗, 跳过中间那条服务连通;
-                        //  - 右端的 ✕ → **服务连通行末尾那颗刷新钮** —— 它就在 ✕ 的正下方,
-                        //    而刷新钮平时只能从最后一颗圆钮向右进去, 这条正好给它第二个入口.
+                        //  - 左半 (进去看) → 圆钮那排第一颗, 跳过中间那条服务连通;
+                        //  - 右端那一条 → **服务连通行末尾那颗刷新钮** —— 它就在正下方, 而刷新钮
+                        //    平时只能从最后一颗圆钮向右进去, 这条正好给它第二个入口.
                         //    先前这里给的是圆钮那排最后一颗 (「退出应用」), 空间上毫无道理:
                         //    从卡片右上角按一下"下"就跳到面板左下方那颗红的, 用户实测反直觉.
                         //    没有服务连通行时 (退出确认变体) 仍然落最后一颗圆钮.
@@ -679,84 +710,48 @@ private fun TvActionPanelDialog(
                             .focusProperties {
                                 down = if (connectivity != null) refreshFocus else lastCapsuleFocus
                             },
+                        // 主体两态一样: 进播放页看这一集.
+                        // force: 跳过一起看跟随模式的导航守卫 —— 那道守卫只在目标与房主已发布的
+                        // 播放位置一字不差时放行, 跟随者退出播放页后连回自己的会话都会被挡住.
+                        // 跟随该拦的是"播别的", 不是"回去接着看"
                         onClick = {
                             onDismissRequest()
-                            // force: 回到**已经在播的这一集**, 跳过一起看跟随模式的导航守卫 ——
-                            // 那道守卫只在目标与房主已发布的播放位置一字不差时放行, 跟随者退出
-                            // 播放页后连回自己的会话都会被挡住. 跟随该拦的是"播别的", 不是"回去接着看"
-                            navigator.navigateEpisodeDetails(
-                                session.subjectId,
-                                session.episodeId,
-                                force = true,
-                            )
+                            navigator.navigateEpisodeDetails(cardSubjectId, cardEpisodeId, force = true)
                         },
-                        // **关掉会话不关面板** —— 面板里唯一一个按下去不关的动作:
+                        // 没会话那一档用**空心的圆圈套三角**, 不用下载图标: 本应用真有缓存/下载
+                        // 功能, 下载的字形会被直接读成"把这一集缓存下来", 指的是另一件事.
+                        // 空心而不是实心 —— 实心读作"正在播", 而这一颗按下去才开始热
+                        trailingIcon = if (session != null) Icons.Rounded.Close else Icons.Outlined.PlayCircle,
+                        trailingLabel = if (session != null) closeLabel else prepareLabel,
+                        // 只有"关掉会话"是危险动作
+                        trailingDanger = session != null,
+                        // **右端这一条是后台会话的开关**, 两个方向:
                         //
-                        // - 其余每一颗都是"离开这里去别处"(回去接着看 / 回主页 / 退出), 关面板
-                        //   是那个动作的一部分; ✕ 改的却是**面板自己正在显示的东西**.
-                        // - 会话本来就在后台, 屏幕上看不出来. 按完就关面板的话, 用户看见的只有
-                        //   面板消失, 没有任何反馈说明会话真的结束了 —— 要确认还得再长按一次
-                        //   把面板叫回来看. 留在面板里则是结果直接写在原位.
-                        // - 代价是想接着走人要多按一次返回. 比"按完不知道生效没有"便宜得多;
-                        //   连通行那颗刷新钮同样是留在面板里刷新, 不是孤例.
+                        // - 有会话 → ✕ 关掉它. **关掉不关面板** (面板里唯一一个按下去不关的动作):
+                        //   其余每一颗都是"离开这里去别处", 关面板是那个动作的一部分; 而这颗改的是
+                        //   **面板自己正在显示的东西**. 会话本来就在后台、屏幕上看不出来, 按完就关
+                        //   面板的话用户只看见面板消失, 没有任何反馈说明会话真结束了. 关掉之后卡片
+                        //   就地退成「接下来播放」, 结果直接写在原位.
+                        // - 没会话 → **在后台把这一集起起来**, 不进播放页 (见
+                        //   PlaybackSessionEntry.startInBackground). 慢的源要十几秒, 原先只能进去
+                        //   干等或者进去了再退出来等; 现在按一下让它先热着, 人接着浏览, 就绪时照常
+                        //   有提示. 起来之后卡片当场变成「正在播放」, 小字开始报进度.
                         //
-                        // 关掉之后卡片**就地退成「接下来播放」**(那一集正好是"最近没看完"的第一名),
-                        // 而不是变成空的占位卡. 一度做过后者, 想的是"空出来最能说明关掉了", 但那张
-                        // 空卡上写着「暂无可播放的内容」—— 那一刻明明有得播, 拿假信息换反馈不划算.
-                        // 而这一跳本身并不小: 右端那块 56dp 的关闭区**整个消失**, 焦点被迫从 ✕ 落到
-                        // 整张卡 (错误色实底换成主题色玻璃), 小字从"正在缓冲"变成"继续播放",
-                        // 进度线压暗定住. 卡片右半边没了, 不会被读成"没生效".
-                        onClose = {
-                            playback.close()
-                            reclaimCardFocus = true
-                        },
-                        onFocusLabel = { label, danger ->
-                            focusedLabel = label
-                            focusedDanger = danger
-                        },
-                    )
-                } else if (upNext != null) {
-                    TvPlaybackCard(
-                        subjectId = upNext.subjectId,
-                        episodeId = upNext.episodeId,
-                        subjectTitle = upNext.subjectTitle,
-                        episodeSort = upNext.episodeSort,
-                        // 位置/时长来自播放进度表那条记录 (没看完才有); 没有就整条线不画,
-                        // 与"正在播放但时长未知"同一条规矩
-                        progress = {
-                            if (upNext.durationMillis > 0) {
-                                PlaybackProgress(upNext.positionMillis, upNext.durationMillis)
+                        // 两个方向合用同一个位置, 于是"按一下开、再按一下关"本身就是可逆的;
+                        // 而"我现在就要看"始终是主体那一下, 没有因此变成两次按键.
+                        onTrailingClick = {
+                            if (session != null) {
+                                playback.close()
+                                // 焦点只在**换组件**那一路会掉: 关掉之后要是连「接下来播放」都没有,
+                                // 整块变成占位卡 (另一个 composable, 节点重建, 而 Compose 不会
+                                // 自动改派焦点). 退成「接下来播放」是同一个调用点, 右端这一条
+                                // 本身都不重建, 焦点自然留在原处 —— 那一路**不能**去 reclaim,
+                                // 否则会把焦点从这颗按钮抢到卡片主体上.
+                                if (TvUpNextStore.target == null) reclaimCardFocus = true
                             } else {
-                                null
+                                playback.startInBackground(cardSubjectId, cardEpisodeId, context)
                             }
                         },
-                        // 固定一句, 不查会话状态 (这一态压根没有会话)
-                        status = { PlaybackSessionStatusText(upNextLabel, PlaybackSessionStatusSeverity.Normal) },
-                        mainLabel = upNextLabel,
-                        // 历史进度压暗: 这条线不是正在走的进度
-                        progressBarAlpha = TV_UP_NEXT_BAR_ALPHA,
-                        onClick = {
-                            onDismissRequest()
-                            // force: 与卡片其余入口同一个理由 (跳过一起看跟随模式的导航守卫)
-                            navigator.navigateEpisodeDetails(
-                                upNext.subjectId,
-                                upNext.episodeId,
-                                force = true,
-                            )
-                        },
-                        // 没有会话可关, 所以整块让给"播放"这一个动作
-                        onClose = null,
-                        mainModifier = Modifier
-                            .focusRequester(cardFocus)
-                            .onFocusChanged { cardFocused = it.isFocused }
-                            .then(
-                                if (cardIsDefault) {
-                                    Modifier.onFocusChanged { focusArrived = it.isFocused }
-                                } else {
-                                    Modifier
-                                },
-                            )
-                            .focusProperties { down = firstCapsuleFocus },
                         onFocusLabel = { label, danger ->
                             focusedLabel = label
                             focusedDanger = danger
@@ -912,14 +907,15 @@ private class TvActionPanelAction(
  *
  * 两种用法共用本组件, 只差参数 (见 [TvActionPanelDialog] 里的三态):
  *
- * - **正在播放**: 有后台会话. 小字是会话此刻的状态, 有 ✕, 进度线是实时位置.
+ * - **正在播放**: 有后台会话. 小字是会话此刻的状态, 进度线是实时位置, 右端是 ✕ (关掉会话).
  * - **接下来播放**: 没有会话但有得播 (见 [TvUpNextStore]). 小字是「继续播放/接下来播放」,
- *   **没有 ✕** (没有会话可关; 而"把这部从接下来播放里去掉"是另一种意思, 不该藏在这颗按钮后面),
- *   进度线是上次看到哪、且压暗 —— 那是历史进度不是正在走的进度.
+ *   进度线是上次看到哪、且压暗 (那是历史进度不是正在走的进度), 右端是「在后台准备」.
  *
- * 整块 (除右端那一条) 就是那个动作本身 —— 媒体信息不是按钮上方的附属块, 它**就是**那个按钮.
- * 关闭长在卡片右端而不是排进下面那排圆钮, 是因为单独一颗 ✕ 没人知道它关的是什么
- * (最容易读成"关掉这个面板"); 挪到卡片上之后, 指代对象由位置本身给出.
+ * 整块 (除右端那一条) 是**进去看**, 两态都一样 —— 媒体信息不是按钮上方的附属块, 它**就是**那个
+ * 按钮. 右端那一条则是**后台会话的开关**: 有会话时关掉它, 没有时开起来. 同一个位置在两态里做的是
+ * 同一件事的两个方向, 所以换态时焦点留在原处也不会读错 (两态共用一个调用点, 节点因此不重建).
+ * 它长在卡片右端而不是排进下面那排圆钮, 是因为单独一颗图标没人知道它作用于什么 (最容易读成
+ * "关掉这个面板"); 挪到卡片上之后, 指代对象由位置本身给出.
  *
  * **两块的聚焦表现刻意不同**: 主体是**玻璃高亮** (半透明主题色渐亮, 见下), 关闭是错误色实底.
  * 两种不同处理, 一眼看得出焦点在哪一半. 关闭未聚焦时压到次要色 —— 它是逃生口不是主角, 但
@@ -939,7 +935,9 @@ private class TvActionPanelAction(
  * @param status 同上 —— 它是 `@Composable` 的 (文案要查字符串资源), 但同样在卡片内部才调用,
  *   会话状态那一跳因此记不到整个面板身上.
  * @param mainLabel 主体聚焦时写在面板底部固定标签行上的那句话.
- * @param onClose `null` = 不画右端那颗 ✕ (「接下来播放」态).
+ * @param onTrailingClick `null` = 整块都是主体, 不画右端那一条.
+ * @param trailingIcon / @param trailingLabel / @param trailingDanger 右端那一条的图标、标签行文案,
+ *   以及聚焦时是不是用错误色实底 (只有"关掉会话"是危险动作).
  * @param progressBarAlpha 进度线的浓度: 实时进度给 1f, 历史进度压暗 (见上).
  * @param onFocusLabel 上报给面板的固定标签行.
  * @param mainModifier 加在左半 (整块那个动作) 上: 面板用它挂焦点落点与方向改道.
@@ -955,15 +953,17 @@ private fun TvPlaybackCard(
     status: @Composable () -> PlaybackSessionStatusText,
     mainLabel: String,
     onClick: () -> Unit,
-    onClose: (() -> Unit)?,
+    onTrailingClick: (() -> Unit)?,
+    trailingIcon: ImageVector,
+    trailingLabel: String,
+    trailingDanger: Boolean,
     onFocusLabel: (label: String, danger: Boolean) -> Unit,
     mainModifier: Modifier = Modifier,
     closeModifier: Modifier = Modifier,
     progressBarAlpha: Float = 1f,
 ) {
-    val closeLabel = stringResource(Lang.exit_app_close_playback)
     var mainFocused by remember { mutableStateOf(false) }
-    var closeFocused by remember { mutableStateOf(false) }
+    var trailingFocused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(10.dp)
     // 玻璃高亮: 平时是面板同款的玻璃底 (glassContainerColor), 聚焦时换成半透明主题色 ——
     // 材质不变只是"亮起来", 而不是加一圈线. 动画让它是渐亮而不是硬切
@@ -1049,37 +1049,41 @@ private fun TvPlaybackCard(
                     }
                 }
             }
-            // 关闭那一条: 未聚焦与主体同一块玻璃 (卡片看起来是一整块), 聚焦时错误色实底 ——
-            // 与主体的半透明高亮是两种材质, 焦点在哪一半一眼可辨.
-            // 「接下来播放」态整块让给主体 (onClose == null), 不画一颗按不动的灰 ✕
-            if (onClose != null) {
-                val closeContainer by animateColorAsState(
-                    if (closeFocused) MaterialTheme.colorScheme.error else glassContainerColor(),
+            // 右端那一条 (后台会话的开关): 未聚焦与主体同一块玻璃 (卡片看起来是一整块), 聚焦时
+            // **实底** —— 与主体的半透明高亮是两种材质, 焦点在哪一半一眼可辨. 实底的颜色按危险与否
+            // 分: 关掉会话是错误色, 在后台准备是主题色 (它是个正向动作, 用红的会吓人)
+            if (onTrailingClick != null) {
+                val trailingContainer by animateColorAsState(
+                    when {
+                        !trailingFocused -> glassContainerColor()
+                        trailingDanger -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.primary
+                    },
                 )
                 Box(
                     Modifier
                         .width(TV_NOW_PLAYING_CLOSE_WIDTH)
                         .fillMaxHeight()
                         .then(closeModifier)
-                        .background(closeContainer)
+                        .background(trailingContainer)
                         .onFocusChanged {
-                            closeFocused = it.isFocused
-                            if (it.isFocused) onFocusLabel(closeLabel, true)
+                            trailingFocused = it.isFocused
+                            if (it.isFocused) onFocusLabel(trailingLabel, trailingDanger)
                         }
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
-                            onClick = onClose,
+                            onClick = onTrailingClick,
                         ),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        Icons.Rounded.Close,
-                        contentDescription = closeLabel,
-                        tint = if (closeFocused) {
-                            MaterialTheme.colorScheme.onError
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
+                        trailingIcon,
+                        contentDescription = trailingLabel,
+                        tint = when {
+                            !trailingFocused -> MaterialTheme.colorScheme.onSurfaceVariant
+                            trailingDanger -> MaterialTheme.colorScheme.onError
+                            else -> MaterialTheme.colorScheme.onPrimary
                         },
                     )
                 }

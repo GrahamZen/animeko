@@ -12,6 +12,7 @@ package me.him188.ani.app.ui.foundation.playback
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.compositionLocalOf
+import me.him188.ani.app.platform.Context
 import me.him188.ani.app.domain.player.VideoLoadingState
 
 /**
@@ -123,12 +124,27 @@ interface PlaybackSessionEntry {
      */
     fun close()
 
+    /**
+     * **不进播放页, 直接在后台把某一集起起来**: 建会话 + 建它的 ViewModel, 整条"搜数据源 → 选源 →
+     * 起播"的流水线就跑起来了, 就绪时照常提示 (与退出播放页留下的那种会话完全同源, 之后进播放页
+     * 拿回的就是这一个).
+     *
+     * 它是这套机制的另一半: 原先只能"进去等着它加载, 或者进去了再退出来等", 而慢的源要十几秒 ——
+     * 现在可以在动作面板上一键让它先热起来, 人继续浏览.
+     *
+     * 已经有会话在播这一集时什么都不做 (返回 true); 播别的则**替换**掉 (同"只留一个会话"那条规矩).
+     *
+     * @return false = 这个形态不支持 (没有保留会话的机制, 见 [None])
+     */
+    fun startInBackground(subjectId: Int, episodeId: Int, context: Context): Boolean
+
     /** 不保留会话的形态 (手机 / 桌面) 用的空实现. */
     object None : PlaybackSessionEntry {
         override val session: RetainedPlaybackSessionInfo? get() = null
         override val progress: PlaybackProgress? get() = null
         override val status: PlaybackSessionStatus? get() = null
         override fun close() {}
+        override fun startInBackground(subjectId: Int, episodeId: Int, context: Context): Boolean = false
     }
 }
 
