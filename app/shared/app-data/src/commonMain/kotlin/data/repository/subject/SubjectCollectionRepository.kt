@@ -85,7 +85,9 @@ import me.him188.ani.datasources.api.topic.UnifiedCollectionType
 import me.him188.ani.datasources.bangumi.processing.toSubjectCollectionType
 import me.him188.ani.utils.coroutines.combine
 import me.him188.ani.utils.logging.debug
+import me.him188.ani.utils.logging.info
 import me.him188.ani.utils.logging.logger
+import me.him188.ani.utils.logging.warn
 import me.him188.ani.utils.platform.currentTimeMillis
 import me.him188.ani.utils.serialization.BigNum
 import kotlin.coroutines.CoroutineContext
@@ -241,6 +243,12 @@ class SubjectCollectionRepositoryImpl(
     override fun subjectCollectionFlow(
         subjectId: Int
     ): Flow<SubjectCollectionInfo> = getEpisodeTypeFiltersUseCase().flatMapLatest { epTypes ->
+        // 本订阅内是否已经为"条目在库但分集为空"补取过一次。分集只是取条目时的副产品 (见下面),
+        // 条目行新鲜就不会再取, 而 TTL 是 1 小时 —— 分集一旦被抹掉, 一小时内每次进详情页都是
+        // 空的选集区且**一条网络请求都没有** (2026-08-23 Sony 上高达 Z / subject 9622 实测)。
+        // 用订阅内的标志而不是"空就重取": 真的没有分集的条目 (未播出新番) 会每次 DAO 发射都重取,
+        // 变成请求风暴。每次进页面是一次新订阅, 最多补取一次。
+        var refetchedForMissingEpisodes = false
         subjectCollectionDao.findById(subjectId)
             .restartOnNewLogin(sessionManager)
             .transform { existing ->
@@ -249,8 +257,16 @@ class SubjectCollectionRepositoryImpl(
                     emit(existing)
                 }
 
-                // 如果没有缓存, 则 fetch 然后插入 subject 缓存
-                if (existing == null || existing.isExpired()) {
+                val missingEpisodes = existing != null &&
+                    !refetchedForMissingEpisodes &&
+                    episodeCollectionDao.listIdBySubjectId(subjectId).first().isEmpty()
+                if (missingEpisodes) {
+                    refetchedForMissingEpisodes = true
+                    logger.info { "Subject $subjectId is cached but has no episodes locally, refetching" }
+                }
+
+                // 如果没有缓存 (或缓存过期, 或分集缺失), 则 fetch 然后插入 subject 缓存
+                if (existing == null || existing.isExpired() || missingEpisodes) {
                     val subject = subjectService.getSubjectCollection(subjectId)
                     val lastFetched = currentTimeMillis()
                     val subjectEntity = subject?.toEntity(
@@ -263,13 +279,29 @@ class SubjectCollectionRepositoryImpl(
                         subjectCollectionDao.upsert(subjectEntity)
 
                         // 更新剧集列表
-                        val oldIds = episodeCollectionDao.listIdBySubjectId(subjectId).first().toMutableList()
-                        episodeCollectionDao.upsert(episodeEntities)
-                        for (newEntity in episodeEntities) {
-                            oldIds.remove(newEntity.episodeId)
-                        }
-                        if (oldIds.isNotEmpty()) { // 删除本地存的多余的剧集 (通常没有)
-                            episodeCollectionDao.deleteAllByEpisodeIds(subjectId, oldIds)
+                        if (episodeEntities.isEmpty()) {
+                            // **取回来是空分集时绝不动本地的**: 原来的写法会把"本地有、这次没回"的分集
+                            // 全部当成"多余的"删掉 (见下面 oldIds), 同时上面那次 upsert 已经把条目行
+                            // 刷成新鲜 → 之后一小时内都不会再取 → 详情页选集区永久空白且无请求。
+                            // 空列表更可能是接口/网络的一次抖动, 而不是"这部番真的没有分集了"。
+                            val localCount = episodeCollectionDao.listIdBySubjectId(subjectId).first().size
+                            logger.warn {
+                                "Fetched subject $subjectId returned no episodes; " +
+                                    "keeping $localCount local episodes instead of deleting them"
+                            }
+                        } else {
+                            val oldIds = episodeCollectionDao.listIdBySubjectId(subjectId).first().toMutableList()
+                            episodeCollectionDao.upsert(episodeEntities)
+                            for (newEntity in episodeEntities) {
+                                oldIds.remove(newEntity.episodeId)
+                            }
+                            if (oldIds.isNotEmpty()) { // 删除本地存的多余的剧集 (通常没有)
+                                episodeCollectionDao.deleteAllByEpisodeIds(subjectId, oldIds)
+                            }
+                            logger.info {
+                                "Fetched subject $subjectId: ${episodeEntities.size} episodes" +
+                                    if (oldIds.isNotEmpty()) ", removed ${oldIds.size} stale" else ""
+                            }
                         }
                     }
                     // TODO: 2025/5/24 handle subject not found 
