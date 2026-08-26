@@ -17,6 +17,7 @@ import kotlinx.datetime.minus
 import kotlinx.datetime.plus
 import kotlinx.datetime.todayIn
 import me.him188.ani.app.data.models.episode.EpisodeCollectionInfo
+import me.him188.ani.datasources.api.EpisodeType
 import kotlin.time.Clock
 
 /**
@@ -159,7 +160,14 @@ fun TmdbEpisodeStills.matchToEpisodes(
     // **至少要有一个真实的邻居锚点**, 所以只对两集以上的条目做: 单集条目两侧都是季边界, 等于
     // 没有任何证据 —— 而季里恰好也只有一集时算出来的差正好是 2, 会白送一张图, 绕过"有日期却
     // 对不上说明匹配到的条目本身可疑"那道闸门 (单测抓到的).
-    if (byEpisodeNumber.isNotEmpty() && episodes.size >= 2) {
+    //
+    // **轴上只排正片**: 特别篇命中的是 TMDB 的 season 0, 而 [byEpisodeNumber] 只索引正片那一季 ——
+    // 它在集号轴上是个空洞, 让它占一个位置就会把**相邻正片集**的锚点打断 (邻居"命中了"但反查不出
+    // 集号, 于是直接放弃). 实测「カーニバル・ファンタズム」12 集正片 + 1 集 SP (与第 1 集同期):
+    // SP 排在第 1 集前后任一侧, 第 1 集都拿不到图; 把 SP 从轴上摘掉后 13 集全有.
+    // SP 自己的图不受影响 —— 它走的是日期/集名那两条路.
+    val numberAxis = episodes.filter { it.episodeInfo.type == EpisodeType.MainStory }
+    if (byEpisodeNumber.isNotEmpty() && numberAxis.size >= 2) {
         // 集号索引反查; 内容完全相同的集 (字段全空的占位集) 一律弃用, 免得夹错
         val numberByMedia = mutableMapOf<TmdbEpisodeMedia, Int?>()
         for ((number, media) in byEpisodeNumber) {
@@ -167,13 +175,13 @@ fun TmdbEpisodeStills.matchToEpisodes(
         }
         val lowest = byEpisodeNumber.keys.min()
         val highest = byEpisodeNumber.keys.max()
-        episodes.forEachIndexed { index, episode ->
+        numberAxis.forEachIndexed { index, episode ->
             if (episode.episodeId in result) return@forEachIndexed
             val prevNumber = if (index == 0) lowest - 1 else {
-                result[episodes[index - 1].episodeId]?.let { numberByMedia[it] } ?: return@forEachIndexed
+                result[numberAxis[index - 1].episodeId]?.let { numberByMedia[it] } ?: return@forEachIndexed
             }
-            val nextNumber = if (index == episodes.lastIndex) highest + 1 else {
-                result[episodes[index + 1].episodeId]?.let { numberByMedia[it] } ?: return@forEachIndexed
+            val nextNumber = if (index == numberAxis.lastIndex) highest + 1 else {
+                result[numberAxis[index + 1].episodeId]?.let { numberByMedia[it] } ?: return@forEachIndexed
             }
             if (nextNumber - prevNumber != 2) return@forEachIndexed
             byEpisodeNumber[prevNumber + 1]?.let { result[episode.episodeId] = it }
