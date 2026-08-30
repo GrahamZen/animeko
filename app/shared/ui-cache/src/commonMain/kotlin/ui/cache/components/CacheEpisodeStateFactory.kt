@@ -80,7 +80,8 @@ internal fun HasBackgroundScope.createCacheEpisodeStateFlow(
         stateFlow,
         subjectCollectionType,
         mediaCache.cache.canPlay,
-    ) { stats, state, type, canPlay ->
+        mediaCache.cache.isMerging,
+    ) { stats, state, type, canPlay, isMerging ->
         val subjectId = metadata.subjectId.toInt()
         val episodeId = metadata.episodeId.toInt()
         CacheEpisodeState(
@@ -104,6 +105,7 @@ internal fun HasBackgroundScope.createCacheEpisodeStateFlow(
             },
             mediaSourceId = mediaCache.cache.origin.mediaSourceId,
             originMediaId = mediaCache.cache.origin.mediaId,
+            isMerging = isMerging,
         )
     }
 }
