@@ -16,6 +16,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
@@ -121,6 +123,7 @@ import me.him188.ani.app.domain.mediasource.web.captcha.WebSourceIdentityRegistr
 import me.him188.ani.app.domain.media.cache.MediaCacheManager
 import me.him188.ani.app.domain.media.cache.MediaCacheManagerImpl
 import me.him188.ani.app.domain.media.cache.engine.HttpMediaCacheEngine
+import me.him188.ani.app.domain.media.cache.engine.createCacheDownloadDispatcher
 import me.him188.ani.app.domain.media.cache.engine.KtorPersistentHttpDownloader
 import me.him188.ani.app.domain.media.cache.engine.MediaCacheEngineKey
 import me.him188.ani.app.domain.media.cache.engine.TorrentMediaCacheEngine
@@ -475,6 +478,8 @@ private fun KoinApplication.otherModules(getContext: () -> Context, coroutineSco
             fileSystem = SystemFileSystem,
             baseSaveDir = get<MediaSaveDirProvider>().saveDir
                 .let { Path(it).resolve(HttpMediaCacheEngine.MEDIA_CACHE_DIR) },
+            // 专用低优先级线程, 不与驱动界面的数据流抢协程池 (见 createCacheDownloadDispatcher)
+            ioDispatcher = createCacheDownloadDispatcher(),
             scope = coroutineScope,
         )
     }
