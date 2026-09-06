@@ -106,9 +106,6 @@ sealed class NavRoutes : NavKey {
 
     @Serializable
     data object PlaybackHistory : NavRoutes()
-
-    @Serializable
-    data object PlaybackHistorySyncStatus : NavRoutes()
 }
 
 @Serializable
