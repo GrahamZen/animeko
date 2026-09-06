@@ -93,7 +93,6 @@ import me.him188.ani.app.platform.features.StreamType
 import me.him188.ani.app.platform.features.getComponentAccessors
 import me.him188.ani.app.tools.rememberUiMonoTasker
 import me.him188.ani.app.ui.comment.CommentEditorState
-import me.him188.ani.app.ui.comment.CommentReportHost
 import me.him188.ani.app.ui.comment.CommentReportState
 import me.him188.ani.app.ui.comment.CommentState
 import me.him188.ani.app.ui.danmaku.DanmakuEditorState
@@ -430,9 +429,6 @@ private fun EpisodeScreenContent(
         }
         ImageViewer(imageViewer) { imageViewer.clear() }
     }
-
-    // 页面级唯一 Host: 评论列表所在 tab 切走时也能收到举报结果提示
-    CommentReportHost(vm.commentReportState)
 
     if (showEditCommentSheet) {
         EpisodeEditCommentSheet(
@@ -1213,7 +1209,7 @@ private fun EpisodeVideo(
 @Composable
 private fun EpisodeCommentColumn(
     commentState: CommentState,
-    commentReportState: CommentReportState,
+    commentReportState: CommentReportState?,
     commentEditorState: CommentEditorState,
     subjectId: Int,
     episodeId: Int,
