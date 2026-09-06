@@ -436,6 +436,7 @@ private class FakeCaptchaBrowser : CaptchaBrowser {
         modifier: Modifier,
         onExitRequest: (() -> Unit)?,
         onConfirmRequest: (() -> Unit)?,
+        tvInputMode: TvWebInputMode,
     ) {
     }
 

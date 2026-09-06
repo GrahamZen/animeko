@@ -244,6 +244,7 @@ class ImageCaptchaSolverTest {
             modifier: Modifier,
             onExitRequest: (() -> Unit)?,
             onConfirmRequest: (() -> Unit)?,
+            tvInputMode: TvWebInputMode,
         ) {
         }
 
