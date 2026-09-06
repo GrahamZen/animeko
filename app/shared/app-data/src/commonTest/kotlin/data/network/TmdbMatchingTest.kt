@@ -742,6 +742,108 @@ class TmdbMatchingTest {
         // 集名索引那条**不切段**: 切了会让「A／その1」「A／その2」撞键, 而撞键整条弃用
         assertTrue(tmdbEpisodeNameKey("結末／その1") != tmdbEpisodeNameKey("結末／その2"))
     }
+
+    // ---------- 衍生短篇混装进正传 season 0: 集名后缀认领 (2026-09-06) ----------
+
+    /**
+     * TMDB 把一个系列的全部衍生短篇混装进正传的 S0, 集名写成「作品名 + 本集名」以示区分,
+     * 而 Bangumi 那边只有本集名. 日期两边差 3 天 (超出 ±1 容差), 集号轴又被"有日期却对不上
+     * 说明条目可疑"那道闸门关着 —— 实测 Re:プチから始める異世界生活 (bgm 185837) 14 集全无图.
+     *
+     * 圈数字必须先折叠: normalizeForMatch 只留 isLetterOrDigit, 而 ① 是 No 类不是 Nd,
+     * 不折叠就被整个滤掉, 与 TMDB 那边留着的「1」永远差一个字符.
+     */
+    @Test
+    fun `衍生短篇 - 集名带作品名前缀时按后缀认领`() {
+        val stills = TmdbEpisodeStills(
+            byEpisodeName = mapOf(
+                tmdbEpisodeNameKey("Re:プチから始める異世界生活 ぷち1 再来の学校") to
+                        TmdbEpisodeMedia(stillUrl = "s0e12"),
+                tmdbEpisodeNameKey("Re:プチから始める異世界生活 ぷち2 自称先生、ベアトリス") to
+                        TmdbEpisodeMedia(stillUrl = "s0e13"),
+                tmdbEpisodeNameKey("Re:ゼロから始める休憩時間 3rd season 眠れる鬼の夜話") to
+                        TmdbEpisodeMedia(stillUrl = "s0e51"),
+            ),
+        )
+        // bgm 的日期在 TMDB 那边不存在 (两边差 3 天), 只能靠集名
+        val episodes = listOf(
+            dated(1, "ぷち①再来の学校", PackedDate(2016, 6, 24)),
+            dated(2, "ぷち②自称先生、ベアトリス", PackedDate(2016, 7, 1)),
+        )
+        val matched = stills.matchToEpisodes(episodes)
+        assertEquals(TmdbEpisodeMedia(stillUrl = "s0e12"), matched[1])
+        assertEquals(TmdbEpisodeMedia(stillUrl = "s0e13"), matched[2])
+    }
+
+    @Test
+    fun `衍生短篇 - 后缀撞上两条就宁可无图`() {
+        val stills = TmdbEpisodeStills(
+            byEpisodeName = mapOf(
+                tmdbEpisodeNameKey("作品甲 眠れる鬼の夜話") to TmdbEpisodeMedia(stillUrl = "a"),
+                tmdbEpisodeNameKey("作品乙 眠れる鬼の夜話") to TmdbEpisodeMedia(stillUrl = "b"),
+            ),
+        )
+        val matched = stills.matchToEpisodes(listOf(dated(1, "眠れる鬼の夜話", PackedDate(2024, 10, 2))))
+        assertNull(matched[1], "后缀分不出来时不许猜")
+    }
+
+    @Test
+    fun `衍生短篇 - 集名太短不认领`() {
+        val stills = TmdbEpisodeStills(
+            byEpisodeName = mapOf(
+                tmdbEpisodeNameKey("なにか長い作品名 決戦") to TmdbEpisodeMedia(stillUrl = "a"),
+            ),
+        )
+        // 归一化后只有 2 个字符, 短到随便撞: 与关系软边那条判据同源 (>= 4)
+        val matched = stills.matchToEpisodes(listOf(dated(1, "決戦", PackedDate(2024, 10, 2))))
+        assertNull(matched[1])
+    }
+
+
+    /**
+     * **日期轴给出"看着很确定但错"的答案**: 衍生短篇与正片同期播出时, Bangumi 把短篇的播出日
+     * 记成**正片那天**, 而 TMDB 记的是次日 (网络上传日). 于是短篇条目的每一集都在日期轴上
+     * **精确命中正片**, 整排选集卡拿到正片的图.
+     *
+     * 实测 bgm 516311「Re:ゼロから始める休憩時間 3rd season」16 集全是正片的图 (2026-09-06 用户报的):
+     * bgm ep1 = 2024-10-02「眠れる鬼の夜話」, TMDB S1 E51 = 2024-10-02「劇場型悪意」(正片),
+     * TMDB S0 E51 = 2024-10-03「Re:ゼロから始める休憩時間 3rd season 眠れる鬼の夜話」(才是它).
+     *
+     * 那天只有正片一个候选, 所以 preferredSeasonByEpisodeNames 的"同日多季投票"没票可投 ——
+     * 只能靠集名优先于日期.
+     */
+    @Test
+    fun `衍生短篇与正片同日 - 集名优先于日期轴`() {
+        val main = TmdbEpisodeMedia(stillUrl = "s1e51-正片")
+        val short = TmdbEpisodeMedia(stillUrl = "s0e51-短篇")
+        val stills = TmdbEpisodeStills(
+            byAirDate = mapOf("2024-10-02" to listOf(main), "2024-10-03" to listOf(short)),
+            byEpisodeName = mapOf(
+                tmdbEpisodeNameKey("劇場型悪意") to main,
+                tmdbEpisodeNameKey("Re:ゼロから始める休憩時間 3rd season 眠れる鬼の夜話") to short,
+            ),
+        )
+        val matched = stills.matchToEpisodes(listOf(dated(1, "眠れる鬼の夜話", PackedDate(2024, 10, 2))))
+        assertEquals(short, matched[1], "日期精确命中正片, 但集名认的是短篇 —— 集名说了算")
+    }
+
+    @Test
+    fun `集名对不上时日期照旧说了算`() {
+        val media = TmdbEpisodeMedia(stillUrl = "s1e1")
+        val stills = TmdbEpisodeStills(
+            byAirDate = mapOf("2024-10-02" to listOf(media)),
+            byEpisodeName = mapOf(tmdbEpisodeNameKey("别的集名") to TmdbEpisodeMedia(stillUrl = "x")),
+        )
+        val matched = stills.matchToEpisodes(listOf(dated(1, "本集名", PackedDate(2024, 10, 2))))
+        assertEquals(media, matched[1])
+    }
+
+    @Test
+    fun `圈数字折叠 - 与半角数字归一成同一个键`() {
+        assertEquals(tmdbEpisodeNameKey("ぷち1 再来の学校"), tmdbEpisodeNameKey("ぷち①再来の学校"))
+        assertEquals("20", tmdbEpisodeNameKey("⑳"))
+    }
+
 }
 
 /**

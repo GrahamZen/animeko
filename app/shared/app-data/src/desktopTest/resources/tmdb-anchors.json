@@ -14,7 +14,7 @@
     },
     {
       "date": "1995-11-18",
-      "expectPath": "/gTRXgigmgKpeJjW07iq686HZyBD.jpg",
+      "expectPath": "/jIpagj2Dud9g3ZVJFvaWikEWsYz.jpg",
       "hit": "movie/9323",
       "layer": "name",
       "name": "GHOST IN THE SHELL / 攻殻機動隊",
@@ -195,14 +195,13 @@
     {
       "date": "2016-04-08",
       "expectPath": "/7ZruEnSnHD6Jx5mF0hBt1E306Vt.jpg",
-      "hit": "tv/65942",
-      "layer": "root/bgm2(Re:ゼロから始める異世界生活)",
       "name": "Re:ゼロから始める休憩時間",
       "nameCn": "Re：从零开始的休息时间",
       "screeningYear": null,
       "subjectId": 177998,
       "theatrical": false,
-      "why": "root: Ani 给了名字但搜不到, 二次回落 Bangumi"
+      "why": "Re:Zero 家族 (2026-09-06 用户点名整批入表). TMDB 把全家挂在 tv/65942 一条记录下: 正片四季合并成 S1 (85 集), 四部衍生短篇混装进 S0 (81 集). 这一批守当天新加的三条规则: 别名档要过原名召回集佐证 (Re:プチ 的 bgm 别名字段写着「Isekai Shokudou」= 異世界食堂)、hero 背景取 /images 的无字幕首张 (= TMDB 网页三个语言页显示的那张, 而不是按语言各存一个的 backdrop_path)、以及集名后缀认领 (S0 的集名带作品名前缀, bgm 那边只有本集名)",
+      "aliases": []
     },
     {
       "date": "2022-03-04",
@@ -538,7 +537,7 @@
       "date": "2016-08-26",
       "theatrical": true,
       "screeningYear": null,
-      "expectPath": "/8x9iKH8kWA0zdkgNdpAew7OstYe.jpg",
+      "expectPath": "/mMtUybQ6hL24FXo0F3Z4j2KG7kZ.jpg",
       "layer": "name",
       "why": "主语料: 君の名は。命中自己的 movie"
     },
@@ -2410,6 +2409,255 @@
       "expectPath": "/dtqffEWIFFaZKZSkfc7XjjSzC1J.jpg",
       "layer": "movie",
       "why": "「劇場版」前缀剥除修复 (2026-08-27): TMDB 原题不带该前缀, 带着搜过不了逐词校验, 削字一路撞前篇被日期闸门拦后全链空手; 剥前缀作 primary 同义变体后命中 movie/1233186"
+    },
+    {
+      "aliases": [
+        "Re:Zero kara Hajimeru Isekai Seikatsu",
+        "rezero",
+        "Re0",
+        "Re: Life a Different World from Zero"
+      ],
+      "date": "2016-04-03",
+      "expectPath": "/7ZruEnSnHD6Jx5mF0hBt1E306Vt.jpg",
+      "name": "Re:ゼロから始める異世界生活",
+      "nameCn": "Re：从零开始的异世界生活",
+      "screeningYear": null,
+      "subjectId": 140001,
+      "theatrical": false,
+      "why": "Re:Zero 家族 (2026-09-06 用户点名整批入表). TMDB 把全家挂在 tv/65942 一条记录下: 正片四季合并成 S1 (85 集), 四部衍生短篇混装进 S0 (81 集). 这一批守当天新加的三条规则: 别名档要过原名召回集佐证 (Re:プチ 的 bgm 别名字段写着「Isekai Shokudou」= 異世界食堂)、hero 背景取 /images 的无字幕首张 (= TMDB 网页三个语言页显示的那张, 而不是按语言各存一个的 backdrop_path)、以及集名后缀认领 (S0 的集名带作品名前缀, bgm 那边只有本集名)"
+    },
+    {
+      "aliases": [
+        "Isekai Shokudou"
+      ],
+      "date": "2016-06-24",
+      "expectPath": "/7ZruEnSnHD6Jx5mF0hBt1E306Vt.jpg",
+      "name": "Re:プチから始める異世界生活",
+      "nameCn": "Re：从迷你开始的异世界生活",
+      "screeningYear": null,
+      "subjectId": 185837,
+      "theatrical": false,
+      "why": "Re:Zero 家族 (2026-09-06 用户点名整批入表). TMDB 把全家挂在 tv/65942 一条记录下: 正片四季合并成 S1 (85 集), 四部衍生短篇混装进 S0 (81 集). 这一批守当天新加的三条规则: 别名档要过原名召回集佐证 (Re:プチ 的 bgm 别名字段写着「Isekai Shokudou」= 異世界食堂)、hero 背景取 /images 的无字幕首张 (= TMDB 网页三个语言页显示的那张, 而不是按语言各存一个的 backdrop_path)、以及集名后缀认领 (S0 的集名带作品名前缀, bgm 那边只有本集名)"
+    },
+    {
+      "aliases": [
+        "Re：从零开始的异世界生活 Memory Snow",
+        "Re:Zero kara Hajimeru Isekai Seikatsu (2018)",
+        "Re:Zero - Starting Life in Another World (2018)"
+      ],
+      "date": "2019-06-07",
+      "expectPath": "/t9ifVuOtSZBvtieF9L83pnHnOcC.jpg",
+      "name": "Re:ゼロから始める異世界生活 Memory Snow",
+      "nameCn": "Re：从零开始的异世界生活 雪之回忆",
+      "screeningYear": 2018,
+      "subjectId": 225462,
+      "theatrical": true,
+      "why": "单集条目 (OVA/剧场版): TMDB 上是独立 movie, 命中自己而不是本传"
+    },
+    {
+      "aliases": [],
+      "date": "2019-11-08",
+      "expectPath": "/9K1zhrS8jZ3NFZwzc5RgtwxskLT.jpg",
+      "name": "Re:ゼロから始める異世界生活 氷結の絆",
+      "nameCn": "Re：从零开始的异世界生活 冰结之绊",
+      "screeningYear": null,
+      "subjectId": 261805,
+      "theatrical": false,
+      "why": "单集条目 (OVA/剧场版): TMDB 上是独立 movie, 命中自己而不是本传"
+    },
+    {
+      "aliases": [],
+      "date": "2019-04-09",
+      "expectPath": "/nLDxVvCnQaRRqWjvER9j5bsrre9.jpg",
+      "name": "異世界かるてっと",
+      "nameCn": "异世界四重奏",
+      "screeningYear": null,
+      "subjectId": 262865,
+      "theatrical": false,
+      "why": "異世界かるてっと (Re:Zero 的角色出演联动, 与本家一起入表). TMDB 三季合并成 tv/87478 的 S1 (35 集), 三个 bgm 条目都挂上去 —— 家族同图聚类: 三条 backdrop 必须同图, 分开了就是有一条错配"
+    },
+    {
+      "aliases": [
+        "Re:Zero kara Hajimeru Isekai Seikatsu (2020)",
+        "Re0 第二季",
+        "Re:ゼロから始める異世界生活2"
+      ],
+      "date": "2020-07-08",
+      "expectPath": "/7ZruEnSnHD6Jx5mF0hBt1E306Vt.jpg",
+      "name": "Re:ゼロから始める異世界生活 2nd season",
+      "nameCn": "Re：从零开始的异世界生活 第二季",
+      "screeningYear": null,
+      "subjectId": 278826,
+      "theatrical": false,
+      "why": "Re:Zero 家族 (2026-09-06 用户点名整批入表). TMDB 把全家挂在 tv/65942 一条记录下: 正片四季合并成 S1 (85 集), 四部衍生短篇混装进 S0 (81 集). 这一批守当天新加的三条规则: 别名档要过原名召回集佐证 (Re:プチ 的 bgm 别名字段写着「Isekai Shokudou」= 異世界食堂)、hero 背景取 /images 的无字幕首张 (= TMDB 网页三个语言页显示的那张, 而不是按语言各存一个的 backdrop_path)、以及集名后缀认领 (S0 的集名带作品名前缀, bgm 那边只有本集名)"
+    },
+    {
+      "aliases": [],
+      "date": "2020-01-14",
+      "expectPath": "/nLDxVvCnQaRRqWjvER9j5bsrre9.jpg",
+      "name": "異世界かるてっと２",
+      "nameCn": "异世界四重奏 第二季",
+      "screeningYear": null,
+      "subjectId": 285422,
+      "theatrical": false,
+      "why": "異世界かるてっと (Re:Zero 的角色出演联动, 与本家一起入表). TMDB 三季合并成 tv/87478 的 S1 (35 集), 三个 bgm 条目都挂上去 —— 家族同图聚类: 三条 backdrop 必须同图, 分开了就是有一条错配"
+    },
+    {
+      "aliases": [],
+      "date": "2020-01-01",
+      "expectPath": "/7ZruEnSnHD6Jx5mF0hBt1E306Vt.jpg",
+      "name": "Re:ゼロから始める異世界生活 新編集版",
+      "nameCn": "Re：从零开始的异世界生活 新编集版",
+      "screeningYear": null,
+      "subjectId": 296195,
+      "theatrical": false,
+      "why": "Re:Zero 家族 (2026-09-06 用户点名整批入表). TMDB 把全家挂在 tv/65942 一条记录下: 正片四季合并成 S1 (85 集), 四部衍生短篇混装进 S0 (81 集). 这一批守当天新加的三条规则: 别名档要过原名召回集佐证 (Re:プチ 的 bgm 别名字段写着「Isekai Shokudou」= 異世界食堂)、hero 背景取 /images 的无字幕首张 (= TMDB 网页三个语言页显示的那张, 而不是按语言各存一个的 backdrop_path)、以及集名后缀认领 (S0 的集名带作品名前缀, bgm 那边只有本集名)"
+    },
+    {
+      "aliases": [
+        "异世界四重奏 另一个世界",
+        "Isekai Quartet: Another World"
+      ],
+      "date": "2022-06-10",
+      "expectPath": "/uDXI48cmsHsInx5DC7ziW4bQ3ie.jpg",
+      "name": "劇場版 異世界かるてっと ～あなざーわーるど～",
+      "nameCn": "剧场版 异世界四重奏 ～Another World～",
+      "screeningYear": null,
+      "subjectId": 303126,
+      "theatrical": true,
+      "why": "单集条目 (OVA/剧场版): TMDB 上是独立 movie, 命中自己而不是本传"
+    },
+    {
+      "aliases": [
+        "Re:Zero kara Hajimeru Break Time 2nd Season"
+      ],
+      "date": "2020-07-10",
+      "expectPath": "/7ZruEnSnHD6Jx5mF0hBt1E306Vt.jpg",
+      "name": "Re:ゼロから始める休憩時間 2nd Season",
+      "nameCn": "Re：从零开始的休息时间2",
+      "screeningYear": null,
+      "subjectId": 310194,
+      "theatrical": false,
+      "why": "Re:Zero 家族 (2026-09-06 用户点名整批入表). TMDB 把全家挂在 tv/65942 一条记录下: 正片四季合并成 S1 (85 集), 四部衍生短篇混装进 S0 (81 集). 这一批守当天新加的三条规则: 别名档要过原名召回集佐证 (Re:プチ 的 bgm 别名字段写着「Isekai Shokudou」= 異世界食堂)、hero 背景取 /images 的无字幕首张 (= TMDB 网页三个语言页显示的那张, 而不是按语言各存一个的 backdrop_path)、以及集名后缀认领 (S0 的集名带作品名前缀, bgm 那边只有本集名)"
+    },
+    {
+      "aliases": [
+        "Re:Zero kara Hajimeru Isekai Seikatsu (2021)",
+        "Re0 第二季后半"
+      ],
+      "date": "2021-01-06",
+      "expectPath": "/7ZruEnSnHD6Jx5mF0hBt1E306Vt.jpg",
+      "name": "Re:ゼロから始める異世界生活 2nd season 後半クール",
+      "nameCn": "Re：从零开始的异世界生活 第二季 后半部分",
+      "screeningYear": null,
+      "subjectId": 316247,
+      "theatrical": false,
+      "why": "Re:Zero 家族 (2026-09-06 用户点名整批入表). TMDB 把全家挂在 tv/65942 一条记录下: 正片四季合并成 S1 (85 集), 四部衍生短篇混装进 S0 (81 集). 这一批守当天新加的三条规则: 别名档要过原名召回集佐证 (Re:プチ 的 bgm 别名字段写着「Isekai Shokudou」= 異世界食堂)、hero 背景取 /images 的无字幕首张 (= TMDB 网页三个语言页显示的那张, 而不是按语言各存一个的 backdrop_path)、以及集名后缀认领 (S0 的集名带作品名前缀, bgm 那边只有本集名)"
+    },
+    {
+      "aliases": [
+        "Re：從零開始的異世界生活 第三季 襲擊篇",
+        "Re0 第三季",
+        "Re0 3",
+        "rezero s3",
+        "Re:Zero kara Hajimeru Isekai Seikatsu (2024)",
+        "Re:ゼロから始める異世界生活 (2024)",
+        "Re:Zero kara Hajimeru Isekai Seikatsu 3rd Season Shuugeki Hen",
+        "Re:ZERO -Starting Life in Another World- Season 3 Shuugeki Hen"
+      ],
+      "date": "2024-10-02",
+      "expectPath": "/7ZruEnSnHD6Jx5mF0hBt1E306Vt.jpg",
+      "name": "Re:ゼロから始める異世界生活 3rd season 襲擊編",
+      "nameCn": "Re：从零开始的异世界生活 第三季 袭击篇",
+      "screeningYear": null,
+      "subjectId": 425998,
+      "theatrical": false,
+      "why": "Re:Zero 家族 (2026-09-06 用户点名整批入表). TMDB 把全家挂在 tv/65942 一条记录下: 正片四季合并成 S1 (85 集), 四部衍生短篇混装进 S0 (81 集). 这一批守当天新加的三条规则: 别名档要过原名召回集佐证 (Re:プチ 的 bgm 别名字段写着「Isekai Shokudou」= 異世界食堂)、hero 背景取 /images 的无字幕首张 (= TMDB 网页三个语言页显示的那张, 而不是按语言各存一个的 backdrop_path)、以及集名后缀认领 (S0 的集名带作品名前缀, bgm 那边只有本集名)"
+    },
+    {
+      "aliases": [
+        "Re：從零開始的異世界生活 第三季 反擊篇",
+        "Re:Zero kara Hajimeru Isekai Seikatsu (2025)",
+        "Re:Zero - Starting Life in Another World (2025)",
+        "re0 第三季 反击篇",
+        "re0 第三季 反擊篇"
+      ],
+      "date": "2025-02-05",
+      "expectPath": "/7ZruEnSnHD6Jx5mF0hBt1E306Vt.jpg",
+      "name": "Re:ゼロから始める異世界生活 3rd season 反擊編",
+      "nameCn": "Re：从零开始的异世界生活 第三季 反击篇",
+      "screeningYear": null,
+      "subjectId": 510728,
+      "theatrical": false,
+      "why": "Re:Zero 家族 (2026-09-06 用户点名整批入表). TMDB 把全家挂在 tv/65942 一条记录下: 正片四季合并成 S1 (85 集), 四部衍生短篇混装进 S0 (81 集). 这一批守当天新加的三条规则: 别名档要过原名召回集佐证 (Re:プチ 的 bgm 别名字段写着「Isekai Shokudou」= 異世界食堂)、hero 背景取 /images 的无字幕首张 (= TMDB 网页三个语言页显示的那张, 而不是按语言各存一个的 backdrop_path)、以及集名后缀认领 (S0 的集名带作品名前缀, bgm 那边只有本集名)"
+    },
+    {
+      "aliases": [],
+      "date": "2024-10-02",
+      "expectPath": "/7ZruEnSnHD6Jx5mF0hBt1E306Vt.jpg",
+      "name": "Re:ゼロから始める休憩時間 3rd season",
+      "nameCn": "Re：从零开始的休息时间3",
+      "screeningYear": null,
+      "subjectId": 516311,
+      "theatrical": false,
+      "why": "Re:Zero 家族 (2026-09-06 用户点名整批入表). TMDB 把全家挂在 tv/65942 一条记录下: 正片四季合并成 S1 (85 集), 四部衍生短篇混装进 S0 (81 集). 这一批守当天新加的三条规则: 别名档要过原名召回集佐证 (Re:プチ 的 bgm 别名字段写着「Isekai Shokudou」= 異世界食堂)、hero 背景取 /images 的无字幕首张 (= TMDB 网页三个语言页显示的那张, 而不是按语言各存一个的 backdrop_path)、以及集名后缀认领 (S0 的集名带作品名前缀, bgm 那边只有本集名)"
+    },
+    {
+      "aliases": [
+        "Re:Zero kara Hajimeru Isekai Seikatsu 4th Season",
+        "Re:ZERO -Starting Life in Another World- Season 4",
+        "Re Zero kara Hajimeru Isekai Seikatsu 4th Season",
+        "Re：從零開始的異世界生活 第四季 喪失篇",
+        "re0 第四季 丧失篇",
+        "re0 第四季 喪失篇"
+      ],
+      "date": "2026-04-08",
+      "expectPath": "/7ZruEnSnHD6Jx5mF0hBt1E306Vt.jpg",
+      "name": "Re:ゼロから始める異世界生活 4th season 喪失編",
+      "nameCn": "Re：从零开始的异世界生活 第四季 丧失篇",
+      "screeningYear": null,
+      "subjectId": 547888,
+      "theatrical": false,
+      "why": "Re:Zero 家族 (2026-09-06 用户点名整批入表). TMDB 把全家挂在 tv/65942 一条记录下: 正片四季合并成 S1 (85 集), 四部衍生短篇混装进 S0 (81 集). 这一批守当天新加的三条规则: 别名档要过原名召回集佐证 (Re:プチ 的 bgm 别名字段写着「Isekai Shokudou」= 異世界食堂)、hero 背景取 /images 的无字幕首张 (= TMDB 网页三个语言页显示的那张, 而不是按语言各存一个的 backdrop_path)、以及集名后缀认领 (S0 的集名带作品名前缀, bgm 那边只有本集名)"
+    },
+    {
+      "aliases": [
+        "Isekai Quartet 3"
+      ],
+      "date": "2025-10-13",
+      "expectPath": "/nLDxVvCnQaRRqWjvER9j5bsrre9.jpg",
+      "name": "異世界かるてっと3",
+      "nameCn": "异世界四重奏 第三季",
+      "screeningYear": null,
+      "subjectId": 564421,
+      "theatrical": false,
+      "why": "異世界かるてっと (Re:Zero 的角色出演联动, 与本家一起入表). TMDB 三季合并成 tv/87478 的 S1 (35 集), 三个 bgm 条目都挂上去 —— 家族同图聚类: 三条 backdrop 必须同图, 分开了就是有一条错配"
+    },
+    {
+      "aliases": [
+        "Re：從零開始的異世界生活 第四季 奪還篇",
+        "re0 第四季 夺还篇",
+        "re0 第四季 奪還篇"
+      ],
+      "date": "2026-08-12",
+      "expectPath": "/7ZruEnSnHD6Jx5mF0hBt1E306Vt.jpg",
+      "name": "Re:ゼロから始める異世界生活 4th season 奪還編",
+      "nameCn": "Re：从零开始的异世界生活 第四季 夺还篇",
+      "screeningYear": null,
+      "subjectId": 633836,
+      "theatrical": false,
+      "why": "Re:Zero 家族 (2026-09-06 用户点名整批入表). TMDB 把全家挂在 tv/65942 一条记录下: 正片四季合并成 S1 (85 集), 四部衍生短篇混装进 S0 (81 集). 这一批守当天新加的三条规则: 别名档要过原名召回集佐证 (Re:プチ 的 bgm 别名字段写着「Isekai Shokudou」= 異世界食堂)、hero 背景取 /images 的无字幕首张 (= TMDB 网页三个语言页显示的那张, 而不是按语言各存一个的 backdrop_path)、以及集名后缀认领 (S0 的集名带作品名前缀, bgm 那边只有本集名)"
+    },
+    {
+      "aliases": [],
+      "date": "2026-04-08",
+      "expectPath": "/7ZruEnSnHD6Jx5mF0hBt1E306Vt.jpg",
+      "name": "Re:ゼロから始める休憩時間 4th season",
+      "nameCn": "Re：从零开始的休息时间4",
+      "screeningYear": null,
+      "subjectId": 638494,
+      "theatrical": false,
+      "why": "Re:Zero 家族 (2026-09-06 用户点名整批入表). TMDB 把全家挂在 tv/65942 一条记录下: 正片四季合并成 S1 (85 集), 四部衍生短篇混装进 S0 (81 集). 这一批守当天新加的三条规则: 别名档要过原名召回集佐证 (Re:プチ 的 bgm 别名字段写着「Isekai Shokudou」= 異世界食堂)、hero 背景取 /images 的无字幕首张 (= TMDB 网页三个语言页显示的那张, 而不是按语言各存一个的 backdrop_path)、以及集名后缀认领 (S0 的集名带作品名前缀, bgm 那边只有本集名)"
     }
   ]
 }
