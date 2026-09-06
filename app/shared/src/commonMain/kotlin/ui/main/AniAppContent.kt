@@ -216,13 +216,6 @@ fun AniAppContent(aniNavigator: AniNavigator) {
                     playbackSessionHolder,
                     Modifier.fillMaxSize(),
                 )
-                BangumiSessionExpiredPromptHost(
-                    viewModel = aniAppViewModel,
-                    enabled = appState.initialNavRoute is NavRoutes.Main,
-                    onLogin = {
-                        aniNavigator.navigateBangumiAuthorize()
-                    },
-                )
             }
         }
     }
