@@ -88,14 +88,21 @@ class ScheduleViewModel(
         SchedulePagePresentation(
             daysFor(today),
             airingSchedules = result.getOrNull()?.map { airingSchedule ->
-                AiringSchedule(
-                    airingSchedule.date,
-                    SchedulePageDataHelper.toColumnItems(
-                        airingSchedule.list.map { it.toPresentation(timeZone) },
-                        addIndicator = currentDateTime.date == airingSchedule.date,
-                        currentDateTime.time,
-                    ),
-                )
+                // 这一天还没取完就先摆骨架: 空列表在界面上与"这一天真没有新番"长得一模一样,
+                // 而时间表是一天一天填上来的, 进页面头几秒每天都会写着"没有新番"
+                if (airingSchedule.pending && airingSchedule.list.isEmpty()) {
+                    AiringSchedule(airingSchedule.date, PLACEHOLDER_EPISODES, isPlaceholder = true)
+                } else {
+                    AiringSchedule(
+                        airingSchedule.date,
+                        SchedulePageDataHelper.toColumnItems(
+                            airingSchedule.list.map { it.toPresentation(timeZone) },
+                            addIndicator = currentDateTime.date == airingSchedule.date,
+                            currentDateTime.time,
+                        ),
+                        isPlaceholder = airingSchedule.pending,
+                    )
+                }
             }.orEmpty(),
             error = result.exceptionOrNull()?.let { LoadError.fromException(it) },
         )
@@ -122,6 +129,11 @@ class ScheduleViewModel(
     private companion object {
         /** 当前时刻的重算周期: 界面上"现在几点"精确到分钟, 再密没有意义. */
         private val TICK_PERIOD = 1.minutes
+
+        /** 一天的骨架卡. 条数只是个观感上不空的数, 与那天真有几部无关. */
+        private val PLACEHOLDER_EPISODES = (1..10).map {
+            AiringScheduleColumnItem.PlaceholderData(id = it, showTime = true)
+        }
     }
 }
 

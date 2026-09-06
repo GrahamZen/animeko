@@ -25,6 +25,13 @@ import kotlin.time.Instant
 data class AiringScheduleForDate(
     val date: LocalDate,
     val list: List<EpisodeWithAiringTime>,
+    /**
+     * 这一天的数据还没取完 (名册里还有条目没拿到分集).
+     *
+     * 时间表是按天懒加载的, [list] 为空有两种完全不同的含义: 这一天真没有新番, 或者只是还没轮到
+     * 它. 界面拿它区分"这一天没有新番"与骨架占位 —— 缺了这一位, 进页面头几秒每天都写着"没有新番".
+     */
+    val pending: Boolean = false,
 )
 
 data class EpisodeWithAiringTime(
