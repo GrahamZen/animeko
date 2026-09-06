@@ -150,7 +150,6 @@ import me.him188.ani.app.ui.lang.settings_tab_settings_backup
 import me.him188.ani.app.ui.lang.settings_tab_storage
 import me.him188.ani.app.ui.lang.settings_tab_theme
 import me.him188.ani.app.ui.lang.settings_tab_update
-import me.him188.ani.app.ui.settings.account.BangumiSyncTab
 import me.him188.ani.app.ui.settings.account.ProfileGroup
 import me.him188.ani.app.ui.settings.account.SelfInfoBanner
 import me.him188.ani.app.ui.settings.framework.components.LocalSliderBackKeyExitsLeft
@@ -189,7 +188,6 @@ typealias SettingsTab = me.him188.ani.app.navigation.SettingsTab
 @Composable
 fun SettingsScreen(
     vm: SettingsViewModel,
-    onNavigateToEmailLogin: () -> Unit,
     onNavigateToBangumiOAuth: () -> Unit,
     loadOpenSourceLibrariesJsons: suspend () -> List<ByteArray>,
     modifier: Modifier = Modifier,
@@ -267,7 +265,7 @@ fun SettingsScreen(
                 selfInfoState,
                 checked = bannerChecked,
                 { navigateToTab(SettingsTab.PROFILE) },
-                onNavigateToEmailLogin,
+                onNavigateToBangumiOAuth,
                 Modifier.fillMaxWidth().tabFocusTarget(SettingsTab.PROFILE),
                 containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
             )
@@ -343,13 +341,7 @@ fun SettingsScreen(
                         tabModifier,
                     ) {
                         when (currentTab) {
-                            SettingsTab.PROFILE -> ProfileGroup(
-                                onNavigateToEmail = onNavigateToEmailLogin,
-                                onNavigateToBangumiSync = {
-                                    navigateTo(DetailPaneRoutes.BangumiSync)
-                                },
-                                onNavigateToBangumiOAuth = onNavigateToBangumiOAuth,
-                            )
+                            SettingsTab.PROFILE -> ProfileGroup()
 
                             SettingsTab.APPEARANCE -> AppearanceGroup(vm.uiSettings, vm.themeSettings)
                             SettingsTab.THEME -> ThemeGroup(vm.themeSettings)
@@ -834,27 +826,6 @@ internal fun SettingsPageLayout(
                             }
                         }
                     }
-                    entry<DetailPaneRoutes.BangumiSync> {
-                        DetailPaneRoute(
-                            topAppBar = {
-                                AniTopAppBar(
-                                    title = { AniTopAppBarDefaults.Title("Bangumi 同步") },
-                                    navigationIcon = {
-                                        BackNavigationIconButton(navigateUp)
-                                    },
-                                    colors = topAppBarColors,
-                                    windowInsets = topAppBarWindowInsets,
-                                    size = topAppBarSize,
-                                    scrollBehavior = detailPaneTopAppBarScrollBehavior,
-                                )
-                            },
-                            detailPaneTopAppBarScrollBehavior,
-                        ) {
-                            RouteContent(scrollable = false) {
-                                BangumiSyncTab()
-                            }
-                        }
-                    }
                     },
                 )
             }
@@ -980,9 +951,6 @@ sealed class DetailPaneRoutes : NavKey {
 
     @Serializable
     data object Developers : DetailPaneRoutes()
-
-    @Serializable
-    data object BangumiSync : DetailPaneRoutes()
 }
 
 private val DetailPaneBackStackSaver: Saver<SnapshotStateList<DetailPaneRoutes>, Any> = listSaver(
@@ -997,7 +965,6 @@ private val DetailPaneBackStackSaver: Saver<SnapshotStateList<DetailPaneRoutes>,
                     "Acknowledgements" -> DetailPaneRoutes.Acknowledgements
                     "OpenSourceLicenses" -> DetailPaneRoutes.OpenSourceLicenses
                     "Developers" -> DetailPaneRoutes.Developers
-                    "BangumiSync" -> DetailPaneRoutes.BangumiSync
                     else -> DetailPaneRoutes.Main
                 }
             }.toMutableStateList()
