@@ -22,6 +22,8 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.platform.InspectorInfo
+import androidx.compose.ui.focus.FocusEventModifierNode
+import androidx.compose.ui.focus.FocusState
 import androidx.compose.ui.focus.onFocusChanged
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
@@ -70,6 +72,19 @@ class TvGridFocusState internal constructor(internal val scope: TvFocusScope) {
     /** 当前聚焦卡下标 (由 [tvGridFocusItem] 上报; 仅按键判定读, 非 snapshot 状态). */
     internal var focusedIndex: Int = -1
 
+    /**
+     * 最后一个报告"我持着焦点"的卡节点 (见 [TvGridItemPresenceNode]).
+     *
+     * 补射的前提是**焦点真的悬空了**. 只比下标答不了这个问题 —— 两批卡片并存 (跨天淡出、
+     * 分页换 generation) 时下标必然撞车, 而长按连发期间"用户接管"那道代数闸门又是瞎的
+     * (`tvFocusNavSignal` 有 isAutoRepeat 守卫, 连发不推进代数), 于是补射把用户已经按到后面的
+     * 焦点拽回来 (2026-09-06 用户报"长按右键焦点被上一张卡片拉回去, 偶尔反复拉").
+     *
+     * 节点身份能直接回答: 若它**仍在组合里** ([Modifier.Node.isAttached]), 焦点就没悬空 ——
+     * 要么还在它身上, 要么用户把焦点移到了别处, 两种都轮不到补射.
+     */
+    internal var focusedNode: Modifier.Node? = null
+
     /** 已解析的待聚焦目标下标 (锚点匹配用); null = 无已解析目标. */
     var pendingIndex: Int? by mutableStateOf(null)
         private set
@@ -84,13 +99,27 @@ class TvGridFocusState internal constructor(internal val scope: TvFocusScope) {
     internal var navGenerationAtRequest: Int = 0
         private set
 
+    /** 发起请求时的按键代数 (含连发, 见 [TvFocusScope.userInputGeneration]). */
+    private var inputGenerationAtRequest: Int = 0
+
     /** 是否有在途的送焦请求 (期间调用方应冻结"聚焦即选中"类副作用, 见文件头). */
     val switching: Boolean get() = pendingIndex != null || pendingRowEdge != null
 
-    /** 程序化聚焦第 [index] 项 (越界会钳到末项; 由 [SendFocusEffect] 消化). */
-    fun focusItem(index: Int) {
+    /**
+     * 程序化聚焦第 [index] 项 (越界会钳到末项; 由 [SendFocusEffect] 消化).
+     *
+     * [reason] 只进日志: 排"焦点自己动了"这类问题时, 第一个要分清的就是"页面请求的"还是
+     * "框架补射的" (见 [consumeRearmRequest]).
+     */
+    fun focusItem(index: Int, reason: String = "page") {
+        // 只记**框架自己发起**的那几发: "焦点自己动了"的排查里, 第一件事就是分清是不是页面请求的.
+        // 页面请求太密 (时间表长按右键每换一行一次), 记了只是噪音
+        if (reason != "page") {
+            logger.info { "tvfocus: focusItem($index) reason=$reason focusedIndex=$focusedIndex" }
+        }
         scope.cancel(entryKey)
         navGenerationAtRequest = scope.userNavGeneration
+        inputGenerationAtRequest = scope.userInputGeneration
         pendingRowEdge = null
         pendingIndex = index
         requestGeneration++
@@ -103,6 +132,7 @@ class TvGridFocusState internal constructor(internal val scope: TvFocusScope) {
     fun focusRowEdge(row: Int, direction: Int) {
         scope.cancel(entryKey)
         navGenerationAtRequest = scope.userNavGeneration
+        inputGenerationAtRequest = scope.userInputGeneration
         pendingIndex = null
         pendingRowEdge = row to direction
         requestGeneration++
@@ -129,6 +159,14 @@ class TvGridFocusState internal constructor(internal val scope: TvFocusScope) {
      * **判据**: 焦点还记在这张卡上 (`focusedIndex == index`) 而它的节点没了. 正常的滚动回收
      * 命不中 —— 电视上滚动一定由焦点移动驱动, 焦点先落到新卡、[focusedIndex] 随之更新, 旧卡
      * 才被回收. 在途请求期间不管 (那条路有自己的到位/超时逻辑, 且锚点会随新节点重新附着).
+     *
+     * **光凭下标不够, 上报端还必须确认"销毁的正是持焦的那个节点"** (见
+     * [TvGridItemPresenceNode]): 两批卡片并存时下标会撞车 —— 时间表长按右键跨天, 新一天的
+     * 第 0 张刚拿到焦点, 旧一天的第 0 张随淡出销毁, 下标同为 0、`focusedIndex` 同为 0,
+     * 于是补射把用户已经按到第 1、2 张的焦点拽回第 0 张, 长按期间还会连着拽几次
+     * (2026-09-06 用户报"长按右键焦点被上一张卡片拉回去, 偶尔反复拉"; 真机日志里就是
+     * `聚焦卡 0 的节点被销毁, 补一次送焦`). 长按连发不推进 [TvFocusScope.userNavGeneration]
+     * (`tvFocusNavSignal` 有 isAutoRepeat 守卫), 所以下面那道"用户接管"闸门此时是瞎的.
      */
     internal fun onItemNodeDetached(index: Int) {
         if (focusedIndex != index || switching) return
@@ -164,13 +202,39 @@ class TvGridFocusState internal constructor(internal val scope: TvFocusScope) {
         rearmRequest = null
         // 网格已经不在组合里 = 面板/页面走了, 不是"卡被换掉": 丢弃
         if (installedGrids <= 0) return
-        if (focusedIndex != index || switching) return
+        if (switching) return
+        // **焦点没悬空就不补**: 见 [focusedNode]. 这条比下标判据靠得住 —— 下标会撞车,
+        // 而"还有活着的卡持着焦点"是直接的否定证据
+        val holder = focusedNode
+        if (holder != null && holder.isAttached) return
+        if (focusedIndex != index) return
         if (scope.userNavGeneration != navGenerationAtRequest) return
         if (rearmIndex == index && rearmCount >= REARM_MAX_CONSECUTIVE) return
         rearmCount = if (rearmIndex == index) rearmCount + 1 else 1
         rearmIndex = index
-        logger.info { "TvGridFocusState: 聚焦卡 $index 的节点被销毁, 补一次送焦 (第 $rearmCount 次)" }
-        focusItem(index)
+        logger.info { "tvfocus: 聚焦卡 $index 的节点被销毁, 补一次送焦 (第 $rearmCount 次)" }
+        focusItem(index, reason = "rearm")
+    }
+
+    /**
+     * **焦点落到了别的卡上, 在途送焦作废**.
+     *
+     * "用户接管就取消"原先只从按键侧观察 (`userNavGeneration`), 而**长按连发不推进代数**
+     * (`tvFocusNavSignal` 的 isAutoRepeat 守卫, 见文件头三条不变量), 于是长按期间的在途请求
+     * 谁也取消不掉: 时间表长按右键每换一行都会请求一次 `focusItem(focused + 1)` (行末接下一行
+     * 行首), 而送焦要等滚动 + 锚点附着才落地 —— 这期间默认空间搜索已经把焦点又往右挪了几张,
+     * 迟到的那一发就把焦点拽回去 (2026-09-06 用户报"长按右键焦点被上一张卡片拉回去, 偶尔反复拉").
+     *
+     * 从**焦点侧**观察就没有这个盲区: 焦点自己落到了非目标的卡上, 就说明有别人在驱动移动,
+     * 这一发已经过期. 与"目标到位即清"是同一个出口, 只是理由相反.
+     */
+    internal fun onFocusTakenByOtherItem(index: Int) {
+        // **必须是用户按出来的那种落点**. 组合销毁时焦点会跌落到布局里第一个可聚焦节点 ——
+        // 那正是在途请求要救的场面 (见文件头), 作废掉它焦点就永远停在跌落处.
+        // 判据: 请求发出之后用户按过键 (含连发, 所以长按也认得出来).
+        if (scope.userInputGeneration == inputGenerationAtRequest) return
+        logger.info { "tvfocus: 焦点已落到 $index (在途目标 $pendingIndex), 作废这一发" }
+        cancel()
     }
 
     /** 取消在途请求 (调用方确定目标不会出现, 如分页确定空列表). */
@@ -335,8 +399,29 @@ private data class TvGridItemPresenceElement(
 private class TvGridItemPresenceNode(
     private var state: TvGridFocusState,
     private var index: Int,
-) : Modifier.Node() {
-    override fun onDetach() = state.onItemNodeDetached(index)
+) : Modifier.Node(), FocusEventModifierNode {
+    /**
+     * 本节点 (这张卡) 此刻是不是持着焦点.
+     *
+     * 存在这里而不是只看 [TvGridFocusState.focusedIndex]: 两批卡片并存时下标会撞车,
+     * 只比下标会把"另一批里同号的那张被销毁"误判成"持焦卡被销毁" —— 见
+     * [TvGridFocusState.onItemNodeDetached] 的判据一段.
+     */
+    private var focused = false
+
+    /**
+     * `isFocused` 是本节点自己持焦, `hasFocus` 是焦点在它子树里 (卡片的可聚焦体通常在更里层).
+     * 两者取或: 这里只关心"焦点是不是在这张卡上".
+     */
+    override fun onFocusEvent(focusState: FocusState) {
+        focused = focusState.isFocused || focusState.hasFocus
+        // 谁最后持的焦点要记身份, 不能只记下标 (见 [TvGridFocusState.focusedNode])
+        if (focused) state.focusedNode = this
+    }
+
+    override fun onDetach() {
+        if (focused) state.onItemNodeDetached(index)
+    }
 
     fun update(newState: TvGridFocusState, newIndex: Int) {
         // 下标变了 = 同一个节点被 Lazy 复用到了另一张卡, 旧下标那张卡并没有"被销毁", 只更新记账
@@ -369,8 +454,11 @@ fun rememberTvGridFocus(scope: TvFocusScope): TvGridFocusState {
                 if (key !== state.entryKey) return@collect
                 val index = state.focusedIndex
                 if (index < 0 || state.switching) return@collect
+                // 与 consumeRearmRequest 同一道判据: 还有活着的卡持着焦点就不是"焦点悬空"
+                val holder = state.focusedNode
+                if (holder != null && holder.isAttached) return@collect
                 if (scope.userNavGeneration != state.navGenerationAtRequest) return@collect
-                state.focusItem(index)
+                state.focusItem(index, reason = "anchor-detach")
             }
     }
     LaunchedEffect(state) {
@@ -409,7 +497,11 @@ fun Modifier.tvGridFocusItem(
         .onFocusChanged {
             if (it.isFocused) {
                 state.focusedIndex = index
-                if (index == targetIndex) state.cancel()
+                when {
+                    index == targetIndex -> state.cancel() // 到位
+                    // 落到了别的卡上 = 有别人在驱动焦点, 在途那一发已过期 (长按连发的盲区)
+                    state.pendingIndex != null -> state.onFocusTakenByOtherItem(index)
+                }
             }
         }
 }

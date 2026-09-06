@@ -140,6 +140,24 @@ class TvFocusScope {
     var userNavGeneration: Int by mutableIntStateOf(0)
         private set
 
+    /**
+     * 按键代数, **连发也算** ([tvFocusNavSignal] 上报). 与 [userNavGeneration] 的分工:
+     *
+     * - [userNavGeneration] 是"用户介入了, 取消在途送焦" —— 它**必须**放过连发, 否则由长按驱动的
+     *   整批切换 (换天/换分类) 会被自己的第二发取消掉 (见 [tvFocusNavSignal] 里那段).
+     * - 本代数只回答一个更弱的问题: "自某个时刻起用户按过键吗". 用来分辨焦点是**用户按出来的**
+     *   还是组合销毁时**跌落**过去的 —— 前者该让在途请求作废, 后者恰恰要靠在途请求救回来.
+     *
+     * 只有需要这个区分的地方读它 (见 [TvGridFocusState.onFocusTakenByOtherItem]).
+     */
+    var userInputGeneration: Int by mutableIntStateOf(0)
+        private set
+
+    /** 用户按下方向/确认键 (含系统连发) 的上报, 只推进 [userInputGeneration], 不取消任何请求. */
+    fun notifyUserInput() {
+        userInputGeneration++
+    }
+
     /** [key] 的 FocusRequester (惰性创建). 框架内部互操作用; 页面侧一律走锚点 + [request]. */
     fun requesterOf(key: TvFocusKey): FocusRequester = requesters.getOrPut(key) { FocusRequester() }
 

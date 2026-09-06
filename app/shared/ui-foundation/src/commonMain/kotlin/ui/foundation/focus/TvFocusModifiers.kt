@@ -128,6 +128,9 @@ fun Modifier.tvFocusNavSignal(scope: TvFocusScope): Modifier = onPreviewKeyEvent
         // 诊断: 连发守卫是否真的生效 —— isAutoRepeat 是 expect/actual, Android 读
         // nativeKeyEvent.repeatCount; 电视遥控器长按到底会不会带 repeatCount>0 未经实测
         if (event.isAutoRepeat != true) scope.notifyUserNavigation()
+        // 连发也要记一笔 (只推进代数, 不取消请求): 用来分辨"焦点是用户按过去的"还是
+        // "组合销毁时跌落过去的", 见 [TvFocusScope.userInputGeneration]
+        scope.notifyUserInput()
     }
     false // 只旁听, 不消费
 }
