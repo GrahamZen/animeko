@@ -243,11 +243,9 @@
       "date": "2016-04-08",
       "eps": null,
       "theatrical": false,
-      "expectAirDateKeys": [
-        "2016-04-04"
-      ],
-      "minWithStill": 112,
-      "why": "自 backdrop 锚点批量生成 (2026-08-26 当前实现输出人工复核): root: Ani 给了名字但搜不到, 二次回落 Bangumi"
+      "expectAirDateKeys": [],
+      "minWithStill": 60,
+      "why": "直连 bangumi 后期望值变了 (2026-09-05): 原值 (112 张, 含 2016-04-04) 是 Ani 的一个偶然 —— 它给的母条目名 (Re:プチ) 在 TMDB 搜不到, 于是走了二次回落. 直连后血统由 bangumi 的「主线故事」出边正常解析出来, 拿到 80 张. 这是个 2 分钟的短篇衍生, 两种结果都是主线的剧照, 取哪一季属于启发式"
     },
     {
       "subjectId": 497594,
