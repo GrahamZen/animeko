@@ -921,8 +921,12 @@ internal fun TvSkipOpEdTipButton(
  * 直接开到硬上限而不是默认的 0.5x–2.5x: 既然"倍速范围"这条设置在遥控器上已经去掉了, 就别再替用户
  * 收窄. 代价是能选到 3 倍以上 —— 那时弹幕会跳 (上游 #1524, 长按倍速默认 2.5 就是为此), 低端盒子的
  * 解码与音频变速也会吃力, 但这是用户自己选的档位.
+ *
+ * internal: 手机控制台的倍速条也要用这一个 (见 `RemotePlayerHandle`) —— 它以前读 `vm.playbackSpeedRange`,
+ * 那是配置里的 min/max, 而这条设置在遥控器形态下整条被隐藏, 于是永远是出厂的 0.5x–2.5x, 表现为
+ * 手机上调不到电视能调的档位, 发过去也会被夹回 2.5x.
  */
-private val TV_PLAYBACK_SPEED_RANGE =
+internal val TV_PLAYBACK_SPEED_RANGE =
     VideoScaffoldConfig.MIN_SUPPORTED_PLAYBACK_SPEED..VideoScaffoldConfig.MAX_SUPPORTED_PLAYBACK_SPEED
 
 // ---- 控件尺寸 (Prime 密度: 初版的 80%) ----
