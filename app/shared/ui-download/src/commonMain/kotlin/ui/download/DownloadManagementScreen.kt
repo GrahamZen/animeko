@@ -223,7 +223,6 @@ fun DownloadManagementScreen(
             }
         },
     )
-    }
 }
 
 @Composable
