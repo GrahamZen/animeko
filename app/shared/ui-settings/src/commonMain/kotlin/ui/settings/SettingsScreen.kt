@@ -180,6 +180,7 @@ import me.him188.ani.app.ui.settings.tabs.media.source.MediaSourceSubscriptionGr
 import me.him188.ani.app.ui.settings.tabs.media.source.rememberMediaSourceSelectionState
 import me.him188.ani.app.ui.settings.tabs.network.ConfigureProxyGroup
 import me.him188.ani.app.ui.settings.tabs.network.ServerSelectionGroup
+import me.him188.ani.app.ui.settings.tabs.network.TmdbImagesGroup
 import me.him188.ani.app.ui.settings.tabs.theme.ThemeGroup
 import me.him188.ani.app.ui.update.devbuild.DevBuildsTab
 import me.him188.ani.utils.platform.hasScrollingBug
@@ -388,10 +389,13 @@ fun SettingsScreen(
 
                             SettingsTab.MEDIA_SELECTOR -> MediaSelectionGroup(vm.mediaSelectionGroupState)
                             SettingsTab.SERVER -> ServerSelectionGroup(vm.danmakuSettingsState, vm.danmakuServerTesters)
-                            SettingsTab.PROXY -> ConfigureProxyGroup(
-                                state = vm.configureProxyState,
-                                onStartProxyTestLoop = { vm.startProxyTesterLoop() },
-                            )
+                            SettingsTab.PROXY -> {
+                                ConfigureProxyGroup(
+                                    state = vm.configureProxyState,
+                                    onStartProxyTestLoop = { vm.startProxyTesterLoop() },
+                                )
+                                TmdbImagesGroup(vm.tmdbImagesDisabled)
+                            }
 
                             SettingsTab.BT -> {
                                 TorrentEngineGroup(vm.torrentSettingsState)
