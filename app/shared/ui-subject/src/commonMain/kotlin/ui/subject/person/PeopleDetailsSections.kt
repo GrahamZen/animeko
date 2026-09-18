@@ -100,7 +100,15 @@ import org.jetbrains.compose.resources.stringResource
 /**
  * 人物/角色详情内各处点击的导航行为.
  *
- * @param onBeforeNavigate 任何导航前调用 (侧边预览 sheet 用它先关闭自己).
+ * **有预览环境 ([LocalPeoplePreviewHandler]) 时, 点人物/角色不导航, 而是把预览换成那个人** ——
+ * 与页面上点圆头像 ([rememberPeopleClickHandler]) 同一个去处. 先前这里是无条件导航, 于是同一个圆头像
+ * "在页面上点开预览、在预览弹窗里点却整页跳走"; 在播放器里代价尤其大: 跳走就离开了播放器, 播放**被暂停**
+ * (用户 2026-09-18). 进全屏的入口只留预览头部那颗「打开完整页面」.
+ *
+ * 点**作品**仍然照常导航: 那本来就是去条目详情页, 预览给不出对应形态.
+ *
+ * @param onBeforeNavigate 任何导航前调用 (侧边预览 sheet 用它先关闭自己). 走预览分支时不调用 ——
+ * 那一路不离开当前弹窗, 只是换个人.
  */
 @Immutable
 class PeopleDetailsNavigation(
@@ -112,15 +120,24 @@ class PeopleDetailsNavigation(
 @Composable
 fun rememberPeopleDetailsNavigation(onBeforeNavigate: () -> Unit = {}): PeopleDetailsNavigation {
     val navigator = LocalNavigator.current
-    return remember(navigator, onBeforeNavigate) {
+    val preview = LocalPeoplePreviewHandler.current
+    return remember(navigator, onBeforeNavigate, preview) {
         PeopleDetailsNavigation(
             onClickPerson = {
-                onBeforeNavigate()
-                navigator.navigatePersonDetails(it)
+                if (preview != null) {
+                    preview(PeoplePreviewTarget.Person(it))
+                } else {
+                    onBeforeNavigate()
+                    navigator.navigatePersonDetails(it)
+                }
             },
             onClickCharacter = {
-                onBeforeNavigate()
-                navigator.navigateCharacterDetails(it)
+                if (preview != null) {
+                    preview(PeoplePreviewTarget.Character(it))
+                } else {
+                    onBeforeNavigate()
+                    navigator.navigateCharacterDetails(it)
+                }
             },
             onClickSubject = { subject ->
                 onBeforeNavigate()
