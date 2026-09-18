@@ -28,6 +28,7 @@ import me.him188.ani.app.ui.foundation.saveable.mutableStateSaver
 import me.him188.ani.app.ui.foundation.widgets.LocalToaster
 import me.him188.ani.app.ui.foundation.widgets.dismissDialogButton
 import me.him188.ani.app.ui.foundation.tvOverlayWindowKeys
+import me.him188.ani.app.ui.foundation.widgets.aniDialogContainerColor
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.mediafetch_request_editor_continue_editing
 import me.him188.ani.app.ui.lang.mediafetch_request_editor_discard
@@ -121,6 +122,7 @@ fun MediaFetchRequestEditorDialog(
                 Modifier.fillMaxWidth(),
             )
         },
+        containerColor = aniDialogContainerColor(),
     )
 
     if (showConfirmDiscard) {
@@ -149,6 +151,7 @@ fun MediaFetchRequestEditorDialog(
             text = {
                 Text(discardConfirmationText)
             },
+            containerColor = aniDialogContainerColor(),
         )
     }
 }

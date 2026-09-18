@@ -80,6 +80,7 @@ import me.him188.ani.app.ui.foundation.tvOverlayWindowKeys
 import me.him188.ani.app.ui.foundation.widgets.AniCenteredPanelDialog
 import me.him188.ani.app.ui.foundation.widgets.AniFocusActionButton
 import me.him188.ani.app.ui.foundation.widgets.dismissDialogButton
+import me.him188.ani.app.ui.foundation.widgets.aniDialogContainerColor
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.rating_comment_hint
 import me.him188.ani.app.ui.lang.rating_comment_label
@@ -168,6 +169,7 @@ fun RatingEditorDialog(
             },
             // "继续编辑" = 关掉这个确认框回去接着写, 遥控器上返回键就是这个意思
             dismissButton = dismissDialogButton(continueEditingText) { showConfirmCancelDialog = false },
+            containerColor = aniDialogContainerColor(),
         )
     }
     val focusManager = LocalFocusManager.current
@@ -238,6 +240,7 @@ fun RatingEditorDialog(
             .clickable(remember { MutableInteractionSource() }, indication = null) {
                 focusManager.clearFocus() // 点击编辑框外面关闭键盘
             },
+        containerColor = aniDialogContainerColor(),
     )
 }
 

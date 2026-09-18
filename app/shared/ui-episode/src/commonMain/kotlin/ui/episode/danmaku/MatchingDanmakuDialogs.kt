@@ -40,6 +40,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import me.him188.ani.app.ui.foundation.widgets.dismissDialogButton
 import me.him188.ani.app.ui.foundation.widgets.focusHighlightedButtonColors
+import me.him188.ani.app.ui.foundation.widgets.aniDialogContainerColor
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.episode_danmaku_match_change
 import me.him188.ani.app.ui.lang.episode_danmaku_match_loading_danmaku
@@ -84,6 +85,7 @@ fun MatchingDanmakuDialog(
             )
         },
         dismissButton = dismissDialogButton(cancelText, onDismissRequest),
+        containerColor = aniDialogContainerColor(),
     )
 }
 
@@ -239,6 +241,7 @@ fun SubjectPickerDialog(
         confirmButton = {
         },
         dismissButton = dismissDialogButton(cancelText, onDismissRequest),
+        containerColor = aniDialogContainerColor(),
     )
 }
 
@@ -269,6 +272,7 @@ fun EpisodePickerDialog(
         confirmButton = {
         },
         dismissButton = dismissDialogButton(cancelText, onDismissRequest),
+        containerColor = aniDialogContainerColor(),
     )
 }
 //
