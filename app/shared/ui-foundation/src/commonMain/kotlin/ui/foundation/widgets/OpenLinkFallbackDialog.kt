@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import me.him188.ani.app.ui.foundation.lan.QrCodeImage
+import me.him188.ani.app.ui.foundation.widgets.aniDialogContainerColor
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.foundation_browser_open_failed_close
 import me.him188.ani.app.ui.lang.foundation_browser_open_failed_scan_hint
@@ -70,6 +71,7 @@ fun OpenLinkFallbackDialog(
         confirmButton = {
             TextButton(onDismissRequest) { Text(stringResource(Lang.foundation_browser_open_failed_close)) }
         },
+        containerColor = aniDialogContainerColor(),
     )
 }
 

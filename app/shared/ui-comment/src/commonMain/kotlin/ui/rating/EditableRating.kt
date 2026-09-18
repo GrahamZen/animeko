@@ -30,6 +30,7 @@ import me.him188.ani.app.data.models.subject.TestSubjectInfo
 import me.him188.ani.app.tools.MonoTasker
 import me.him188.ani.app.ui.foundation.tvOverlayWindowKeys
 import me.him188.ani.app.ui.foundation.widgets.DismissDialogButton
+import me.him188.ani.app.ui.foundation.widgets.aniDialogContainerColor
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.rating_requires_collection
 import me.him188.ani.app.ui.lang.settings_mediasource_close
@@ -158,6 +159,7 @@ fun EditableRatingDialogsHost(state: EditableRatingState) {
                     state.dismissRatingRequiresCollectionDialog()
                 }
             },
+            containerColor = aniDialogContainerColor(),
         )
     }
 

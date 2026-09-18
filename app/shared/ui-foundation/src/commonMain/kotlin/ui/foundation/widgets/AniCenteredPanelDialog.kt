@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Surface
+import androidx.compose.material3.AlertDialogDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -32,6 +33,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import me.him188.ani.app.ui.foundation.dialogs.DialogWindowDimAmount
 import me.him188.ani.app.ui.foundation.tvOverlayWindowKeys
+import me.him188.ani.app.ui.foundation.LocalAniUiBehavior
 
 /**
  * 半透明居中大面板弹窗: 按窗口比例定尺寸, 下层内容 (视频画面 / 页面) 经系统遮罩隐约透出.
@@ -145,8 +147,11 @@ private const val CENTERED_PANEL_ALPHA = 0.85f
  * 面板底色 = `surfaceContainerHigh` + 半透明.
  *
  * 角色刻意与 M3 `AlertDialog` 的默认容器色一致: 所有弹窗 (这里的大面板、复用的手机端对话框、
- * 弹幕延迟这类小对话框) 底色于是同出一处, 不会一个偏亮一个偏暗. 只有大面板加半透明 —— 它盖掉
- * 大半个屏幕, 透出一点下层才知道自己没离开播放器; 小对话框不透.
+ * 弹幕延迟这类小对话框) 底色于是同出一处, 不会一个偏亮一个偏暗.
+ *
+ * **2026-09-18 起半透明不再只给大面板**: 原先的取舍是"大面板盖掉大半个屏幕, 透出一点下层才知道
+ * 自己没离开播放器; 小对话框不透", 但播放器上小对话框与大面板往往前后脚出现, 一个透一个不透反而
+ * 显得没对齐 (用户). 现在 TV 上一律走 [aniDialogContainerColor].
  *
  * 公开是为了 TV 上其他居中大弹窗共用 (播放器评论回复弹窗 / 角色·制作人员·关联作品的"查看全部"
  * 网格 / 人物预览): 它们各有理由不能直接套 [AniCenteredPanelDialog] (评论回复要让播放器根部的
@@ -156,6 +161,26 @@ private const val CENTERED_PANEL_ALPHA = 0.85f
 val centeredPanelColor: Color
     @Composable
     get() = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = CENTERED_PANEL_ALPHA)
+
+/**
+ * 弹窗 (`AlertDialog` 一族) 的容器底色: **TV 上半透明**, 其余平台保持 M3 默认.
+ *
+ * TV 上的弹窗多半盖在播放画面或背景大图之上, 实心底色是一块板子; 与 [centeredPanelColor] 取同一档
+ * alpha, 于是"大面板 + 小对话框"前后脚出现时看着是同一套东西 (用户 2026-09-18: 播放器里的弹窗底色
+ * 统一成半透明).
+ *
+ * 手机 / 桌面不动: 那里弹窗底下是普通页面, 透出来只会让正文更难读, 也没有"我还在播放器里"这层信息.
+ *
+ * 用在 `AlertDialog(containerColor = aniDialogContainerColor())`. 自己画 `Surface` 的弹窗 (如
+ * `BasicAlertDialog` 的内容) 同样可以用, 但**必须显式给 contentColor** —— 带 alpha 的底色在配色表里
+ * 查不到对应的 "on" 色, Surface 会退回 `LocalContentColor` (默认纯黑).
+ */
+@Composable
+fun aniDialogContainerColor(): Color = if (LocalAniUiBehavior.current.focusDrivenNavigation) {
+    centeredPanelColor
+} else {
+    AlertDialogDefaults.containerColor
+}
 
 /**
  * 背景图上的遮罩不透明度: 压住亮色剧照到正文读得清即可, 不必压到只剩轮廓.
