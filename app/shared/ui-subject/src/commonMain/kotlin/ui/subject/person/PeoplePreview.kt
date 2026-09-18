@@ -161,9 +161,19 @@ fun PeoplePreviewHost(
     }
     CompositionLocalProvider(LocalPeoplePreviewHandler provides { target = it }) {
         content()
-    }
-    target?.let { current ->
-        PeoplePreviewSideSheet(current, onDismissRequest = { target = null })
+        // **预览弹窗自己也要在 provider 之内**: 否则弹窗里那些人物/角色的圆头像拿不到
+        // [LocalPeoplePreviewHandler], [rememberPeopleClickHandler] 当场退化成"导航去人物详情页" ——
+        // 于是"在弹窗里点会进全屏、在页面上点只开预览", 同一个圆头像两种行为. 在播放器上代价尤其大:
+        // 进全屏就离开了播放器, 播放**被暂停** (用户 2026-09-18).
+        //
+        // 进全屏的入口只留 [PeoplePreviewBody] 头部那颗「打开完整页面」—— 点头像一律换成看那个人的预览.
+        // 换的是同一个 target (预览不叠栈): 返回键仍是一步关掉整个预览, 不逐层回退.
+        //
+        // 同一个坑播放器那边打过一次局部补丁 (TvPlayerPeopleViewAllDialog 必须放在 host 之内),
+        // 那条注释可以留着当例证: 根上修好之后它只是"本来就该在里面".
+        target?.let { current ->
+            PeoplePreviewSideSheet(current, onDismissRequest = { target = null })
+        }
     }
 }
 
