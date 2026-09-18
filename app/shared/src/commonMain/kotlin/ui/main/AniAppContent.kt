@@ -58,6 +58,7 @@ import androidx.navigation3.scene.SinglePaneSceneStrategy
 import androidx.navigation3.ui.NavDisplay
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 import me.him188.ani.app.data.models.preference.NoticeSoundKind
 import me.him188.ani.app.shared.Res
@@ -109,6 +110,9 @@ import me.him188.ani.app.ui.foundation.theme.LocalThemeSettings
 import me.him188.ani.app.ui.foundation.widgets.BackNavigationIconButton
 import me.him188.ani.app.ui.foundation.widgets.LocalToaster
 import me.him188.ani.app.ui.foundation.widgets.TopAppBarActionButton
+import me.him188.ani.app.ui.foundation.focus.rememberTvEntryScrollGuard
+import me.him188.ani.app.ui.foundation.focus.tvEntryScrollGuard
+import me.him188.ani.app.ui.foundation.focus.TvFocusRestoreGate
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.main_network_check_failed
 import me.him188.ani.app.ui.login.EmailLoginStartScreen
@@ -139,7 +143,6 @@ import me.him188.ani.app.ui.subject.person.CharacterDetailsViewModel
 import me.him188.ani.app.ui.subject.person.PersonDetailsScreen
 import me.him188.ani.app.ui.subject.person.PersonDetailsViewModel
 import me.him188.ani.app.ui.subject.episode.RetainedPlaybackSessionHolder
-import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.playback_session_sound_hint
 import me.him188.ani.app.ui.subject.episode.rememberRetainedPlaybackNoticeTexts
 import me.him188.ani.app.ui.user.SelfInfoStateProducer
@@ -151,8 +154,6 @@ import me.him188.ani.datasources.api.source.FactoryId
 import org.jetbrains.compose.resources.stringResource
 import kotlin.time.Duration.Companion.seconds
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
-import me.him188.ani.app.ui.foundation.focus.rememberTvEntryScrollGuard
-import me.him188.ani.app.ui.foundation.focus.tvEntryScrollGuard
 
 /**
  * UI 入口点. 包含所有子页面, 以及组合这些子页面的方式 (navigation).
@@ -290,6 +291,15 @@ private const val FOCUS_FALLBACK_GRACE_FRAMES = 15
  */
 private val FOCUS_FALLBACK_GRACE_CEILING = 1.seconds
 
+
+/**
+ * 页面自己恢复落点时额外让位的上限 (见 [TvFocusRestoreGate]).
+ *
+ * 取 3 秒: 搜索页返回的实测长尾是 1944ms, 留出余量; 再长就当页面恢复出了问题, 兜底照常出手 ——
+ * 宁可焦点落错地方, 也不能让方向键彻底失效 (那是兜底存在的全部理由).
+ */
+private val FOCUS_FALLBACK_RESTORE_CEILING = 3.seconds
+
 @Composable
 private fun AniAppContentImpl(
     aniNavigator: AniNavigator,
@@ -342,6 +352,14 @@ private fun AniAppContentImpl(
                     // 焦点一旦落定 collectLatest 立刻取消本次等待, 这段让位根本不会走完.
                     withTimeoutOrNull(FOCUS_FALLBACK_GRACE_CEILING) {
                         repeat(FOCUS_FALLBACK_GRACE_FRAMES) { withFrameNanos { } }
+                    }
+                    // 页面自己在派进页落点时接着让位: 上面那 15 帧按的是"页面锚点跨几帧就发得出请求",
+                    // 而"从更深页面返回列表页"要先等分页数据 —— 搜索页实测 312~1944ms, 那 15 帧根本
+                    // 不够, 兜底必然先抢到并落在页顶的搜索框上, 页面的落点随后才把焦点拉到卡片
+                    // (用户 2026-09-18: "焦点先闪到搜索框再跑到卡上"). 见 [TvFocusRestoreGate].
+                    // 仍有上限: 页面恢复卡住时照样兜得住.
+                    withTimeoutOrNull(FOCUS_FALLBACK_RESTORE_CEILING) {
+                        snapshotFlow { TvFocusRestoreGate.restoring }.first { !it }
                     }
                     // 持续重试 (状态一变 collectLatest 即取消): 转场动画期间请求可能落在
                     // 将被移除的旧页面上, 旧页面销毁后焦点再次丢失会自动再触发

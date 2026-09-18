@@ -9,6 +9,7 @@
 
 package me.him188.ani.app.ui.exploration.search
 
+import me.him188.ani.app.ui.foundation.focus.TvFocusRestoreClaim
 import me.him188.ani.app.ui.foundation.focus.tvSwallowKeysWhenLeaving
 import androidx.compose.animation.AnimatedContent
 import me.him188.ani.app.ui.foundation.tv.tvTouchTap
@@ -133,6 +134,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import me.him188.ani.app.data.models.preference.NsfwMode
 import me.him188.ani.app.data.models.schedule.AnimeSeason
 import me.him188.ani.app.data.models.subject.CanonicalTagKind
@@ -260,6 +262,30 @@ import me.him188.ani.app.ui.remote.RemoteSearchResultsSource
 import me.him188.ani.app.ui.remote.TvRemoteControl
 import me.him188.ani.datasources.api.topic.UnifiedCollectionType
 import org.jetbrains.compose.resources.stringResource
+import kotlin.time.Duration.Companion.seconds
+
+/**
+ * `railExitRestore` 的结果. 布尔不够用: "没送成"要分成**两种**, 否则调用方只能一律退到搜索框 ——
+ * 而数据没到那一种退过去就是用户看到的"焦点先闪一下搜索框再跑到卡上" (2026-09-18).
+ */
+private enum class RailExitRestoreResult {
+    /** 已经把焦点送到那张卡了. */
+    Done,
+
+    /** 有落点记忆, 但分页数据还没回来; 落点已自行接管 (异步等数据). 调用方**什么都别做**. */
+    NotReady,
+
+    /** 没有可恢复的落点 (输入态 / 空结果 / 没点过卡片). 调用方走自己的退路. */
+    NoTarget,
+}
+
+/**
+ * 返回本页时等分页数据重新到位的上限 (见 railExitRestore).
+ *
+ * 实测这个窗口是 211~711ms, 长尾到 1944ms (见 memory 里 issue #2 那份表), 取 3 秒留足余量;
+ * 再长就当数据出了问题, 把焦点交回页面兜底.
+ */
+private val RESTORE_DATA_TIMEOUT = 3.seconds
 
 /** 见下面进程被杀后恢复搜索的那段 effect: 那条路平时不跑, 出事后只能靠日志判定。 */
 private val searchRestoreLogger = logger("TvSearchPage")
@@ -394,11 +420,13 @@ fun TvSearchPage(
     // 内容区焦点入口: 从页面外进来的焦点 (导航兜底的无方向 enter) 一律先送进内容区而非侧边栏
     // (同主页外壳 TvMainScreenLayout 的做法); 侧边栏靠内容区里按左键进入
     val contentFocus = remember { FocusRequester() }
+    // 结果面板的落点解析是否在途 (内层的 gridFocus.switching 提到页面级, 给下面的 onEnter 读)
+    val gridSendInFlight = remember { mutableStateOf(false) }
     // 侧边栏右键/返回退出时的焦点还原: 结果面板在此注册"回上次聚焦卡片"的处理 (走带
     // 到位确认+重试的落点解析器). 未注册 (输入态) 或没有可回的卡时退回 contentFocus
     // 进组默认落点. 不还原会落到左上角搜索词文字上, 且直连 requestFocus 偶发被焦点系统
     // 静默拒绝时会看起来"按下键没反应"
-    val railExitRestore = remember { mutableStateOf<(() -> Boolean)?>(null) }
+    val railExitRestore = remember { mutableStateOf<(() -> RailExitRestoreResult)?>(null) }
     // 搜索框的落点 (输入面板挂在输入框上): 无方向进入本页内容区时的默认目标, 也是输入态里
     // "候选项按返回回到框"的目标
     val inputFieldFocus = remember { FocusRequester() }
@@ -415,7 +443,9 @@ fun TvSearchPage(
     LaunchedEffect(Unit) {
         snapshotFlow { pageHasFocus }.collect { has ->
             if (has || !pageIsForeground.value) return@collect
-            if (railExitRestore.value?.invoke() != true) {
+            // NotReady = 落点正在等数据, 它会自己送焦; 这时退到搜索框就是那一下"闪"
+            if (railExitRestore.value?.invoke() == RailExitRestoreResult.NoTarget) {
+                searchRestoreLogger.info { "[restore] page fallback -> search field" }
                 runCatching { inputFieldFocus.requestFocus() }
             }
         }
@@ -446,7 +476,17 @@ fun TvSearchPage(
     Box(
         modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
             .onFocusChanged { pageHasFocus = it.hasFocus }
-            .focusProperties { onEnter = { contentFocus.requestFocus() } }
+            .focusProperties {
+                onEnter = {
+                    // **落点解析在途就放行**: 它送焦到目标卡的那个 requestFocus 同样要"进入"本组,
+                    // 在这里改道到 contentFocus 就把它拆了 —— 而 contentFocus 落到的是内容区第一个
+                    // 可聚焦节点, 也就是顶部那块搜索词 (聚焦即填充主题色, 很扎眼). 于是从详情页返回
+                    // 时先看到搜索词高亮一下, 39ms 后焦点才被落点拉到卡片上
+                    // (用户 2026-09-18; 真机日志实测: 搜索词块先获焦, 两帧后焦点才被落点拉到卡片上).
+                    // 放行之后原请求自己会落到目标卡 —— 同 TvAnchoredCardRow 里那条"解析进行中一律放行".
+                    if (!gridSendInFlight.value) contentFocus.requestFocus()
+                }
+            }
             .focusGroup(),
     ) {
         Box(
@@ -465,7 +505,12 @@ fun TvSearchPage(
                 // 用户症状: "深滚一路返回, 先跳到第一个候选, 再按一次返回才回搜索框"。
                 .focusProperties {
                     onEnter = {
-                        if (railExitRestore.value?.invoke() != true) {
+                        // NotReady (数据还没到) 一律**放行**: 既不改道也不退到搜索框 —— 退过去就是
+                        // 那一下"闪". 放行后本组此刻若没有可聚焦目标, 整页会短暂没有焦点, 由上面那条
+                        // 页面级兜底接手 (落点已在等数据, 到了自己送焦). 同 TvAnchoredCardRow 里
+                        // "解析进行中就放行"的处理.
+                        if (railExitRestore.value?.invoke() == RailExitRestoreResult.NoTarget) {
+                            searchRestoreLogger.info { "[restore] onEnter -> search field" }
                             runCatching { inputFieldFocus.requestFocus() }
                         }
                     }
@@ -495,6 +540,7 @@ fun TvSearchPage(
                         backGoesToInput = backGoesToInput,
                         onOpenFilter = { showFilterDialog = true },
                         railExitRestore = railExitRestore,
+                        gridSendInFlight = gridSendInFlight,
                     )
                 } else {
                     TvSearchInputPane(
@@ -525,7 +571,7 @@ fun TvSearchPage(
             onAvatarClick = {},
             onExitFocus = {
                 // 结果态优先回上次聚焦的卡片 (与进页恢复一致), 其余情况进内容区默认落点
-                if (railExitRestore.value?.invoke() != true) {
+                if (railExitRestore.value?.invoke() != RailExitRestoreResult.Done) {
                     runCatching { contentFocus.requestFocus() }
                 }
             },
@@ -1182,7 +1228,9 @@ private fun TvSearchResultsPane(
     /** 打开筛选弹窗 (弹窗本体在页面级, 输入态共用同一个). */
     onOpenFilter: () -> Unit,
     /** 侧边栏右键退出时的焦点还原注册槽 (见页面级声明); 本面板在位时写入, 离场清空. */
-    railExitRestore: MutableState<(() -> Boolean)?>,
+    railExitRestore: MutableState<(() -> RailExitRestoreResult)?>,
+    /** 见页面级 onEnter: 本面板的落点解析在途时, 页面根不要改道抢焦点. */
+    gridSendInFlight: MutableState<Boolean>,
     modifier: Modifier = Modifier,
 ) {
     val tmdb = remember { GlobalKoin.get<TmdbImageService>() }
@@ -1352,16 +1400,62 @@ private fun TvSearchResultsPane(
 
     gridFocus.SendFocusEffect(gridState) { items.itemCount }
 
+    // 恢复落点期间让全局兜底让位, 否则它会抢在前面把焦点塞给页顶的搜索框, 等本页的落点派出去
+    // 又被拉到卡片上 —— 看着就是"焦点先闪一下搜索框再跑到卡上" (用户 2026-09-18).
+    // 覆盖的两段与上面 backToFirstCard 的判据同源 (落位之后那段由兜底自己的 hasFocusInside 管).
+    // 返回本页时落点在等分页数据 (见下面 railExitRestore 的 await 分支)
+    var awaitingRestoreData by remember { mutableStateOf(false) }
+    TvFocusRestoreClaim(active = !restoreSettled || gridFocus.switching || awaitingRestoreData)
+    DisposableEffect(gridFocus.switching, awaitingRestoreData) {
+        gridSendInFlight.value = gridFocus.switching || awaitingRestoreData
+        onDispose { gridSendInFlight.value = false }
+    }
+
     // 侧边栏右键退出 → 回上次聚焦的卡片 (与进页恢复一致), 而不是空间焦点搜索/进组默认
     // 落到左上角搜索词文字上. 走上面的落点解析器: 聚焦到位确认 + 重试, 直连 requestFocus
     // 偶发被焦点系统静默拒绝时不至于永久卡死
+    val restoreScope = rememberCoroutineScope()
     DisposableEffect(Unit) {
         railExitRestore.value = restore@{
-            val count = items.itemCount
             val last = lastFocusedCard.intValue
-            if (count <= 0 || last < 0) return@restore false
-            gridFocus.focusItem(minOf(last, count - 1))
-            true
+            if (last < 0) {
+                searchRestoreLogger.info { "[restore] NoTarget (lastFocusedCard=$last)" }
+                return@restore RailExitRestoreResult.NoTarget
+            }
+            val count = items.itemCount
+            if (count > 0) {
+                searchRestoreLogger.info { "[restore] Done -> card $last (itemCount=$count)" }
+                gridFocus.focusItem(minOf(last, count - 1))
+                return@restore RailExitRestoreResult.Done
+            }
+            // 已经在等了就别再起一个 (三个调用点可能先后问到)
+            if (awaitingRestoreData) return@restore RailExitRestoreResult.NotReady
+            // **数据还没到时接管并等它**, 不是认输.
+            //
+            // 调用方 (页面级的"没焦点就找个落点"兜底) 拿到 false 会把焦点退给顶部搜索框, 而几百毫秒后
+            // 数据到了落点又把焦点拉到卡片上 —— 看着就是"焦点先闪一下搜索框再跑到卡上", 中间按的方向键
+            // 还按搜索框的拓扑走 (用户 2026-09-18). 从详情页返回时必然撞上: 列表页在缩回栈里是**常驻组合**,
+            // 不会重新跑进页恢复那条路, 而 LazyPagingItems 仍要重新 present 一轮.
+            //
+            // 等不到就交回兜底 (焦点宁可落在搜索框, 也不能整页没有焦点 —— 那是方向键全失效).
+            awaitingRestoreData = true
+            searchRestoreLogger.info { "[restore] NotReady -> awaiting data for card $last" }
+            restoreScope.launch {
+                try {
+                    val ready = withTimeoutOrNull(RESTORE_DATA_TIMEOUT) {
+                        snapshotFlow { items.itemCount }.first { it > 0 }
+                    }
+                    if (ready == null) {
+                        searchRestoreLogger.info { "[restore] await timed out, handing focus back to fallback" }
+                    } else {
+                        searchRestoreLogger.info { "[restore] data arrived (itemCount=$ready) -> card $last" }
+                        gridFocus.focusItem(minOf(last, ready - 1))
+                    }
+                } finally {
+                    awaitingRestoreData = false
+                }
+            }
+            RailExitRestoreResult.NotReady
         }
         onDispose { railExitRestore.value = null }
     }
@@ -1872,7 +1966,11 @@ private fun TvSearchTopRow(
             Surface(
                 onClick = onEditQuery,
                 modifier = Modifier.focusRequester(titleFocusRequester)
-                    .onFocusChanged { if (it.isFocused) onFallbackFocused() },
+                    .onFocusChanged {
+                        if (it.isFocused) {
+                            onFallbackFocused()
+                        }
+                    },
                 shape = RoundedCornerShape(8.dp),
                 color = if (focused) MaterialTheme.colorScheme.primary else Color.Transparent,
                 interactionSource = interactionSource,
