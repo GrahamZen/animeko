@@ -65,6 +65,10 @@ import me.him188.ani.app.ui.foundation.SteppedSlider
 import me.him188.ani.app.ui.foundation.animation.AniAnimatedVisibility
 import me.him188.ani.app.ui.foundation.animation.LocalAniMotionScheme
 import me.him188.ani.app.ui.foundation.quantizeSliderValue
+import me.him188.ani.app.navigation.LocalNavigator
+import me.him188.ani.app.ui.foundation.tv.LocalTvPlayerChromeEditorVariant
+import me.him188.ani.app.ui.lang.settings_player_tv_chrome
+import me.him188.ani.app.ui.lang.settings_player_tv_chrome_description
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.settings_app_close_behavior
 import me.him188.ani.app.ui.lang.settings_app_close_behavior_exit
@@ -736,6 +740,20 @@ fun SettingsScope.PlayerGroup(
             },
         )
         HorizontalDividerItem()
+
+        // 「自定义播放器按钮」: 页面实现在 ui-tv, 装了变体才有这个功能 (见 LocalTvPlayerChromeEditorVariant).
+        // 点进去是一个不播放任何东西的播放器, 在上面直接排两行按钮 —— 那一页自己就是说明, 所以这里
+        // 不摆开关也不摆预览
+        val chromeEditor = LocalTvPlayerChromeEditorVariant.current
+        if (chromeEditor != null) {
+            val navigator = LocalNavigator.current
+            TextItem(
+                title = { Text(stringResource(Lang.settings_player_tv_chrome)) },
+                description = { Text(stringResource(Lang.settings_player_tv_chrome_description)) },
+                onClick = { navigator.navigateTvPlayerChrome() },
+            )
+            HorizontalDividerItem()
+        }
 
         // 「退出播放页后保留播放状态」: 只有自带"回到会话"入口的形态才给这条 (见 AniUiBehavior
         // .retainPlaybackSession), 否则关不掉也回不去. 存在 ThemeSettings 里只是存储位置.

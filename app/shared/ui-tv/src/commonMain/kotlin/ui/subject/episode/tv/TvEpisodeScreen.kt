@@ -1071,8 +1071,13 @@ fun TvEpisodeScreenContent(
                     // 图标行再往下: 展开选集条 (Prime 形态, 焦点落当前集卡片);
                     // 确认无分集 (未开播/加载失败) 才直通详情页, 数据未到则等就绪后自动展开.
                     // 选集条内再往下: 详情页 (第三层)
-                    Key.DirectionDown -> when (overlay.focusRegion) {
-                        TvPlayerFocusRegion.BOTTOM_ROW -> {
+                    Key.DirectionDown -> when {
+                        // 起跳点通常是图标行; 但用户可以把那一行的按钮**一颗不剩**地藏掉
+                        // (见 TvPlayerChromeLayout), 那时焦点永远到不了 BOTTOM_ROW —— 起跳点
+                        // 让给进度条, 否则选集条与内嵌详情页在播放器里再没有入口 (见 bottomRowPresent)
+                        overlay.focusRegion == TvPlayerFocusRegion.BOTTOM_ROW ||
+                                (overlay.focusRegion == TvPlayerFocusRegion.PROGRESS &&
+                                        !overlay.bottomRowPresent) -> {
                             downKeyLatched = true
                             when (overlay.episodeStrip) {
                                 TvEpisodeStripState.AVAILABLE -> overlay.expandEpisodeStrip()
@@ -1083,7 +1088,7 @@ fun TvEpisodeScreenContent(
                             true
                         }
 
-                        TvPlayerFocusRegion.EPISODES -> {
+                        overlay.focusRegion == TvPlayerFocusRegion.EPISODES -> {
                             downKeyLatched = true
                             overlay.openDetails()
                             true

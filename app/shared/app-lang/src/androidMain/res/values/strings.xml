@@ -399,6 +399,8 @@
     <string name="settings_player_remember_playback_speed_description">Keep the speed you set in the player across episodes and restarts. When off, it applies only until you leave the player, then returns to the default speed.</string>
     <string name="settings_player_default_playback_speed">Default playback speed</string>
     <string name="settings_player_default_playback_speed_description">Speed to start at each time you open the player</string>
+    <string name="settings_player_tv_chrome">Customize player buttons</string>
+    <string name="settings_player_tv_chrome_description">Rearrange the buttons in the player, or hide the ones you never use. Several layouts can be kept and switched between.</string>
     <string name="settings_player_mpv_options">Custom mpv options</string>
     <string name="settings_player_mpv_options_description">One option per line, in the form key=value. Lines starting with # are comments. Changes apply immediately.</string>
     <string name="settings_player_mpv_options_empty">Not configured</string>
@@ -930,6 +932,18 @@
     <string name="video_player_tv_up_next_in">in %1$ds</string>
     <string name="video_player_tv_episodes">Episodes</string>
     <string name="video_player_tv_skip_segment">Skip %1$s</string>
+    <string name="video_player_tv_chrome_title">Customize player buttons</string>
+    <string name="video_player_tv_chrome_subtitle">Nothing plays on this page. However you arrange these buttons is how the player will look.</string>
+    <string name="video_player_tv_chrome_hint">OK to pick up  ·  Hold OK to hide or show  ·  Back to leave</string>
+    <string name="video_player_tv_chrome_hint_grabbed">Left / Right to move  ·  OK to drop  ·  Back to undo</string>
+    <string name="video_player_tv_chrome_hidden">hidden</string>
+    <string name="video_player_tv_chrome_reset">Reset this layout</string>
+    <string name="video_player_tv_chrome_duplicate">Duplicate layout</string>
+    <string name="video_player_tv_chrome_delete">Delete this layout</string>
+    <string name="video_player_tv_chrome_preset_name">Layout %1$d</string>
+    <string name="video_player_tv_chrome_item_aspect_ratio">Aspect ratio</string>
+    <string name="video_player_tv_chrome_item_divider">Group separator</string>
+    <string name="video_player_tv_chrome_item_spacer">Flexible space</string>
     <string name="video_player_release_to_cancel">Release to cancel</string>
     <string name="video_player_stats_title">Playback Info</string>
     <string name="video_player_stats_title_show">Show Playback Info</string>

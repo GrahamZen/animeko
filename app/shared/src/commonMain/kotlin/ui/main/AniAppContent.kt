@@ -89,6 +89,7 @@ import me.him188.ani.app.ui.download.details.MediaDetailsLazyGrid
 import me.him188.ani.app.ui.download.subject.SubjectDownloadsScreen
 import me.him188.ani.app.ui.exploration.schedule.ScheduleScreen
 import me.him188.ani.app.ui.exploration.schedule.ScheduleViewModel
+import me.him188.ani.app.ui.foundation.tv.LocalTvPlayerChromeEditorVariant
 import me.him188.ani.app.ui.foundation.animation.NavigationMotionScheme
 import me.him188.ani.app.ui.foundation.animation.ProvideAniMotionCompositionLocals
 import me.him188.ani.app.ui.foundation.tv.TV_HERO_ZOOM_NAV_HOLD_MILLIS
@@ -738,6 +739,17 @@ private fun AniAppContentImpl(
                         },
                         windowInsets = windowInsetsWithoutTitleBar,
                     )
+                }
+                entry<NavRoutes.TvPlayerChrome> { route ->
+                    // 页面实现在 ui-tv, 共享代码只认插槽. 入口只在遥控器形态的设置里摆,
+                    // 所以这里拿不到变体 = 有人从别处硬跳进来了, 原样退回去
+                    val editor = LocalTvPlayerChromeEditorVariant.current
+                    val onBack: () -> Unit = { aniNavigator.popBackStack(route, inclusive = true) }
+                    if (editor == null) {
+                        LaunchedEffect(Unit) { onBack() }
+                    } else {
+                        editor.Page(onNavigateBack = onBack, modifier = Modifier.fillMaxSize())
+                    }
                 }
                 entry<NavRoutes.BangumiMerge> { route ->
                     BangumiMergeScreen(

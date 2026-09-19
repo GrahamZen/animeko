@@ -430,6 +430,8 @@
     <string name="settings_player_remember_playback_speed_description">在播放器內調整的倍速跨劇集和重啟保持。關閉後僅對本次播放生效，退出播放器即回到預設倍速。</string>
     <string name="settings_player_default_playback_speed">預設倍速</string>
     <string name="settings_player_default_playback_speed_description">每次進入播放器時的起始倍速</string>
+    <string name="settings_player_tv_chrome">自訂播放器按鈕</string>
+    <string name="settings_player_tv_chrome_description">排列播放器裡的按鈕，或者把用不上的藏起來；可以存幾套換著用</string>
     <string name="settings_player_mpv_options">自訂 mpv 選項</string>
     <string name="settings_player_mpv_options_description">每行一個選項，格式為 key=value，以 # 開頭的行為註釋。儲存後立即生效</string>
     <string name="settings_player_mpv_options_empty">未設定</string>
@@ -849,6 +851,18 @@
     <string name="video_player_tv_up_next_in">%1$d 秒後</string>
     <string name="video_player_tv_episodes">劇集</string>
     <string name="video_player_tv_skip_segment">跳過 %1$s</string>
+    <string name="video_player_tv_chrome_title">自訂播放器按鈕</string>
+    <string name="video_player_tv_chrome_subtitle">這一頁不會播放任何東西。這裡排成什麼樣，播放器裡就是什麼樣。</string>
+    <string name="video_player_tv_chrome_hint">確認鍵 拿起  ·  長按確認鍵 隱藏 / 顯示  ·  返回鍵 離開</string>
+    <string name="video_player_tv_chrome_hint_grabbed">左 / 右 移動  ·  確認鍵 放下  ·  返回鍵 復原</string>
+    <string name="video_player_tv_chrome_hidden">已隱藏</string>
+    <string name="video_player_tv_chrome_reset">還原預設排法</string>
+    <string name="video_player_tv_chrome_duplicate">複製為新版面</string>
+    <string name="video_player_tv_chrome_delete">刪除這套版面</string>
+    <string name="video_player_tv_chrome_preset_name">版面 %1$d</string>
+    <string name="video_player_tv_chrome_item_aspect_ratio">畫面比例</string>
+    <string name="video_player_tv_chrome_item_divider">分組豎線</string>
+    <string name="video_player_tv_chrome_item_spacer">彈性留白</string>
     <string name="video_player_release_to_cancel">放開手指取消</string>
     <string name="video_player_stats_title">播放資訊</string>
     <string name="video_player_stats_title_show">顯示播放資訊</string>

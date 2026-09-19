@@ -267,6 +267,17 @@ class TvPlayerOverlayState(
      */
     var detailsContentComposed: Boolean by mutableStateOf(false)
 
+    /**
+     * 图标行此刻在不在版式里, 由 TvPlayerControlsOverlay 上报 (**看的是用户排的版式, 不是那一行
+     * 有没有被临时藏起来** —— 焦点落胶囊时它会淡出, 那不算不在场).
+     *
+     * 为什么需要它: 用户可以把图标行的按钮**一颗不剩**地藏掉 (见 TvPlayerChromeLayout), 而
+     * "再按下键 = 选集条 / 内嵌详情页"这条通路的起跳点一直是 `focusRegion == BOTTOM_ROW`.
+     * 那一行整个没了之后焦点永远到不了那个区域, 选集条与内嵌详情页在播放器里就**再没有入口**了.
+     * 根路由据此把起跳点让给进度条.
+     */
+    var bottomRowPresent: Boolean by mutableStateOf(true)
+
     /** 把焦点送回面板里当前聚焦的那一条 (见 [panelItemFocusTick]). */
     fun requestPanelItemFocus() {
         panelItemFocusTick++

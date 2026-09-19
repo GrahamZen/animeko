@@ -202,6 +202,11 @@ interface AniNavigator {
     fun navigateBangumiMerge() {
         navigate(NavRoutes.BangumiMerge)
     }
+
+    /** TV: 自定义播放器按钮 (见 [NavRoutes.TvPlayerChrome]). */
+    fun navigateTvPlayerChrome() {
+        navigateSingleInstance(NavRoutes.TvPlayerChrome)
+    }
 }
 
 /**
