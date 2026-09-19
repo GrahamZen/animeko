@@ -217,6 +217,12 @@ internal fun TvPlayerPanelHost(
     /** 各胶囊按钮的焦点请求器: 面板最底项按下键显式回到打开它的那个胶囊. */
     pillFocusRequesters: Map<TvPlayerPanel, FocusRequester>,
     /**
+     * 胶囊此刻的视觉顺序 (左→右), 条目上按左/右键跳相邻面板的依据.
+     * 用户能排版式 (顺序 + 显隐) 之后这份顺序是现算的, 不再是常量 —— 藏起来的胶囊不在里面,
+     * 它的请求器根本没附着.
+     */
+    pillOrder: List<TvPlayerPanel>,
+    /**
      * 面板可向上生长的空间 (window px): 胶囊行上缘 − 顶部信息下缘, 由调用方实测.
      * NaN (尚未测得) 时兜底 [TV_PANEL_FALLBACK_MAX_HEIGHT]. Provider 形式 + 测量阶段才读:
      * 位置变化只触发面板重测量, 不重组控制层.
@@ -354,10 +360,14 @@ internal fun TvPlayerPanelHost(
                             !(panel == TvPlayerPanel.DANMAKU_LIST && focusedIndex.intValue == 0 &&
                                     danmakuChipsPresent.value) -> {
                         if (event.type == KeyEventType.KeyDown) {
-                            val neighborIndex = TV_PILL_VISUAL_ORDER.indexOf(panel) +
-                                    (if (event.key == Key.DirectionLeft) -1 else 1)
-                            TV_PILL_VISUAL_ORDER.getOrNull(neighborIndex)?.let {
-                                runCatching { pillFocusRequesters.getValue(it).requestFocus() }
+                            val current = pillOrder.indexOf(panel)
+                            // -1 = 打开本面板的那颗胶囊已经不在行上了 (刚被藏掉): 不猜邻居
+                            if (current >= 0) {
+                                val neighborIndex =
+                                    current + (if (event.key == Key.DirectionLeft) -1 else 1)
+                                pillOrder.getOrNull(neighborIndex)?.let {
+                                    runCatching { pillFocusRequesters.getValue(it).requestFocus() }
+                                }
                             }
                         }
                         // 到头 (最左/最右胶囊的面板) 也消费, 防斜跳

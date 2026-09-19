@@ -77,6 +77,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -102,6 +103,9 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import me.him188.ani.app.data.models.preference.TvPlayerChromeItem
+import me.him188.ani.app.data.models.preference.TvPlayerChromeLayout
+import me.him188.ani.app.data.models.preference.TvPlayerChromeRow
 import me.him188.ani.app.data.models.preference.VideoScaffoldConfig
 import me.him188.ani.app.navigation.LocalNavigator
 import me.him188.ani.app.ui.danmaku.DanmakuEditorState
@@ -183,7 +187,7 @@ import kotlin.time.Duration
 internal val TV_PLAYER_HORIZONTAL_PAD = 48.dp
 
 /** 底部渐变 scrim 高度. */
-private val TV_PLAYER_BOTTOM_SCRIM_HEIGHT = 380.dp
+internal val TV_PLAYER_BOTTOM_SCRIM_HEIGHT = 380.dp
 
 /**
  * 底部渐变 scrim 最深处不透明度.
@@ -191,10 +195,10 @@ private val TV_PLAYER_BOTTOM_SCRIM_HEIGHT = 380.dp
  * 只要托住白字可读即可, 不必压到近黑: 0.95 时屏幕下半条几乎是纯黑, 画面被切掉一块
  * (进度条一出来尤其明显). 控件都是白字/白图标, 0.72 下最亮的画面也只剩三成亮度, 对比够了.
  */
-private const val TV_PLAYER_BOTTOM_SCRIM_ALPHA = 0.72f
+internal const val TV_PLAYER_BOTTOM_SCRIM_ALPHA = 0.72f
 
 /** 顶部渐变 scrim 高度 (标题可读性). */
-private val TV_PLAYER_TOP_SCRIM_HEIGHT = 180.dp
+internal val TV_PLAYER_TOP_SCRIM_HEIGHT = 180.dp
 
 /**
  * 顶部渐变 scrim 最深处不透明度.
@@ -202,7 +206,7 @@ private val TV_PLAYER_TOP_SCRIM_HEIGHT = 180.dp
  * 比底部压得更狠: 顶部只有标题、数据源与时钟, 压黑没有代价; 而底部常年压着字幕,
  * **不能**跟着一起加深 —— 用户很多时候是边看字幕的.
  */
-private const val TV_PLAYER_TOP_SCRIM_ALPHA = 0.64f
+internal const val TV_PLAYER_TOP_SCRIM_ALPHA = 0.64f
 
 /** 顶部信息里数据源图标的尺寸. */
 private val TV_PLAYER_SOURCE_ICON_SIZE = 18.dp
@@ -223,7 +227,7 @@ private val TV_PLAYER_INEXACT_MATCH_COLOR = Color(0xFFFFD180)
  * 9dp 是控件内部的留白 (对称, 所以本常量一致 = 看到的空白一致). 也就是说实际观感 ≈ 本值 + 9dp,
  * 这一档已经贴得相当紧了; 进度条行本身那点 `padding(vertical)` 已经去掉, 别再加回来.
  */
-private val TV_PLAYER_PROGRESS_ROW_GAP = 4.dp
+internal val TV_PLAYER_PROGRESS_ROW_GAP = 4.dp
 
 /**
  * 控制层 (L1) + 浮出面板 (L2).
@@ -379,6 +383,22 @@ internal fun TvPlayerControlsOverlay(
         // 停靠留边由轮播内部 contentPadding 提供).
         // 焦点在胶囊行/浮出面板时只露到进度条为止 (Prime 行为): 进度条以下的
         // 图标行暂隐, 焦点回到进度条/图标行再出现.
+        // **本次控制层出现期间版式定死** —— 无 key 的 remember, 只在本层重新组合时取一次.
+        //
+        // 配置是 Compose State (`produceState`), 不这么攥着的话, 用户在别处换一套版式会让正在场上的
+        // 这一层当场重排, 而**焦点脚下的那个节点可能就此消失** (被新版式藏掉、或换到了另一行):
+        // Compose 在节点移除时清掉焦点且不交还祖先 = 控制层还在但方向键全失效; 顺带 focusRegion
+        // 停在旧值 (它只在获焦时上报), 自动隐藏看门狗与 hideBelowProgress 都读它, 后患不止一处.
+        //
+        // 收起时本层整个退出组合 (外层 AniAnimatedVisibility), 所以下次唤出来就是新版式 —— 换版式
+        // 永远发生在"屏幕上没有可聚焦按钮"的那一段, 代价只是控制层开着时换的那一次要等它收一下.
+        // 以后不管从哪加"播放中切换版式"的入口 (手机控制台 / 动作面板 / 某个键), 这道闸都在.
+        val chromeLayout = remember { vm.videoScaffoldConfig.tvPlayerChrome.active }
+        // 两行此刻各自摆着什么 (版式 + 运行时筛选). 要在行组合之前知道:
+        // 进度条上/下键的落点、以及"整行空了就别摆出来"都依赖它
+        val pillItems = rememberTvPillItems(chromeLayout)
+        val bottomRowItems = rememberTvBottomRowItems(vm, chromeLayout)
+        val pillOrder = remember(pillItems) { tvPillVisualOrder(pillItems) }
         // derivedStateOf: focusRegion 每次方向键都在变, 直接读会让整个覆盖层
         // (scrim/标题/胶囊/面板) 随每步导航重组; 收窄成布尔翻转才失效
         val hideBelowProgress by remember {
@@ -395,10 +415,37 @@ internal fun TvPlayerControlsOverlay(
         // 这一条推翻了原来"图标行绝不能摘掉、否则按钮往下掉"的做法 —— 往下掉正是现在要的,
         // 而且 AniAnimatedVisibility 会把这一段高度变化做成动画, 唤出控制层时位置自己滑回去.
         // **进度条行仍然不许摘**: 摘了那两个控件就贴到屏幕底缘了.
-        val showBelowProgress = !hideBelowProgress && chromeVisible
+        // 最后一项: 用户可以把图标行整行藏掉 (只剩分组竖线也算空) —— 那时这一行连同它的
+        // 间距都不该占位, 进度条的下键也没有落点可指
+        val bottomRowHasFocusable = bottomRowItems.any { !it.isSeparator }
+        val showBelowProgress = !hideBelowProgress && chromeVisible && bottomRowHasFocusable
+        // 上报给根路由: 整行被藏光时"再按下键 = 选集条"的起跳点要让给进度条 (见 bottomRowPresent).
+        // 报的是版式判据而不是 showBelowProgress —— 后者含临时淡出, 那不算不在场
+        SideEffect { overlay.bottomRowPresent = bottomRowHasFocusable }
         // 每个胶囊按钮的焦点请求器: 面板最底项按下键显式回到"打开它的那个胶囊" ——
-        // 靠空间搜索会落到面板正下方的任意按钮, 落错后该按钮又把面板切成自己的 (卡片跳变)
+        // 靠空间搜索会落到面板正下方的任意按钮, 落错后该按钮又把面板切成自己的 (卡片跳变).
+        // **被用户藏起来的胶囊照样有请求器, 但节点不在场**, 所以经它请求焦点的地方一律要 runCatching
         val pillFocusRequesters = remember { TvPlayerPanel.entries.associateWith { FocusRequester() } }
+        // 用户把某颗胶囊藏了, 而状态机 (rememberSaveable) 恢复出来的正好是它开着的面板 ——
+        // 走得到这一步: 播放页被盖住 (动作面板跳设置那类) 而不是退出, 回来时状态机照原样恢复.
+        // 面板会浮在那儿而底下没有对应的胶囊, 焦点无处可去.
+        //
+        // **`activePanel` 只在 effect 里用 snapshotFlow 观察, 绝不读在本组合的 body 上**: 它是每按
+        // 一次方向键就变的热状态 (聚焦哪颗胶囊就是哪个面板), body 读等于每走一格就重组整个控制层 ——
+        // 两条 scrim、顶部信息、面板宿主、胶囊行、进度条行、图标行全在里面. 这正是
+        // TvPlayerOverlayState 那句性能约定说的事; 真机上的症状是聚焦到内容最重的弹幕胶囊时,
+        // 浮出的面板会闪一下.
+        LaunchedEffect(pillOrder) {
+            snapshotFlow { overlay.activePanel }.collect { panel ->
+                if (panel == null || panel in pillOrder) return@collect
+                overlay.activePanel = null
+                // **光清面板不够**: 恢复出面板时构造函数把初始落点一并设成了 PANEL (见 TvPlayerOverlayState),
+                // 而那个入口请求器在刚被关掉的面板里, 永远附着不上 —— 解析器空转到放弃, 焦点就此悬空
+                // (症状: 控制层在场但方向键全没反应). 改派到进度条; 落点解析是 collectLatest, 新请求
+                // 到达即取消那次 PANEL 解析.
+                overlay.focusProgress()
+            }
+        }
         // 角色 / 制作人员胶囊按下确定: 弹与详情页同一个「查看全部」大网格 (见 TvPlayerPeopleViewAllDialog).
         // 只会是 STAFF / CHARACTERS 两颗; null = 没开.
         var peopleViewAll by remember { mutableStateOf<TvPlayerPanel?>(null) }
@@ -451,6 +498,7 @@ internal fun TvPlayerControlsOverlay(
                             vm = vm,
                             page = page,
                             pillFocusRequesters = pillFocusRequesters,
+                            pillOrder = pillOrder,
                             // NaN (尚未测得) 由面板侧兜底成固定高度
                             availableHeightPx = { pillsRowTopPx.floatValue - topInfoBottomPx.floatValue },
                         )
@@ -490,6 +538,7 @@ internal fun TvPlayerControlsOverlay(
                         overlay = overlay,
                         danmakuEditorState = danmakuEditorState,
                         vm = vm,
+                        items = pillItems,
                         pillFocusRequesters = pillFocusRequesters,
                         onNewComment = { openNewEpisodeComment(vm, page, overlay) },
                         onViewAllPeople = { peopleViewAll = it },
@@ -518,7 +567,8 @@ internal fun TvPlayerControlsOverlay(
                         overlay = overlay,
                         // 图标行暂隐期间不能指向它 (节点已移出组合, 未附着的请求器会抛)
                         downFocus = bottomRowFirstFocus.takeIf { showBelowProgress },
-                        upFocus = pillFocusRequesters.getValue(TV_PILL_VISUAL_ORDER.first()),
+                        // 胶囊被用户整行藏掉时没有落点: 传 null (指向未附着的请求器会抛)
+                        upFocus = pillOrder.firstOrNull()?.let { pillFocusRequesters.getValue(it) },
                         modifier = chrome.tvFocusAnchor(playerFocus, TvPlayerFocusTarget.PROGRESS),
                     )
 
@@ -536,6 +586,7 @@ internal fun TvPlayerControlsOverlay(
                                 vm = vm,
                                 page = page,
                                 sheetsController = sheetsController,
+                                items = bottomRowItems,
                                 firstButtonFocus = bottomRowFirstFocus,
                                 upFocus = playerFocus.requesterOf(TvPlayerFocusTarget.PROGRESS),
                                 modifier = Modifier.tvFocusAnchor(
@@ -671,23 +722,46 @@ private fun TvPlayerTopInfo(
 }
 
 /**
- * 胶囊按钮行的视觉顺序 (左→右), 与 [TvPlayerPillsRow] 的排列保持一致:
- * 面板条目上按左/右键路由到相邻胶囊 (见 [TvPlayerPanelHost]) 的依据.
+ * 胶囊行此刻实际摆着的条目 (按用户版式排序、去掉隐藏的). 五颗胶囊都无条件在场, 不像图标行那样
+ * 还有运行时筛选.
  */
-internal val TV_PILL_VISUAL_ORDER = listOf(
-    TvPlayerPanel.RECOMMENDATIONS,
-    TvPlayerPanel.STAFF,
-    TvPlayerPanel.CHARACTERS,
-    TvPlayerPanel.COMMENTS,
-    TvPlayerPanel.DANMAKU_LIST,
-)
+@Composable
+private fun rememberTvPillItems(layout: TvPlayerChromeLayout): List<TvPlayerChromeItem> =
+    remember(layout) { layout.visibleItemsOf(TvPlayerChromeRow.PILLS) }
 
-/** 胶囊按钮行: 相关推荐 / 制作人员 / 角色 / 评论 / 弹幕列表 (+ 弹幕发送展开框) + 靠右的 [trailing]. */
+/** 胶囊条目 -> 它绑着的面板. */
+private fun TvPlayerChromeItem.toPanel(): TvPlayerPanel? = when (this) {
+    TvPlayerChromeItem.PILL_RECOMMENDATIONS -> TvPlayerPanel.RECOMMENDATIONS
+    TvPlayerChromeItem.PILL_STAFF -> TvPlayerPanel.STAFF
+    TvPlayerChromeItem.PILL_CHARACTERS -> TvPlayerPanel.CHARACTERS
+    TvPlayerChromeItem.PILL_COMMENTS -> TvPlayerPanel.COMMENTS
+    TvPlayerChromeItem.PILL_DANMAKU -> TvPlayerPanel.DANMAKU_LIST
+    else -> null
+}
+
+/**
+ * 胶囊按钮此刻的视觉顺序 (左→右): 面板条目上按左/右键路由到相邻胶囊 (见 [TvPlayerPanelHost]) 的依据.
+ *
+ * 原先是一个写死的常量, 用户能排版式之后必须现算 —— 顺序错了的表现是"面板里按右键跳到了别的面板",
+ * 藏起来的胶囊更是连节点都没有, 请求器根本没附着.
+ */
+internal fun tvPillVisualOrder(items: List<TvPlayerChromeItem>): List<TvPlayerPanel> =
+    items.mapNotNull { it.toPanel() }
+
+/**
+ * 胶囊按钮行: 默认是 相关推荐 / 制作人员 / 角色 / 评论 / 弹幕列表 (+ 弹幕发送展开框) + 靠右的 [trailing],
+ * 顺序与显隐由用户排 (见 [TvPlayerChromeLayout]), 本组合只按 [items] 摆.
+ *
+ * [trailing] 不参与排列: 那是 OP/ED 提示按钮与片尾「接下来播放」卡片的坑位, 它们不是常驻控件,
+ * 自有一套出现时机与焦点规则.
+ */
 @Composable
 private fun TvPlayerPillsRow(
     overlay: TvPlayerOverlayState,
     danmakuEditorState: DanmakuEditorState,
     vm: EpisodeViewModel,
+    /** 本行此刻要摆的胶囊, 已排好序 (见 [rememberTvPillItems]). */
+    items: List<TvPlayerChromeItem>,
     pillFocusRequesters: Map<TvPlayerPanel, FocusRequester>,
     /** 评论胶囊按下确定: 发表本集评论 (见 [openNewEpisodeComment]). */
     onNewComment: () -> Unit,
@@ -718,68 +792,78 @@ private fun TvPlayerPillsRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TvPlayerPill(
-                icon = { Icon(Icons.Rounded.VideoLibrary, null, Modifier.size(TV_PILL_ICON_SIZE)) },
-                label = stringResource(Lang.subject_episode_related_recommendations),
-                panel = TvPlayerPanel.RECOMMENDATIONS,
-                overlay = overlay,
-                focusRequester = pillFocusRequesters.getValue(TvPlayerPanel.RECOMMENDATIONS),
-            )
-            TvPlayerPill(
-                icon = { Icon(Icons.Rounded.Groups, null, Modifier.size(TV_PILL_ICON_SIZE)) },
-                label = stringResource(Lang.subject_details_staff),
-                panel = TvPlayerPanel.STAFF,
-                overlay = overlay,
-                focusRequester = pillFocusRequesters.getValue(TvPlayerPanel.STAFF),
-                // 与评论胶囊同一个道理 (见那颗的注释): 默认的"把焦点送进面板"与直接按上键完全重复.
-                // 这一下改成弹详情页那份「查看全部」大网格 —— 聚焦时浮出的窄面板只够扫一眼,
-                // 而这两类内容在播放器里没有别的入口 (内嵌详情页是精简版, 没有这两个区块)
-                onClick = { onViewAllPeople(TvPlayerPanel.STAFF) },
-                modifier = Modifier.restoreFocusAfter(
-                    viewAllPeopleActive == TvPlayerPanel.STAFF,
-                    abandon = { overlay.layer != TvPlayerLayer.CONTROLS },
-                ),
-            )
-            TvPlayerPill(
-                icon = { Icon(Icons.Rounded.Face, null, Modifier.size(TV_PILL_ICON_SIZE)) },
-                label = stringResource(Lang.subject_details_characters),
-                panel = TvPlayerPanel.CHARACTERS,
-                overlay = overlay,
-                focusRequester = pillFocusRequesters.getValue(TvPlayerPanel.CHARACTERS),
-                onClick = { onViewAllPeople(TvPlayerPanel.CHARACTERS) },
-                modifier = Modifier.restoreFocusAfter(
-                    viewAllPeopleActive == TvPlayerPanel.CHARACTERS,
-                    abandon = { overlay.layer != TvPlayerLayer.CONTROLS },
-                ),
-            )
-            TvPlayerPill(
-                icon = { Icon(Icons.AutoMirrored.Rounded.Comment, null, Modifier.size(TV_PILL_ICON_SIZE)) },
-                label = stringResource(Lang.episode_comments),
-                panel = TvPlayerPanel.COMMENTS,
-                overlay = overlay,
-                focusRequester = pillFocusRequesters.getValue(TvPlayerPanel.COMMENTS),
-                // 本颗胶囊的点击另有其用: 发表本集评论.
-                //
-                // 默认的"把焦点送进面板"与直接按上键完全重复 (面板早在聚焦本胶囊时就浮出来了),
-                // 这一下等于白按; 而发新评论此前在 TV 上没有任何入口 —— 只能回复已有评论,
-                // 手机端那颗「发送评论」FAB 在遥控器形态下没有对应物
-                onClick = onNewComment,
-                // 弹窗关掉后焦点还给本胶囊: 弹窗抢焦点时本节点还在场 (控制层与面板都留在下面),
-                // 但 Compose 不会自己还回来. 控制层已经收起时放弃 —— 那时焦点归属归根路由管
-                modifier = Modifier.restoreFocusAfter(
-                    composingNewComment,
-                    abandon = { overlay.layer != TvPlayerLayer.CONTROLS },
-                ),
-            )
-            // 「弹幕」一颗顶原来的两颗 (弹幕列表 + 发送弹幕): 聚焦浮出弹幕列表面板 (含源开关与
-            // 延迟), 点击展开输入框发弹幕 —— 与「评论」那颗完全同一个模式 (聚焦看, 点击发),
-            // 原来拆成两颗等于把同一件事的"看"和"发"摆成两个并列入口, 还多占一格横向导航
-            TvDanmakuSendEntry(
-                overlay = overlay,
-                danmakuEditorState = danmakuEditorState,
-                vm = vm,
-                panelFocusRequester = pillFocusRequesters.getValue(TvPlayerPanel.DANMAKU_LIST),
-            )
+            for (item in items) {
+                when (item) {
+                    TvPlayerChromeItem.PILL_RECOMMENDATIONS -> TvPlayerPill(
+                        icon = { Icon(Icons.Rounded.VideoLibrary, null, Modifier.size(TV_PILL_ICON_SIZE)) },
+                        label = stringResource(Lang.subject_episode_related_recommendations),
+                        panel = TvPlayerPanel.RECOMMENDATIONS,
+                        overlay = overlay,
+                        focusRequester = pillFocusRequesters.getValue(TvPlayerPanel.RECOMMENDATIONS),
+                    )
+
+                    TvPlayerChromeItem.PILL_STAFF -> TvPlayerPill(
+                        icon = { Icon(Icons.Rounded.Groups, null, Modifier.size(TV_PILL_ICON_SIZE)) },
+                        label = stringResource(Lang.subject_details_staff),
+                        panel = TvPlayerPanel.STAFF,
+                        overlay = overlay,
+                        focusRequester = pillFocusRequesters.getValue(TvPlayerPanel.STAFF),
+                        // 与评论胶囊同一个道理 (见那颗的注释): 默认的"把焦点送进面板"与直接按上键完全重复.
+                        // 这一下改成弹详情页那份「查看全部」大网格 —— 聚焦时浮出的窄面板只够扫一眼,
+                        // 而这两类内容在播放器里没有别的入口 (内嵌详情页是精简版, 没有这两个区块)
+                        onClick = { onViewAllPeople(TvPlayerPanel.STAFF) },
+                        modifier = Modifier.restoreFocusAfter(
+                            viewAllPeopleActive == TvPlayerPanel.STAFF,
+                            abandon = { overlay.layer != TvPlayerLayer.CONTROLS },
+                        ),
+                    )
+
+                    TvPlayerChromeItem.PILL_CHARACTERS -> TvPlayerPill(
+                        icon = { Icon(Icons.Rounded.Face, null, Modifier.size(TV_PILL_ICON_SIZE)) },
+                        label = stringResource(Lang.subject_details_characters),
+                        panel = TvPlayerPanel.CHARACTERS,
+                        overlay = overlay,
+                        focusRequester = pillFocusRequesters.getValue(TvPlayerPanel.CHARACTERS),
+                        onClick = { onViewAllPeople(TvPlayerPanel.CHARACTERS) },
+                        modifier = Modifier.restoreFocusAfter(
+                            viewAllPeopleActive == TvPlayerPanel.CHARACTERS,
+                            abandon = { overlay.layer != TvPlayerLayer.CONTROLS },
+                        ),
+                    )
+
+                    TvPlayerChromeItem.PILL_COMMENTS -> TvPlayerPill(
+                        icon = { Icon(Icons.AutoMirrored.Rounded.Comment, null, Modifier.size(TV_PILL_ICON_SIZE)) },
+                        label = stringResource(Lang.episode_comments),
+                        panel = TvPlayerPanel.COMMENTS,
+                        overlay = overlay,
+                        focusRequester = pillFocusRequesters.getValue(TvPlayerPanel.COMMENTS),
+                        // 本颗胶囊的点击另有其用: 发表本集评论.
+                        //
+                        // 默认的"把焦点送进面板"与直接按上键完全重复 (面板早在聚焦本胶囊时就浮出来了),
+                        // 这一下等于白按; 而发新评论此前在 TV 上没有任何入口 —— 只能回复已有评论,
+                        // 手机端那颗「发送评论」FAB 在遥控器形态下没有对应物
+                        onClick = onNewComment,
+                        // 弹窗关掉后焦点还给本胶囊: 弹窗抢焦点时本节点还在场 (控制层与面板都留在下面),
+                        // 但 Compose 不会自己还回来. 控制层已经收起时放弃 —— 那时焦点归属归根路由管
+                        modifier = Modifier.restoreFocusAfter(
+                            composingNewComment,
+                            abandon = { overlay.layer != TvPlayerLayer.CONTROLS },
+                        ),
+                    )
+
+                    // 「弹幕」一颗顶原来的两颗 (弹幕列表 + 发送弹幕): 聚焦浮出弹幕列表面板 (含源开关与
+                    // 延迟), 点击展开输入框发弹幕 —— 与「评论」那颗完全同一个模式 (聚焦看, 点击发),
+                    // 原来拆成两颗等于把同一件事的"看"和"发"摆成两个并列入口, 还多占一格横向导航
+                    TvPlayerChromeItem.PILL_DANMAKU -> TvDanmakuSendEntry(
+                        overlay = overlay,
+                        danmakuEditorState = danmakuEditorState,
+                        vm = vm,
+                        panelFocusRequester = pillFocusRequesters.getValue(TvPlayerPanel.DANMAKU_LIST),
+                    )
+
+                    else -> Unit // 图标行的条目走不到这里 (按 row 分流过)
+                }
+            }
         }
         // **不参与行高**: trailing 里的「接下来播放」卡片比胶囊高一大截, 让它撑高本行的话,
         // 紧贴本行上方的浮出面板会被整个顶上去 (真机可见). 报 0 高、向上溢出绘制之后, 本行的
@@ -945,11 +1029,11 @@ internal val TV_PLAYBACK_SPEED_RANGE =
 
 // ---- 控件尺寸 (Prime 密度: 初版的 80%) ----
 // 胶囊那几个尺寸在 TvPillShell (ui/foundation/tv/TvPill.kt) 里, 与外壳放在一起
-private val TV_ICON_BUTTON_SIZE = 38.dp
-private val TV_ICON_SIZE = 20.dp
+internal val TV_ICON_BUTTON_SIZE = 38.dp
+internal val TV_ICON_SIZE = 20.dp
 
 /** 图形几乎占满视口的图标 (如 Replay) 的补偿尺寸: 与留白多的图标视觉等大. */
-private val TV_ICON_SIZE_VISUAL_COMPENSATED = 18.dp
+internal val TV_ICON_SIZE_VISUAL_COMPENSATED = 18.dp
 
 /**
  * 进度条行: 左当前时间 + 中间进度条 + 右总时长; 整行是一个焦点节点 (左右键由根路由处理),
@@ -967,8 +1051,11 @@ private fun TvPlayerProgressRow(
     overlay: TvPlayerOverlayState,
     /** 下键的显式落点 (图标行最左按钮): 整行全宽, 交给空间搜索会落到行中间的按钮. */
     downFocus: FocusRequester?,
-    /** 上键的显式落点 (胶囊行最左按钮): 同 [downFocus], 空间搜索会落到行中间的胶囊上. */
-    upFocus: FocusRequester,
+    /**
+     * 上键的显式落点 (胶囊行最左那颗): 同 [downFocus], 空间搜索会落到行中间的胶囊上.
+     * null = 胶囊被用户整行藏掉了, 上键没有落点.
+     */
+    upFocus: FocusRequester?,
     /**
      * 本行此刻看得见吗. false = 控制层已淡到透明, 本行只是**为了撑住胶囊行到屏幕底缘的距离**
      * 而留在布局里 (摘掉的话那颗 OP/ED 提示按钮会当场往下掉一截, 见调用处).
@@ -1002,7 +1089,7 @@ private fun TvPlayerProgressRow(
             .fillMaxWidth()
             .focusProperties {
                 if (downFocus != null) down = downFocus
-                up = upFocus
+                if (upFocus != null) up = upFocus
             }
             .onFocusChanged { if (it.isFocused) overlay.focusRegion = TvPlayerFocusRegion.PROGRESS }
             .focusable(interactionSource = interactionSource)
@@ -1086,7 +1173,48 @@ private fun renderTvPlayerTime(millis: Long): String {
 }
 
 /**
- * 图标行: 播放组 (从头开始/下一集/跳OP) | 数据源 | 弹幕组 (开关/设置) ... 右侧文字选项组与低频组.
+ * 图标行此刻**实际在场**的条目: 用户排的版式 (顺序 + 显隐, 见 [TvPlayerChromeLayout]) 再过一道
+ * 运行时筛选 (没有下一集 / 片源没有字幕轨 / 一起看被关掉), 最后收拾掉落单的分组竖线.
+ *
+ * 为什么要在控制层里先算一遍, 而不是让行自己边画边判: 「进度条按下键落到哪一颗」与
+ * 「整行空了就别摆出来」这两件事, 都得在行组合之前知道答案.
+ */
+@Composable
+private fun rememberTvBottomRowItems(
+    vm: EpisodeViewModel,
+    layout: TvPlayerChromeLayout,
+): List<TvPlayerChromeItem> {
+    val touchInput = LocalTvTouchInputEnabled.current
+    val watchTogether = LocalWatchTogetherEntry.current.enabled
+    val hasNextEpisode = vm.episodeSelectorState.hasNextEpisode
+    val hasSubtitleTracks = vm.player.subtitleTracks != null
+    val hasSpeed = vm.player.features[PlaybackSpeed] != null
+    val hasAspectRatio = vm.player.features[VideoAspectRatio] != null
+    return remember(
+        layout, touchInput, watchTogether, hasNextEpisode, hasSubtitleTracks, hasSpeed, hasAspectRatio,
+    ) {
+        TvPlayerChromeLayout.tidySeparators(
+            layout.visibleItemsOf(TvPlayerChromeRow.BOTTOM).filter { item ->
+                when (item) {
+                    TvPlayerChromeItem.NEXT_EPISODE -> hasNextEpisode
+                    // 触屏 (平板装了 TV 包) 专有的两颗, 电视上连编辑页都不列
+                    TvPlayerChromeItem.TOUCH_EPISODE_STRIP, TvPlayerChromeItem.TOUCH_DETAILS -> touchInput
+                    TvPlayerChromeItem.WATCH_TOGETHER -> watchTogether
+                    TvPlayerChromeItem.SUBTITLE_TRACK -> hasSubtitleTracks
+                    TvPlayerChromeItem.PLAYBACK_SPEED -> hasSpeed
+                    TvPlayerChromeItem.ASPECT_RATIO -> hasAspectRatio
+                    else -> true
+                }
+            },
+        )
+    }
+}
+
+/**
+ * 图标行: 默认是 播放组 (从头开始/下一集/跳OP) | 数据源 | 弹幕组 (开关/设置) ... 右侧文字选项组与低频组,
+ * 但**顺序与显隐由用户排** (设置 - 播放器 - 自定义播放器按钮, 见 [TvPlayerChromeLayout]),
+ * 本组合只按 [items] 摆.
+ *
  * 再往下键 = 详情页 (根路由). 播放/暂停走遥控器确认键, 不再放按钮 (Prime 布局);
  * 选集走详情页覆盖层. 内容统一纯白高对比 (默认主题色在视频上看不清).
  */
@@ -1096,7 +1224,9 @@ private fun TvPlayerBottomRow(
     vm: EpisodeViewModel,
     page: EpisodePageState,
     sheetsController: VideoSideSheetsController<EpisodeVideoSideSheetPage>,
-    /** 最左按钮 (从头开始) 的请求器: 进度条按下键的固定落点. */
+    /** 本行此刻要摆的条目, 已排好序并筛过 (见 [rememberTvBottomRowItems]). */
+    items: List<TvPlayerChromeItem>,
+    /** 行内第一颗**可聚焦**条目的请求器: 进度条按下键的固定落点 (分组竖线不能当落点). */
     firstButtonFocus: FocusRequester,
     /** 行内所有按钮按上键的显式落点 (进度条行): 空间搜索会越过细进度条落到胶囊按钮上. */
     upFocus: FocusRequester,
@@ -1119,6 +1249,9 @@ private fun TvPlayerBottomRow(
         watchTogetherWasEnabled = false
         overlay.focusProgress()
     }
+    // 进度条按下键的落点 = 第一颗**可聚焦**的条目: 用户可以把分组竖线排到行首 (tidySeparators
+    // 只清掉落单的那种), 把请求器挂到不可聚焦的节点上, 下键会当场蒸发
+    val firstFocusable = items.firstOrNull { !it.isSeparator }
     CompositionLocalProvider(
         LocalContentColor provides Color.White,
         LocalTextStyle provides MaterialTheme.typography.labelMedium,
@@ -1135,163 +1268,203 @@ private fun TvPlayerBottomRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            // 从头开始 (Prime 同款). Replay 的图形几乎占满 24dp 视口 (环形箭头画到边),
-            // 而 SkipNext 等图形留白多, 同尺寸下视觉显大 —— 缩一档做视觉等大
-            TvBottomRowIcon(
-                icon = Icons.Rounded.Replay,
-                contentDescription = stringResource(Lang.video_player_tv_restart),
-                onClick = { vm.player.seekTo(0) },
-                modifier = Modifier.focusRequester(firstButtonFocus),
-                iconSize = TV_ICON_SIZE_VISUAL_COMPENSATED,
-            )
-            if (vm.episodeSelectorState.hasNextEpisode) {
-                TvBottomRowIcon(
-                    icon = Icons.Rounded.SkipNext,
-                    contentDescription = stringResource(Lang.video_player_next_episode),
-                    onClick = { vm.episodeSelectorState.selectNext() },
-                )
-            }
-            // 跳过 OP/ED (快进配置的时长)
-            TvSkipOpEdButton(vm)
-            // 触屏 (平板装了 TV 包): 选集条与内嵌详情层在遥控器上是"图标行再按下键"进去的, 触屏没有下键,
-            // 这里补两颗只在触屏设备上出现的按钮, 语义与根路由里下键那两档相同. 电视上不组合
-            if (LocalTvTouchInputEnabled.current) {
-                TvBottomRowIcon(
-                    icon = Icons.Rounded.ViewCarousel,
-                    contentDescription = stringResource(Lang.video_player_select_episode),
-                    onClick = {
-                        when (overlay.episodeStrip) {
-                            TvEpisodeStripState.AVAILABLE -> overlay.expandEpisodeStrip()
-                            TvEpisodeStripState.LOADING -> overlay.expandEpisodeStripWhenReady()
-                            TvEpisodeStripState.EMPTY -> overlay.openDetails()
-                        }
-                    },
-                )
-                TvBottomRowIcon(
-                    icon = Icons.Rounded.Info,
-                    contentDescription = stringResource(Lang.subject_episode_details),
-                    onClick = { overlay.openDetails() },
-                )
-            }
-
-            TvBottomRowDivider()
-
-            // ---- 数据源 ---- (紧跟播放组: 卡顿/字幕不对时换源是看片途中最常走的一步,
-            // 排在弹幕组之后要多按两下)
-            TvBottomRowIcon(
-                icon = Icons.Rounded.DisplaySettings,
-                contentDescription = stringResource(Lang.subject_episode_select_media_source),
-                onClick = { sheetsController.navigateTo(EpisodeVideoSideSheetPage.MEDIA_SELECTOR) },
-            )
-
-            TvBottomRowDivider()
-
-            // ---- 弹幕组 ----
-            TvBottomRowIcon(
-                icon = if (page.danmakuEnabled) Icons.Rounded.Subtitles else Icons.Rounded.SubtitlesOff,
-                contentDescription = stringResource(
-                    if (page.danmakuEnabled) Lang.video_player_disable_danmaku else Lang.video_player_enable_danmaku,
-                ),
-                onClick = { vm.setDanmakuEnabled(!page.danmakuEnabled) },
-            )
-            TvBottomRowIcon(
-                icon = AniIcons.SubtitleGear,
-                contentDescription = stringResource(Lang.subject_episode_danmaku_settings_title),
-                onClick = { sheetsController.navigateTo(EpisodeVideoSideSheetPage.PLAYER_SETTINGS) },
-            )
-            // 一起看: 与弹幕同属"和别人一起看"那一类, 所以并进本组末尾. 位置的取舍是 ——
-            // 一次观看里最多开一次, 排不到从头开始/下一集/换源前面; 但再往右就是收藏/统计
-            // 那些低频项与右半边的设置类按钮, 一个招牌功能埋在那儿要多按七八下才够得着
-            if (watchTogetherEnabled) TvWatchTogetherButton(overlay)
-
-            // 左右两块之间的弹性留白 (常用组靠左, 其余靠右)
-            Spacer(Modifier.weight(1f))
-
-            // ---- 文字选项组 (字幕轨/倍速/画面比例, 自描述文字按钮, 标签槽位仅为行内对齐) ----
-            vm.player.subtitleTracks?.let {
-                TvBottomRowLabeled(label = null) {
-                    TvTextButtonInverse {
-                        PlayerControllerDefaults.SubtitleSwitcher(
-                            it,
-                            modifier = Modifier.height(TV_ICON_BUTTON_SIZE),
-                            onExpandedChanged = { open -> overlay.onPopupExpandedChanged(open) },
-                        )
-                    }
+            for (item in items) {
+                // 落点只挂在第一颗可聚焦的条目上, 其余拿一个空壳
+                val itemModifier = if (item === firstFocusable) {
+                    Modifier.focusRequester(firstButtonFocus)
+                } else {
+                    Modifier
                 }
-            }
-            // 倍速 / 画面比例 (下拉展开时上报, 抑制自动隐藏)
-            //
-            // rangeProvider / onCommitSpeed 必须给 (与手机端 EpisodePage 一致): 少了它们,
-            // 滑块用的是默认 0.5x–2.5x 而不是用户设的范围, 且这里调的倍速既不写回配置也不写进
-            // ViewModel 的 override —— 而 PlaybackSpeedExtension 会在切集/重新起播时按配置里的
-            // playbackSpeed 重新应用, 于是用户在播放器里改的倍速会莫名其妙被弹回去
-            val speedController = remember(vm) {
-                vm.player.features[PlaybackSpeed]?.let {
-                    PlaybackSpeedControllerState(
-                        playbackSpeed = it,
-                        // 固定用默认范围, 不读配置里的 min/max: 遥控器形态下"倍速范围"那条设置
-                        // 已经不提供了 (见 AppSettingsTab.PlaybackSpeedItems), 而配置里可能还
-                        // 留着以前被改窄的值, 读它就等于永远调不回来
-                        rangeProvider = { TV_PLAYBACK_SPEED_RANGE },
-                        onCommitSpeed = { speed -> vm.setPlaybackSpeed(speed) },
-                        scope = scope,
+                when (item) {
+                    // 从头开始 (Prime 同款). Replay 的图形几乎占满 24dp 视口 (环形箭头画到边),
+                    // 而 SkipNext 等图形留白多, 同尺寸下视觉显大 —— 缩一档做视觉等大
+                    TvPlayerChromeItem.RESTART -> TvBottomRowIcon(
+                        icon = Icons.Rounded.Replay,
+                        contentDescription = stringResource(Lang.video_player_tv_restart),
+                        onClick = { vm.player.seekTo(0) },
+                        modifier = itemModifier,
+                        iconSize = TV_ICON_SIZE_VISUAL_COMPENSATED,
                     )
-                }
-            }
-            speedController?.let {
-                TvBottomRowLabeled(label = null) {
-                    TvTextButtonInverse {
-                        SpeedSwitcher(
-                            it,
-                            modifier = Modifier.height(TV_ICON_BUTTON_SIZE),
-                            onExpandedChanged = { open -> overlay.onPopupExpandedChanged(open) },
-                        )
-                    }
-                }
-            }
-            val aspectController = remember(vm) {
-                vm.player.features[VideoAspectRatio]?.let { VideoAspectRatioControllerState(it, scope = scope) }
-            }
-            aspectController?.let {
-                TvBottomRowLabeled(label = null) {
-                    TvTextButtonInverse {
-                        VideoAspectRatioSelector(
-                            it,
-                            modifier = Modifier.height(TV_ICON_BUTTON_SIZE),
-                            onExpandedChanged = { open -> overlay.onPopupExpandedChanged(open) },
-                        )
-                    }
-                }
-            }
 
-            TvBottomRowDivider()
+                    TvPlayerChromeItem.NEXT_EPISODE -> TvBottomRowIcon(
+                        icon = Icons.Rounded.SkipNext,
+                        contentDescription = stringResource(Lang.video_player_next_episode),
+                        onClick = { vm.episodeSelectorState.selectNext() },
+                        modifier = itemModifier,
+                    )
 
-            // ---- 低频操作组 (收藏 + 原三个点菜单的三项) ----
-            TvPlayerCollectionButton(vm, overlay)
-            // 播放器统计开关
-            TvBottomRowIcon(
-                icon = Icons.Outlined.Analytics,
-                contentDescription = stringResource(
-                    if (overlay.showPlayerStats) Lang.video_player_stats_title_hide
-                    else Lang.video_player_stats_title_show,
-                ),
-                onClick = { overlay.showPlayerStats = !overlay.showPlayerStats },
-            )
-            // 外部链接 (点击弹分享下拉)
-            TvPlayerShareButton(overlay, page.shareData)
-            // 缓存
-            TvBottomRowIcon(
-                icon = Icons.Rounded.Download,
-                contentDescription = stringResource(Lang.subject_episode_cache),
-                onClick = { navigator.navigateSubjectCaches(vm.subjectId) },
-            )
+                    // 跳过 OP/ED (快进配置的时长)
+                    TvPlayerChromeItem.SKIP_OP_ED -> TvSkipOpEdButton(vm, itemModifier)
+
+                    // 触屏 (平板装了 TV 包): 选集条与内嵌详情层在遥控器上是"图标行再按下键"进去的,
+                    // 触屏没有下键, 这两颗只在触屏设备上出现, 语义与根路由里下键那两档相同
+                    TvPlayerChromeItem.TOUCH_EPISODE_STRIP -> TvBottomRowIcon(
+                        icon = Icons.Rounded.ViewCarousel,
+                        contentDescription = stringResource(Lang.video_player_select_episode),
+                        onClick = {
+                            when (overlay.episodeStrip) {
+                                TvEpisodeStripState.AVAILABLE -> overlay.expandEpisodeStrip()
+                                TvEpisodeStripState.LOADING -> overlay.expandEpisodeStripWhenReady()
+                                TvEpisodeStripState.EMPTY -> overlay.openDetails()
+                            }
+                        },
+                        modifier = itemModifier,
+                    )
+
+                    TvPlayerChromeItem.TOUCH_DETAILS -> TvBottomRowIcon(
+                        icon = Icons.Rounded.Info,
+                        contentDescription = stringResource(Lang.subject_episode_details),
+                        onClick = { overlay.openDetails() },
+                        modifier = itemModifier,
+                    )
+
+                    TvPlayerChromeItem.DIVIDER_1,
+                    TvPlayerChromeItem.DIVIDER_2,
+                    TvPlayerChromeItem.DIVIDER_3,
+                        -> TvBottomRowDivider()
+
+                    // 左右两块之间的弹性留白 (默认版式里常用组靠左, 其余靠右)
+                    TvPlayerChromeItem.SPACER -> Spacer(Modifier.weight(1f))
+
+                    // 数据源 (默认紧跟播放组: 卡顿/字幕不对时换源是看片途中最常走的一步)
+                    TvPlayerChromeItem.MEDIA_SOURCE -> TvBottomRowIcon(
+                        icon = Icons.Rounded.DisplaySettings,
+                        contentDescription = stringResource(Lang.subject_episode_select_media_source),
+                        onClick = { sheetsController.navigateTo(EpisodeVideoSideSheetPage.MEDIA_SELECTOR) },
+                        modifier = itemModifier,
+                    )
+
+                    TvPlayerChromeItem.DANMAKU_TOGGLE -> TvBottomRowIcon(
+                        icon = if (page.danmakuEnabled) Icons.Rounded.Subtitles else Icons.Rounded.SubtitlesOff,
+                        contentDescription = stringResource(
+                            if (page.danmakuEnabled) {
+                                Lang.video_player_disable_danmaku
+                            } else {
+                                Lang.video_player_enable_danmaku
+                            },
+                        ),
+                        onClick = { vm.setDanmakuEnabled(!page.danmakuEnabled) },
+                        modifier = itemModifier,
+                    )
+
+                    TvPlayerChromeItem.DANMAKU_SETTINGS -> TvBottomRowIcon(
+                        icon = AniIcons.SubtitleGear,
+                        contentDescription = stringResource(Lang.subject_episode_danmaku_settings_title),
+                        onClick = { sheetsController.navigateTo(EpisodeVideoSideSheetPage.PLAYER_SETTINGS) },
+                        modifier = itemModifier,
+                    )
+
+                    // 一起看: 与弹幕同属"和别人一起看"那一类, 默认版式里并在弹幕组末尾
+                    TvPlayerChromeItem.WATCH_TOGETHER -> TvWatchTogetherButton(overlay, itemModifier)
+
+                    // ---- 文字选项组 (字幕轨/倍速/画面比例, 自描述文字按钮, 标签槽位仅为行内对齐) ----
+                    TvPlayerChromeItem.SUBTITLE_TRACK -> vm.player.subtitleTracks?.let {
+                        TvBottomRowLabeled(label = null, itemModifier) {
+                            TvTextButtonInverse {
+                                PlayerControllerDefaults.SubtitleSwitcher(
+                                    it,
+                                    modifier = Modifier.height(TV_ICON_BUTTON_SIZE),
+                                    onExpandedChanged = { open -> overlay.onPopupExpandedChanged(open) },
+                                )
+                            }
+                        }
+                    }
+
+                    // 倍速 (下拉展开时上报, 抑制自动隐藏)
+                    //
+                    // rangeProvider / onCommitSpeed 必须给 (与手机端 EpisodePage 一致): 少了它们,
+                    // 滑块用的是默认 0.5x–2.5x 而不是用户设的范围, 且这里调的倍速既不写回配置也不写进
+                    // ViewModel 的 override —— 而 PlaybackSpeedExtension 会在切集/重新起播时按配置里的
+                    // playbackSpeed 重新应用, 于是用户在播放器里改的倍速会莫名其妙被弹回去
+                    TvPlayerChromeItem.PLAYBACK_SPEED -> {
+                        val speedController = remember(vm) {
+                            vm.player.features[PlaybackSpeed]?.let {
+                                PlaybackSpeedControllerState(
+                                    playbackSpeed = it,
+                                    // 固定用默认范围, 不读配置里的 min/max: 遥控器形态下"倍速范围"那条设置
+                                    // 已经不提供了 (见 AppSettingsTab.PlaybackSpeedItems), 而配置里可能还
+                                    // 留着以前被改窄的值, 读它就等于永远调不回来
+                                    rangeProvider = { TV_PLAYBACK_SPEED_RANGE },
+                                    onCommitSpeed = { speed -> vm.setPlaybackSpeed(speed) },
+                                    scope = scope,
+                                )
+                            }
+                        }
+                        speedController?.let {
+                            TvBottomRowLabeled(label = null, itemModifier) {
+                                TvTextButtonInverse {
+                                    SpeedSwitcher(
+                                        it,
+                                        modifier = Modifier.height(TV_ICON_BUTTON_SIZE),
+                                        onExpandedChanged = { open -> overlay.onPopupExpandedChanged(open) },
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    TvPlayerChromeItem.ASPECT_RATIO -> {
+                        val aspectController = remember(vm) {
+                            vm.player.features[VideoAspectRatio]?.let {
+                                VideoAspectRatioControllerState(it, scope = scope)
+                            }
+                        }
+                        aspectController?.let {
+                            TvBottomRowLabeled(label = null, itemModifier) {
+                                TvTextButtonInverse {
+                                    VideoAspectRatioSelector(
+                                        it,
+                                        modifier = Modifier.height(TV_ICON_BUTTON_SIZE),
+                                        onExpandedChanged = { open -> overlay.onPopupExpandedChanged(open) },
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // ---- 低频操作组 (收藏 + 原三个点菜单的三项) ----
+                    TvPlayerChromeItem.COLLECTION -> TvPlayerCollectionButton(vm, overlay, itemModifier)
+
+                    // 播放器统计开关
+                    TvPlayerChromeItem.PLAYER_STATS -> TvBottomRowIcon(
+                        icon = Icons.Outlined.Analytics,
+                        contentDescription = stringResource(
+                            if (overlay.showPlayerStats) {
+                                Lang.video_player_stats_title_hide
+                            } else {
+                                Lang.video_player_stats_title_show
+                            },
+                        ),
+                        onClick = { overlay.showPlayerStats = !overlay.showPlayerStats },
+                        modifier = itemModifier,
+                    )
+
+                    // 外部链接 (点击弹分享下拉)
+                    TvPlayerChromeItem.SHARE -> TvPlayerShareButton(overlay, page.shareData, itemModifier)
+
+                    TvPlayerChromeItem.CACHE -> TvBottomRowIcon(
+                        icon = Icons.Rounded.Download,
+                        contentDescription = stringResource(Lang.subject_episode_cache),
+                        onClick = { navigator.navigateSubjectCaches(vm.subjectId) },
+                        modifier = itemModifier,
+                    )
+
+                    // 胶囊行的条目走不到这里 (上面按 row 分流过)
+                    TvPlayerChromeItem.PILL_RECOMMENDATIONS,
+                    TvPlayerChromeItem.PILL_STAFF,
+                    TvPlayerChromeItem.PILL_CHARACTERS,
+                    TvPlayerChromeItem.PILL_COMMENTS,
+                    TvPlayerChromeItem.PILL_DANMAKU,
+                        -> Unit
+                }
+            }
         }
     }
 }
 
 /** 图标行分组隔栏: 竖细线, 高度与图标视觉对齐 (含底部标签槽位占位, 与按钮列同构). */
 @Composable
-private fun TvBottomRowDivider(modifier: Modifier = Modifier) {
+internal fun TvBottomRowDivider(modifier: Modifier = Modifier) {
     TvBottomRowLabeled(label = null, modifier.padding(horizontal = 6.dp)) {
         Box(
             Modifier.height(TV_ICON_BUTTON_SIZE).width(1.dp),
@@ -1308,10 +1481,10 @@ private fun TvBottomRowDivider(modifier: Modifier = Modifier) {
 }
 
 /** 图标行分组隔栏的可见高度. */
-private val TV_BOTTOM_ROW_DIVIDER_HEIGHT = 16.dp
+internal val TV_BOTTOM_ROW_DIVIDER_HEIGHT = 16.dp
 
 /** 图标行分组隔栏的不透明度. */
-private const val TV_BOTTOM_ROW_DIVIDER_ALPHA = 0.35f
+internal const val TV_BOTTOM_ROW_DIVIDER_ALPHA = 0.35f
 
 /**
  * 收藏按钮: 图标反映当前收藏状态 (实心/空心), 点击弹收藏状态下拉
@@ -1366,7 +1539,7 @@ private val TV_BOTTOM_ROW_LABEL_HEIGHT = 18.dp
  * [label] 传 null 只预留槽位不显示文字 (字幕/倍速等自描述的文字按钮, 仅为行内对齐).
  */
 @Composable
-private fun TvBottomRowLabeled(
+internal fun TvBottomRowLabeled(
     label: String?,
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
@@ -1402,7 +1575,7 @@ private fun TvBottomRowLabeled(
  * (与胶囊/图标按钮同款示焦; TextButton 文字色取 LocalContentColor, 直接换供给即可).
  */
 @Composable
-private fun TvTextButtonInverse(content: @Composable () -> Unit) {
+internal fun TvTextButtonInverse(content: @Composable () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     Box(
         Modifier
@@ -1421,7 +1594,7 @@ private fun TvTextButtonInverse(content: @Composable () -> Unit) {
  * 图标行圆钮容器: 聚焦时白底黑图标 (与胶囊按钮同款反色示焦), 未聚焦透明白图标.
  */
 @Composable
-private fun TvBottomRowIconButton(
+internal fun TvBottomRowIconButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,

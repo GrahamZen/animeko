@@ -229,6 +229,17 @@ data class VideoScaffoldConfig @SerializationOnly constructor(
      * @since 4.11
      */
     val playerVolume: PlayerVolume = PlayerVolume(1f, false),
+    /**
+     * TV: 播放器控制层两行 (胶囊行 / 图标行) 的自定义版式 —— 顺序与显隐. 电视端专有.
+     *
+     * 那两行上摆着十几个功能, 而各人用得上的完全不是同一批: 不看弹幕的人嫌前几颗碍事,
+     * 常换源的人希望它排在第一颗. 默认版式 (见 [TvPlayerChromeItem] 的声明顺序) 只是个合理的起点,
+     * 这里让用户自己排, 而且可以排**几套**换着用 (见 [TvPlayerChromePresets]); 改的地方是
+     * 设置 - 播放器 - 「自定义播放器按钮」那一页 (`TvPlayerChromeLayoutPage`).
+     *
+     * @since 6.0.7
+     */
+    val tvPlayerChrome: TvPlayerChromePresets = TvPlayerChromePresets.Default,
     // WARNING: if you add new property here, review Companion properties.
     @Suppress("PropertyName") @Transient val _placeholder: Int = 0,
 ) {

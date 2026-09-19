@@ -95,6 +95,9 @@ import me.him188.ani.app.ui.subject.details.layout.tvHeroZoomHoldsPlaceholder
 import me.him188.ani.app.ui.subject.details.state.SubjectDetailsState
 import me.him188.ani.app.ui.subject.episode.EpisodeScreenVariant
 import me.him188.ani.app.ui.subject.episode.LocalEpisodeScreenVariant
+import me.him188.ani.app.ui.foundation.tv.LocalTvPlayerChromeEditorVariant
+import me.him188.ani.app.ui.foundation.tv.TvPlayerChromeEditorVariant
+import me.him188.ani.app.ui.subject.episode.tv.TvPlayerChromeLayoutPage
 import me.him188.ani.app.ui.subject.episode.tv.TvEpisodeScreenContent
 import me.him188.ani.app.ui.user.SelfInfoUiState
 import me.him188.ani.app.ui.remote.RegisterTvRemoteBackgroundPlayer
@@ -205,6 +208,10 @@ fun InstallTvPageVariants(aniNavigator: AniNavigator, content: @Composable () ->
         },
         LocalCollectionPageVariant provides CollectionPageVariant { state, modifier ->
             ProvideTvScrollActivity { TvCollectionPage(state, modifier) }
+        },
+        // 「自定义播放器按钮」页 (设置 - 播放器里的入口据此决定出不出现)
+        LocalTvPlayerChromeEditorVariant provides TvPlayerChromeEditorVariant { onNavigateBack, modifier ->
+            TvPlayerChromeLayoutPage(onNavigateBack, modifier)
         },
         // 这个变体有两个方法 (页面 + 首屏占位), 不能用 SAM lambda 写法
         LocalSubjectDetailsPageVariant provides TvSubjectDetailsPageVariant,
