@@ -129,6 +129,7 @@ import me.him188.ani.app.ui.foundation.TvPageRefreshHandler
 import me.him188.ani.app.ui.foundation.tv.tvPlayKeyShortPress
 import me.him188.ani.app.ui.foundation.tv.tvHeroContentColor
 import me.him188.ani.app.ui.foundation.tv.tvHeroSecondaryContentColor
+import me.him188.ani.app.ui.foundation.tv.tvAnimatedScroll
 import me.him188.ani.app.ui.foundation.widgets.LocalToaster
 import me.him188.ani.app.ui.foundation.widgets.showLoadError
 import me.him188.ani.app.ui.lang.Lang
@@ -816,9 +817,10 @@ fun TvScheduleGridPage(
                 // 会把上一行切成露出一点点的样子; 这里每次都落在整行边界上.
                 // [topRow] 是网格顶部当前对齐到的行号, 每次都显式滚到它 —— 落点解析为了让目标卡
                 // 组合出来会自己 scrollToItem, 这一步顺带把那种临时滚动纠回整行.
-                LaunchedEffect(gridState, gridColumns, visibleRows, cards.size) {
+                val animatedScroll = tvAnimatedScroll()
+                LaunchedEffect(gridState, gridColumns, visibleRows, cards.size, animatedScroll) {
                     // collectLatest + TvScrollAnimator: 连发按键取消进行中的滚动并继承速度
-                    val scrollAnimator = TvScrollAnimator()
+                    val scrollAnimator = TvScrollAnimator(animated = animatedScroll)
                     snapshotFlow { lastFocusedCard }.collectLatest { focused ->
                         if (focused < 0) return@collectLatest
                         val row = focused / gridColumns

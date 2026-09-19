@@ -59,6 +59,7 @@ import me.him188.ani.app.tools.TimeFormatter
 import me.him188.ani.app.ui.foundation.AbstractViewModel
 import me.him188.ani.app.ui.foundation.AniUiBehavior
 import me.him188.ani.app.ui.foundation.LocalAniUiBehavior
+import me.him188.ani.app.ui.foundation.LocalImageCrossfade
 import me.him188.ani.app.ui.foundation.LocalPlatform
 import me.him188.ani.app.ui.foundation.LocalPlatformFontFamily
 import me.him188.ani.app.ui.foundation.LocalEpisodeProgressSettings
@@ -196,6 +197,7 @@ fun AniApp(
         LocalTimeFormatter provides remember { TimeFormatter() },
         LocalThemeSettings provides appState.themeSettings,
         LocalEpisodeProgressSettings provides appState.episodeProgressSettings,
+        LocalImageCrossfade provides appState.themeSettings.visualEffects.transitions,
         LocalPlatformFontFamily provides rememberPlatformFontFamily(appState.platformFont),
         LocalActiveInputSource provides remember { ActiveInputSourceState() },
         LocalAniUiBehavior provides uiBehavior,

@@ -34,6 +34,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.basicMarquee
+import me.him188.ani.app.ui.foundation.tv.TvHeroZoomHandoff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -74,9 +76,13 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Star
+import androidx.compose.ui.text.style.TextOverflow
 import kotlin.math.pow
 import kotlin.time.TimeSource
 import kotlinx.coroutines.Dispatchers
@@ -320,15 +326,6 @@ fun TvHeroButton(
         }
     }
 }
-
-/**
- * hero 区常驻文本跑马灯的迭代次数: 视觉效果完整档以外 (见 TvVisualEffectsLevel.ambient) 滚固定次数后
- * 停在行首 —— 无限迭代让页面永远无法进入"无脏区"静止态 (溢出的文字行每帧重绘 + 整帧重合成,
- * 也阻止合成器跳帧省电), 是低端设备的常驻底噪. 换条目时文本重建, 会重新滚够次数, 信息不丢失.
- * 聚焦才出现的跑马灯 (单实例、用户明确在看) 不受此限.
- */
-@Composable
-fun tvHeroMarqueeIterations(): Int = tvAmbientMarqueeIterations()
 
 /**
  * hero 展示目标的**换挡合并** (两档相同; 2026-09-10 之前只在低特效档): hero 背景图按
@@ -800,18 +797,14 @@ fun TvFullScreenBackdropLayer(
     val dim = background.copy(alpha = TV_FULLSCREEN_BACKDROP_DIM_ALPHA)
     // 这里仍用库的 Crossfade (两张整屏图各开一块离屏): 2026-09-13 Shield 4K A/B 换成 TvModulatedCrossfade 测不出差别
     // (时间表连按 GPU 合计 1673 vs 1682ms), 就没换
-    Crossfade(
-        backdropUrl(),
-        modifier,
-        animationSpec = tween(TV_BACKDROP_CROSSFADE_MILLIS),
-    ) { url ->
+    // 不做底缘渐隐: 本页整屏都是内容, 渐隐带那一段会被擦成纯背景色 —— 在实机上就是
+    // 屏幕最下面横着一条黑边. 它原本是为了托住右下角那行遥控提示, 提示已经去掉了.
+    // 图铺满整屏, 均匀压暗一层就够 (与 16:9 那版不同: 那版图只占屏顶七成, 渐隐带落在
+    // 屏幕中段, 是图与背景之间的过渡, 不是一条贴着屏底的边)
+    val body: @Composable (String?) -> Unit = { url ->
         if (url != null) {
-            // 不做底缘渐隐: 本页整屏都是内容, 渐隐带那一段会被擦成纯背景色 —— 在实机上就是
-            // 屏幕最下面横着一条黑边. 它原本是为了托住右下角那行遥控提示, 提示已经去掉了.
-            // 图铺满整屏, 均匀压暗一层就够 (与 16:9 那版不同: 那版图只占屏顶七成, 渐隐带落在
-            // 屏幕中段, 是图与背景之间的过渡, 不是一条贴着屏底的边)
             Box(Modifier.fillMaxSize()) {
-                // 条目 id 在这张图开始加载那一刻取 (理由同 TvPageBackdropLayer: 交叉淡入期间新旧两张共存)
+                // 条目 id 在这张图开始加载那一刻取 (理由同 TvPageBackdropLayer: 换图期间新旧两张共存)
                 TvBackdropImage(
                     url, remember(url) { themeSeedSubjectId() },
                     zoomDim = dim, zoomTreatment = { TvBackdropTreatment(dim = dim) },
@@ -823,6 +816,11 @@ fun TvFullScreenBackdropLayer(
             }
         }
     }
+    Crossfade(
+        backdropUrl(),
+        modifier,
+        animationSpec = tween(TV_BACKDROP_CROSSFADE_MILLIS),
+    ) { url -> body(url) }
 }
 
 /**
@@ -883,8 +881,13 @@ private val fadeInProfile: FloatArray by lazy {
     }
 }
 
-private fun stopsOf(profile: FloatArray, color: Color, maxAlpha: Float): Array<Pair<Float, Color>> =
-    Array(profile.size) { i -> (i / (profile.size - 1).toFloat()) to color.copy(alpha = maxAlpha * profile[i]) }
+/**
+ * 停点**位置是均匀的** (profile 本身就按 `i / (n-1)` 采样), 所以交给 `Brush` 的均匀分布重载,
+ * 不要走 `vararg Pair<Float, Color>` 那条 —— 后者每帧多装箱一组 Pair 与 Float, 而放大转场里
+ * 这三条渐变每帧都要重建 (treatment 每帧插值, 见 [tvBackdropTreatmentPainter] 的说明, 缓存不了).
+ */
+private fun colorsOf(profile: FloatArray, color: Color, maxAlpha: Float): List<Color> =
+    List(profile.size) { i -> color.copy(alpha = maxAlpha * profile[i]) }
 
 /**
  * 按尺寸与声明预备画笔, 见 [TvBackdropTreatmentPainter].
@@ -896,13 +899,13 @@ fun tvBackdropTreatmentPainter(size: Size, tr: TvBackdropTreatment): TvBackdropT
     val h = size.height
     val w = size.width
     val top = tr.top?.takeIf { it.maxAlpha > 0f }?.let {
-        Brush.verticalGradient(*stopsOf(fadeOutProfile, it.color, it.maxAlpha), startY = h * it.start, endY = h * it.end)
+        Brush.verticalGradient(colorsOf(fadeOutProfile, it.color, it.maxAlpha), startY = h * it.start, endY = h * it.end)
     }
     val left = tr.left?.takeIf { it.maxAlpha > 0f }?.let {
-        Brush.horizontalGradient(*stopsOf(fadeOutProfile, it.color, it.maxAlpha), startX = w * it.start, endX = w * it.end)
+        Brush.horizontalGradient(colorsOf(fadeOutProfile, it.color, it.maxAlpha), startX = w * it.start, endX = w * it.end)
     }
     val bottom = tr.bottom?.takeIf { it.maxAlpha > 0f }?.let {
-        Brush.verticalGradient(*stopsOf(fadeInProfile, it.color, it.maxAlpha), startY = h * it.start, endY = h * it.end)
+        Brush.verticalGradient(colorsOf(fadeInProfile, it.color, it.maxAlpha), startY = h * it.start, endY = h * it.end)
     }
     return TvBackdropTreatmentPainter(
         size, tr.dim,
@@ -1032,6 +1035,97 @@ const val TV_BACKDROP_LEFT_FADE_END = 0.3f
 const val TV_BACKDROP_LEFT_FADE_END_HERO = 0.46f
 
 // ---- hero 文字 ----
+
+/**
+ * hero 大标题接上放大转场: 进详情页时标题从这里平移过去, 返回缩回时反向平移回来.
+ *
+ * 三条接线**必须一起用、且顺序固定**, 所以收成一个 modifier —— 探索 / 追番 / 搜索三页原先各抄一遍,
+ * 结果是同一个修复只打在一页上: 缩回停走马灯 ([TvHeroZoomHandoff.titleSettling]) 2026-09-16 只加给了
+ * 探索页. 新页面接这套转场现在只要这一行.
+ *
+ * 1. [TvHeroZoomHandoff.publishTitle] 登记自己的框, 详情页据此算平移起点;
+ * 2. 平移**必须挂在登记之内** (modifier 链上排在它后面): 图层变换会进 `positionInRoot`,
+ *    挂外面登记的框就会被自己的平移改写, 自激;
+ * 3. [marquee] 为 true 时缩回期间停掉走马灯 —— 停掉即回到行首, 否则标题正滚到中间被拉去平移,
+ *    落位那一刻走马灯重新开始又跳回行首, 看着闪一下.
+ *
+ * @param marquee 本页标题是否开跑马灯 (目前只有探索页开).
+ */
+@Composable
+fun Modifier.tvHeroTitleHandoff(
+    subjectId: Int,
+    title: String,
+    marquee: Boolean = false,
+    /** 与本页标题 `Text` 的取值一致: 转场标题要照抄, 否则折行位置不同, 交接那一帧会跳. */
+    maxLines: Int = 2,
+    clipOverflow: Boolean = false,
+): Modifier {
+    // 无条件读: 条件调用 @Composable 不合法, 而它本身只是读快照状态
+    val settling = TvHeroZoomHandoff.titleSettling(subjectId)
+    // 登记方身份: 离开组合时只撤自己那份 —— 两个页面同时显示同一条目时 (换 tab 的那几帧) 按 subjectId
+    // 分不出是谁登记的. 背景侧 (TvPortraitCard 的 publish/retract) 早就是这么做的
+    val owner = remember { Any() }
+    DisposableEffect(owner) { onDispose { TvHeroZoomHandoff.retractTitle(owner) } }
+    return this
+        .onGloballyPositioned {
+            TvHeroZoomHandoff.publishTitle(owner, subjectId, it.boundsInRoot(), title, maxLines, clipOverflow)
+        }
+        .graphicsLayer {
+            // 缩回期间绘制权交给根级转场层 (它在导航之外, 画得过缩回图; 本页标题无论多大 zIndex 都越不过去).
+            // 两份读**同一份**快照状态, 同一帧一个隐一个显 —— 不靠对时, 也就没有重影
+            if (TvHeroZoomHandoff.titleOwnedByOverlay(subjectId)) {
+                alpha = 0f
+            } else {
+                val o = TvHeroZoomHandoff.shrinkTitleOffset(subjectId)
+                translationX = o?.x ?: 0f
+                translationY = o?.y ?: 0f
+            }
+        }
+        // 流畅档整条不挂 (见 tvAmbientMarquee): basicMarquee 每次测量都要把整串文字按不换行量一遍
+        .tvAmbientMarquee(enabled = marquee && !settling)
+}
+
+/**
+ * hero 信息行里的评分: 星标 + `8.7/10`. 分数无效 (无评分 / 解析不出) 时整块不渲染 —— 别留个空位.
+ *
+ * 探索 / 追番 / 搜索三页逐字相同, 收在这里。**只收了评分与简介两小块**: 信息行中间那段各页是
+ * 真的不一样 (追番页放开播状态 + 播出日期, 搜索页放标签行), 硬塞进一个组件只会换成一堆参数。
+ */
+@Composable
+fun TvHeroRatingBadge(score: String) {
+    if ((score.toFloatOrNull() ?: 0f) <= 0f) return
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Icon(
+            Icons.Rounded.Star,
+            contentDescription = null,
+            Modifier.size(18.dp),
+            tint = MaterialTheme.colorScheme.primary,
+        )
+        Text(
+            "$score/10",
+            color = MaterialTheme.colorScheme.primary,
+            style = MaterialTheme.typography.titleMedium,
+        )
+    }
+}
+
+/**
+ * hero 的简介正文 (信息行下方那段): 三页同一套字号/字色/截断, 宽度由调用方的 [modifier] 给
+ * (各页的入场行号与 weight 不同).
+ */
+@Composable
+fun TvHeroSummaryText(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text,
+        modifier,
+        color = tvHeroContentColor(),
+        style = MaterialTheme.typography.bodyMedium,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
 
 /** TV hero 标题占屏宽比例 (右侧留给 backdrop 清晰区). */
 const val TV_HERO_TITLE_WIDTH_FRACTION = 0.5f

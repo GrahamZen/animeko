@@ -12,13 +12,16 @@ package me.him188.ani.app.ui.subject.collection
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.VisibilityThreshold
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.foundation.background
-import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
@@ -43,7 +46,6 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -62,13 +64,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -133,6 +133,7 @@ import me.him188.ani.app.ui.foundation.focus.tvFocusMoveRateLimit
 import me.him188.ani.app.ui.foundation.tv.ReportTvScrollActivity
 import me.him188.ani.app.ui.foundation.tv.rememberTvScrollHiddenProvider
 import me.him188.ani.app.ui.foundation.tv.rememberTvSettledHeroProvider
+import me.him188.ani.app.ui.foundation.tv.tvContentSwapAnimated
 import me.him188.ani.app.ui.foundation.tv.tvScrollHiddenTextTransform
 import me.him188.ani.app.ui.foundation.tv.tvHeroLineEnter
 import me.him188.ani.app.ui.foundation.tv.tvHeroTextEnterBaseDelay
@@ -152,7 +153,6 @@ import me.him188.ani.app.ui.foundation.tv.tvGridNeighborsOf
 import me.him188.ani.app.ui.foundation.tv.prefetchTvSummaryFallback
 import me.him188.ani.app.ui.foundation.tv.tvHeroBackdropUrl
 import me.him188.ani.app.ui.foundation.tv.TV_HERO_TITLE_WIDTH_FRACTION
-import me.him188.ani.app.ui.foundation.tv.TvHeroZoomHandoff
 import me.him188.ani.app.ui.foundation.navigation.LocalPageIsForeground
 import me.him188.ani.app.ui.foundation.tv.TV_PAGE_BOTTOM_SCRIM_HEIGHT
 import me.him188.ani.app.ui.foundation.tv.TV_PAGE_BOTTOM_SCRIM_MAX_ALPHA
@@ -164,7 +164,6 @@ import me.him188.ani.app.ui.foundation.tv.TV_PAGE_HINT_ICON_SIZE
 import me.him188.ani.app.ui.foundation.tv.TV_PORTRAIT_CARD_COVER_RATIO
 import me.him188.ani.app.ui.foundation.tv.TV_HERO_SUMMARY_WIDTH_FRACTION
 import me.him188.ani.app.ui.foundation.tv.tvHeroContentColor
-import me.him188.ani.app.ui.foundation.tv.tvHeroMarqueeIterations
 import me.him188.ani.app.ui.foundation.focus.TvFocusTransitAnchor
 import me.him188.ani.app.ui.foundation.focus.rememberTvFocusScope
 import me.him188.ani.app.ui.foundation.focus.rememberTvGridFocus
@@ -175,6 +174,13 @@ import me.him188.ani.app.ui.foundation.focus.tvFocusNavSignal
 import me.him188.ani.app.ui.foundation.focus.tvGridFocusItem
 import me.him188.ani.app.ui.foundation.focus.tvGridKeyNavigation
 import me.him188.ani.app.ui.foundation.tv.tvHeroSecondaryContentColor
+import me.him188.ani.app.ui.foundation.tv.tvHeroTitleHandoff
+import me.him188.ani.app.ui.foundation.tv.TvHeroRatingBadge
+import me.him188.ani.app.ui.foundation.tv.TvHeroSummaryText
+import me.him188.ani.app.ui.foundation.tv.tvAnimatedScroll
+import me.him188.ani.app.ui.foundation.tv.tvAmbientMarquee
+import me.him188.ani.app.ui.foundation.tv.tvSwapSpec
+import me.him188.ani.app.ui.foundation.tv.TV_INSTANT_CONTENT_SWAP
 import me.him188.ani.app.ui.foundation.widgets.LocalToaster
 import me.him188.ani.app.ui.foundation.widgets.showLoadError
 import me.him188.ani.utils.logging.info
@@ -856,6 +862,7 @@ fun TvCollectionPage(
                 // 掉帧 —— 实测这段 560ms 双网格滑动是换 tab 那记 jank 的主要来源). 过渡期间
                 // 新旧两个网格同时组合, 各自读自己 tab 的分页数据 (有缓存), 滚动位置按 tab 保留.
                 val fullTransitions = LocalThemeSettings.current.visualEffects.transitions
+                val swapAnimated = tvContentSwapAnimated()
                 AnimatedContent(
                     targetState = state.selectedTypeIndex,
                     modifier = Modifier.fillMaxSize().clipToBounds(),
@@ -868,13 +875,23 @@ fun TvCollectionPage(
                             } togetherWith slideOutHorizontally(tween(TV_COLLECTION_TAB_SLIDE_MILLIS)) { width ->
                                 if (forward) -width else width
                             }
-                        } else {
+                        } else if (swapAnimated) {
                             fadeIn(tween(TV_COLLECTION_TAB_FADE_MILLIS)) togetherWith
                                     fadeOut(tween(TV_COLLECTION_TAB_FADE_MILLIS))
+                        } else {
+                            // 流畅档直接换: 渐隐期间**两棵完整网格同时组合**各读各的分页数据, 500ms 是实打实的双份.
+                            // 退场用 snap 淡出而不是 ExitTransition.None —— 后者会留一帧新旧并存, 见 TV_INSTANT_CONTENT_SWAP
+                            TV_INSTANT_CONTENT_SWAP
                         }
                     },
                     label = "collectionTabGrid",
                 ) { tabIndex ->
+                    // 流畅档: 退场那一份当帧就不画 —— AnimatedContent 要下一帧才移除它, 而这里没有
+                    // 淡出把它变透明, 于是有一帧两个 tab 的网格叠着 (见 TV_INSTANT_CONTENT_SWAP).
+                    // 换 tab 尤其明显: 两棵完整网格连 hero 文字一起重影
+                    if (!fullTransitions && !swapAnimated && tabIndex != state.selectedTypeIndex) {
+                        return@AnimatedContent
+                    }
                     val tabItems = remember(tabIndex) {
                         state.getCollectionLazyPagingItems(tabIndex)
                     }.collectWithLifecycle()
@@ -970,10 +987,11 @@ fun TvCollectionPage(
                         }
                     }
                     if (isActiveTab) {
-                        LaunchedEffect(gridState) {
+                        val animatedScroll = tvAnimatedScroll()
+                        LaunchedEffect(gridState, animatedScroll) {
                             // collectLatest + TvScrollAnimator: 连发按键取消进行中的滚动并继承
                             // 速度, 列表连续流动 (原 collect 要等上一格动画跑完才响应下一个目标)
-                            val scrollAnimator = TvScrollAnimator()
+                            val scrollAnimator = TvScrollAnimator(animated = animatedScroll)
                             snapshotFlow { lastFocusedCard }.collectLatest { focused ->
                                 if (focused >= 0) {
                                     runCatching {
@@ -1213,18 +1231,29 @@ private fun TvCollectionHeroBlock(
     val slidePx = tvScrollHiddenTextSlidePx()
     // 分行错落进场 (完整档): 容器不整块进场, 各行自己带延迟进, 见 tvHeroLineEnter
     val stagger = tvHeroTextStaggerEnabled()
+    // 流畅档直接换字, 不淡入淡出 (见 tvContentSwapAnimated)
+    val swapAnimated = tvContentSwapAnimated()
     // 各行进场的基准起点在 transitionSpec 里算好 (那里才知道 initialState), 内容首次组合时读走 (理由见探索页)
     val enterPlan = remember { IntArray(1) }
+    val heroTextTarget = heroInfoProvider()
     AnimatedContent(
-        targetState = heroInfoProvider(),
+        targetState = heroTextTarget,
         modifier = modifier,
         transitionSpec = {
             enterPlan[0] = tvHeroTextEnterBaseDelay(initialState != null)
-            tvScrollHiddenTextTransform(slidePx, sequential = initialState != null, childrenEnter = stagger, hiding = targetState == null)
+            tvScrollHiddenTextTransform(
+                slidePx, sequential = initialState != null, childrenEnter = stagger,
+                hiding = targetState == null, animated = swapAnimated,
+            )
         },
         contentKey = { it?.subjectId },
         label = "collectionHeroInfo",
     ) { hero ->
+        // **流畅档: 退场那一份当帧就不画**. `AnimatedContent` 要等 transition 收敛才移除退场项,
+        // 那是下一帧, 而流畅档没有淡出把它变透明 (snap 也不行 —— Transition 在 targetState 变化
+        // 的那次组合里返回的还是旧值), 于是整整一帧新旧两份都画着 —— 就是"换 hero 时文字重影"
+        // (2026-09-19 逐帧取证). 卡片态看不到是因为那条路是 A → null → B, 两份从不同时在.
+        if (!swapAnimated && hero?.subjectId != heroTextTarget?.subjectId) return@AnimatedContent
         val lineBase = remember { enterPlan[0] }
         val scope = this
         Column(
@@ -1274,14 +1303,8 @@ private fun ColumnScope.TvCollectionHeroInfo(
     Text(
         info.subjectInfo.displayName,
         lineModifier(0).fillMaxWidth(TV_HERO_TITLE_WIDTH_FRACTION)
-            // 登记标题位置, 给详情页的放大转场 (标题从这里平移过去)
-            .onGloballyPositioned { TvHeroZoomHandoff.publishTitle(info.subjectInfo.subjectId, it.boundsInRoot(), info.subjectInfo.displayName) }
-            // 返回缩回时反向平移回来 (见 TvHeroZoomHandoff.shrinkTitleOffset)
-            .graphicsLayer {
-                val o = TvHeroZoomHandoff.shrinkTitleOffset(info.subjectInfo.subjectId)
-                translationX = o?.x ?: 0f
-                translationY = o?.y ?: 0f
-            },
+            // 放大转场的标题接线, 见该 modifier (本页标题不跑马灯)
+            .tvHeroTitleHandoff(info.subjectInfo.subjectId, info.subjectInfo.displayName),
         color = tvHeroContentColor(),
         style = MaterialTheme.typography.headlineLarge,
         // 超长换行, 至多两行 (与探索页/搜索页统一); 简介 weight 自动让出空间
@@ -1294,24 +1317,7 @@ private fun ColumnScope.TvCollectionHeroInfo(
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         val score = info.subjectInfo.ratingInfo.score
-        if ((score.toFloatOrNull() ?: 0f) > 0f) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Icon(
-                    Icons.Rounded.Star,
-                    contentDescription = null,
-                    Modifier.size(18.dp),
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-                Text(
-                    "$score/10",
-                    color = MaterialTheme.colorScheme.primary,
-                    style = MaterialTheme.typography.titleMedium,
-                )
-            }
-        }
+        TvHeroRatingBadge(score)
         Row(verticalAlignment = Alignment.CenterVertically) {
             AiringLabel(
                 remember(info) {
@@ -1373,7 +1379,7 @@ private fun ColumnScope.TvCollectionHeroInfo(
                 Text(
                     " · $epName",
                     Modifier.weight(1f, fill = false)
-                        .basicMarquee(iterations = tvHeroMarqueeIterations()),
+                        .tvAmbientMarquee(),
                     color = epInfoColor,
                     style = epInfoStyle,
                     maxLines = 1,
@@ -1409,13 +1415,10 @@ private fun ColumnScope.TvCollectionHeroInfo(
         }
     }
     // 简介: 观看途中优先展示下一集的 TMDB 单集简介 (回忆剧情起点), 缺失回退整部简介 + bgm.tv 兜底
-    Text(
+    TvHeroSummaryText(
         nextEpisodeOverview
             ?: info.subjectInfo.summary.trim().ifBlank { summaryFallback.orEmpty() },
         lineModifier(2).weight(1f).fillMaxWidth(TV_HERO_SUMMARY_WIDTH_FRACTION),
-        color = tvHeroContentColor(),
-        style = MaterialTheme.typography.bodyMedium,
-        overflow = TextOverflow.Ellipsis,
     )
 }
 
@@ -1536,8 +1539,10 @@ private fun TvCollectionTabIndicator(
     targetWidth: Dp,
     modifier: Modifier = Modifier,
 ) {
-    val indicatorX by animateDpAsState(targetX, label = "tabIndicatorX")
-    val indicatorWidth by animateDpAsState(targetWidth, label = "tabIndicatorWidth")
+    // 流畅档直接到位 (见 tvContentSwapAnimated): 默认弹簧一跑就是二十来帧, 而它只是一条小横线
+    val spec = tvSwapSpec<Dp>(spring(visibilityThreshold = Dp.VisibilityThreshold))
+    val indicatorX by animateDpAsState(targetX, spec, label = "tabIndicatorX")
+    val indicatorWidth by animateDpAsState(targetWidth, spec, label = "tabIndicatorWidth")
     Box(
         modifier
             .padding(top = 4.dp)

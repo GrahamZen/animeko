@@ -17,6 +17,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
@@ -63,7 +65,6 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -92,16 +93,13 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.layout
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -175,6 +173,7 @@ import me.him188.ani.app.ui.foundation.focus.tvFocusMoveRateLimit
 import me.him188.ani.app.ui.foundation.tv.ReportTvScrollActivity
 import me.him188.ani.app.ui.foundation.tv.rememberTvScrollHiddenProvider
 import me.him188.ani.app.ui.foundation.tv.rememberTvSettledHeroProvider
+import me.him188.ani.app.ui.foundation.tv.tvContentSwapAnimated
 import me.him188.ani.app.ui.foundation.tv.tvScrollHiddenTextTransform
 import me.him188.ani.app.ui.foundation.tv.tvHeroLineEnter
 import me.him188.ani.app.ui.foundation.tv.tvHeroTextEnterBaseDelay
@@ -192,7 +191,6 @@ import me.him188.ani.app.ui.foundation.tv.tvGridNeighborsOf
 import me.him188.ani.app.ui.foundation.tv.prefetchTvSummaryFallback
 import me.him188.ani.app.ui.foundation.tv.tvHeroBackdropUrl
 import me.him188.ani.app.ui.foundation.tv.TV_HERO_TITLE_WIDTH_FRACTION
-import me.him188.ani.app.ui.foundation.tv.TvHeroZoomHandoff
 import me.him188.ani.app.ui.foundation.tv.TV_PAGE_BOTTOM_SCRIM_HEIGHT
 import me.him188.ani.app.ui.foundation.tv.TV_PAGE_BOTTOM_SCRIM_MAX_ALPHA
 import me.him188.ani.app.ui.foundation.tv.TV_PAGE_CARD_SPACING
@@ -212,6 +210,11 @@ import me.him188.ani.app.ui.foundation.focus.tvGridFocusItem
 import me.him188.ani.app.ui.foundation.focus.tvGridKeyNavigation
 import me.him188.ani.app.ui.foundation.focus.tvWindowInitialFocus
 import me.him188.ani.app.ui.foundation.tv.tvHeroSecondaryContentColor
+import me.him188.ani.app.ui.foundation.tv.tvHeroTitleHandoff
+import me.him188.ani.app.ui.foundation.tv.TvHeroRatingBadge
+import me.him188.ani.app.ui.foundation.tv.TvHeroSummaryText
+import me.him188.ani.app.ui.foundation.tv.tvAnimatedScroll
+import me.him188.ani.app.ui.foundation.tv.TV_INSTANT_CONTENT_SWAP
 import me.him188.ani.app.ui.foundation.widgets.LocalToaster
 import me.him188.ani.app.ui.foundation.widgets.showLoadError
 import me.him188.ani.app.ui.lang.Lang
@@ -478,13 +481,30 @@ fun TvSearchPage(
             .onFocusChanged { pageHasFocus = it.hasFocus }
             .focusProperties {
                 onEnter = {
-                    // **落点解析在途就放行**: 它送焦到目标卡的那个 requestFocus 同样要"进入"本组,
-                    // 在这里改道到 contentFocus 就把它拆了 —— 而 contentFocus 落到的是内容区第一个
-                    // 可聚焦节点, 也就是顶部那块搜索词 (聚焦即填充主题色, 很扎眼). 于是从详情页返回
-                    // 时先看到搜索词高亮一下, 39ms 后焦点才被落点拉到卡片上
-                    // (用户 2026-09-18; 真机日志实测: 搜索词块先获焦, 两帧后焦点才被落点拉到卡片上).
-                    // 放行之后原请求自己会落到目标卡 —— 同 TvAnchoredCardRow 里那条"解析进行中一律放行".
-                    if (!gridSendInFlight.value) contentFocus.requestFocus()
+                    // 进本页焦点组的落点, 三档优先级 —— **与侧边栏出组那条 (onExitFocus) 保持同一套**,
+                    // 页面根原先只有最后一档, 那是"从详情页返回先看到搜索词高亮一下"的来源:
+                    //
+                    // contentFocus 指的是内容区那个**不可聚焦**的 focusGroup, 对它 requestFocus 就是默认
+                    // 进组 —— 落到第一个可聚焦节点, 也就是顶部那块搜索词 (它"聚焦即填充主题色", 很扎眼),
+                    // 然后才被落点拉到卡片上 (真机日志: 两者相隔 126ms).
+                    when {
+                        // ① 落点解析在途: 放行. 它送焦到目标卡的那个 requestFocus 同样要"进入"本组,
+                        // 在这里改道就把它拆了 (同 TvAnchoredCardRow 那条"解析进行中一律放行")
+                        gridSendInFlight.value -> {}
+                        // ② 结果态: 直接回上次那张卡. **不依赖上面那个跨层 state 的时序** ——
+                        // railExitRestore 是同步的, 数据在就当场送到位
+                        // ② 结果态: 回上次那张卡. **必须 cancelFocusChange**, 不能放行 ——
+                        // railExitRestore 里的 focusItem 是**异步**的 (悬挂到目标卡附着锚点),
+                        // 放行等于让触发本次 onEnter 的那个请求继续做默认进组, 当场把焦点给了内容区
+                        // 第一个可聚焦节点 (顶部搜索词块, 聚焦即填充主题色), 89ms 后异步落点才把焦点
+                        // 拉到卡片上 —— 那 89ms 就是用户看到的"闪" (2026-09-18 真机日志钉死).
+                        //
+                        // 与档 ① 的区别: 那时进组请求本身就是 focusItem 发的, 放行才能让它落地;
+                        // 这里请求刚发出、还没开始进组, 放行放的是别人的请求.
+                        railExitRestore.value?.invoke() == RailExitRestoreResult.Done -> cancelFocusChange()
+                        // ③ 其余 (输入态 / 没有可回的卡): 才交给默认进组
+                        else -> contentFocus.requestFocus()
+                    }
                 }
             }
             .focusGroup(),
@@ -517,14 +537,24 @@ fun TvSearchPage(
                 }
                 .focusGroup(),
         ) {
+            val modeSwapAnimated = tvContentSwapAnimated()
             AnimatedContent(
                 targetState = showResults,
                 transitionSpec = {
-                    fadeIn(tween(TV_SEARCH_MODE_FADE_MILLIS)) togetherWith
-                            fadeOut(tween(TV_SEARCH_MODE_FADE_MILLIS))
+                    // 流畅档直接换 (见 tvContentSwapAnimated): 这 500ms 里输入态与结果态两棵树同时活着
+                    if (modeSwapAnimated) {
+                        fadeIn(tween(TV_SEARCH_MODE_FADE_MILLIS)) togetherWith
+                                fadeOut(tween(TV_SEARCH_MODE_FADE_MILLIS))
+                    } else {
+                        // 退场用 snap 淡出而不是 ExitTransition.None, 见 TV_INSTANT_CONTENT_SWAP
+                        TV_INSTANT_CONTENT_SWAP
+                    }
                 },
                 label = "searchMode",
             ) { results ->
+                // 流畅档: 退场那一面当帧就不画 (见 TV_INSTANT_CONTENT_SWAP —— AnimatedContent 要下一帧
+                // 才移除它, 没有淡出的话两面会叠一帧)
+                if (!modeSwapAnimated && results != showResults) return@AnimatedContent
                 // 切走的那一面淡出 500ms 期间焦点常还在它上面 (结果面板要等首页数据才送焦): 吞掉按键, 免得在看不见的候选 /
                 // 历史上按确认又提交一次、在搜索框上按确认弹出输入法 (2026-09-14 审查)
                 Box(Modifier.tvSwallowKeysWhenLeaving { results != showResults }, propagateMinConstraints = true) {
@@ -1683,10 +1713,11 @@ private fun TvSearchResultsPane(
                         ): Float = 0f
                     }
                 }
-                LaunchedEffect(gridState) {
+                val animatedScroll = tvAnimatedScroll()
+                LaunchedEffect(gridState, animatedScroll) {
                     // collectLatest + TvScrollAnimator: 连发按键取消进行中的滚动并继承速度,
                     // 列表连续流动 (原 collect 要等上一格动画跑完才响应下一个目标)
-                    val scrollAnimator = TvScrollAnimator()
+                    val scrollAnimator = TvScrollAnimator(animated = animatedScroll)
                     snapshotFlow { lastFocusedCard.intValue }.collectLatest { focused ->
                         if (focused >= 0) {
                             runCatching {
@@ -1842,18 +1873,29 @@ private fun TvSearchHeroInfoBlock(
     val slidePx = tvScrollHiddenTextSlidePx()
     // 分行错落进场 (完整档): 容器不整块进场, 各行自己带延迟进, 见 tvHeroLineEnter
     val stagger = tvHeroTextStaggerEnabled()
+    // 流畅档直接换字, 不淡入淡出 (见 tvContentSwapAnimated)
+    val swapAnimated = tvContentSwapAnimated()
     // 各行进场的基准起点在 transitionSpec 里算好 (那里才知道 initialState), 内容首次组合时读走 (理由见探索页)
     val enterPlan = remember { IntArray(1) }
+    val heroTextTarget = heroItemProvider()
     AnimatedContent(
-        targetState = heroItemProvider(),
+        targetState = heroTextTarget,
         modifier = modifier,
         transitionSpec = {
             enterPlan[0] = tvHeroTextEnterBaseDelay(initialState != null)
-            tvScrollHiddenTextTransform(slidePx, sequential = initialState != null, childrenEnter = stagger, hiding = targetState == null)
+            tvScrollHiddenTextTransform(
+                slidePx, sequential = initialState != null, childrenEnter = stagger,
+                hiding = targetState == null, animated = swapAnimated,
+            )
         },
         contentKey = { it?.subjectId },
         label = "searchHeroInfo",
     ) { hero ->
+        // **流畅档: 退场那一份当帧就不画**. `AnimatedContent` 要等 transition 收敛才移除退场项,
+        // 那是下一帧, 而流畅档没有淡出把它变透明 (snap 也不行 —— Transition 在 targetState 变化
+        // 的那次组合里返回的还是旧值), 于是整整一帧新旧两份都画着 —— 就是"换 hero 时文字重影"
+        // (2026-09-19 逐帧取证). 卡片态看不到是因为那条路是 A → null → B, 两份从不同时在.
+        if (!swapAnimated && hero?.subjectId != heroTextTarget?.subjectId) return@AnimatedContent
         val lineBase = remember { enterPlan[0] }
         fun Modifier.line(index: Int) = tvHeroLineEnter(this@AnimatedContent, stagger, lineBase, index, slidePx)
         Column(
@@ -1864,14 +1906,8 @@ private fun TvSearchHeroInfoBlock(
                 Text(
                     hero.title,
                     Modifier.line(0).fillMaxWidth(TV_HERO_TITLE_WIDTH_FRACTION)
-                        // 登记标题位置, 给详情页的放大转场 (标题从这里平移过去)
-                        .onGloballyPositioned { TvHeroZoomHandoff.publishTitle(hero.subjectId, it.boundsInRoot(), hero.title) }
-                        // 返回缩回时反向平移回来 (见 TvHeroZoomHandoff.shrinkTitleOffset)
-                        .graphicsLayer {
-                            val o = TvHeroZoomHandoff.shrinkTitleOffset(hero.subjectId)
-                            translationX = o?.x ?: 0f
-                            translationY = o?.y ?: 0f
-                        },
+                        // 放大转场的标题接线, 见该 modifier (本页标题不跑马灯)
+                        .tvHeroTitleHandoff(hero.subjectId, hero.title),
                     color = tvHeroContentColor(),
                     style = MaterialTheme.typography.headlineLarge,
                     // 超长换行, 至多两行 (与探索页/追番页统一); 简介 weight 自动让出空间
@@ -1884,24 +1920,7 @@ private fun TvSearchHeroInfoBlock(
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     val score = hero.rating.score
-                    if ((score.toFloatOrNull() ?: 0f) > 0f) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            Icon(
-                                Icons.Rounded.Star,
-                                contentDescription = null,
-                                Modifier.size(18.dp),
-                                tint = MaterialTheme.colorScheme.primary,
-                            )
-                            Text(
-                                "$score/10",
-                                color = MaterialTheme.colorScheme.primary,
-                                style = MaterialTheme.typography.titleMedium,
-                            )
-                        }
-                    }
+                    TvHeroRatingBadge(score)
                     // 元信息行 (开播季度 · 话数 · 类型标签, 见 SubjectPreviewItemInfo.compute)
                     Text(
                         hero.tags,
@@ -1917,12 +1936,9 @@ private fun TvSearchHeroInfoBlock(
                 val summary by remember(hero.subjectId) {
                     derivedStateOf { summaryCache[hero.subjectId].orEmpty() }
                 }
-                Text(
+                TvHeroSummaryText(
                     summary,
                     Modifier.line(2).weight(1f).fillMaxWidth(TV_HERO_SUMMARY_WIDTH_FRACTION),
-                    color = tvHeroContentColor(),
-                    style = MaterialTheme.typography.bodyMedium,
-                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }

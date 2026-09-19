@@ -161,12 +161,21 @@ object TvImageNetworkSpeed {
 /**
  * 聚焦后等这么久还没有任何横版图结论, 就先拿竖版封面当背景, 见 `tvHeroBackdropUrl`.
  *
- * 快档 6s / 慢档 2.5s, 理由见文件头的对照表.
+ * 快档 6s / 慢档 2.5s, 理由见文件头的对照表; **未知期 [UNPROBED_COVER_FALLBACK_MILLIS]**.
+ *
+ * 未知期单独一档, 与 [tvHeroImagePrefetchConcurrency] 同一个道理 (网络越差, 第一条样本回来得
+ * 越晚, 而档位正是靠它定的), 但这里的后果更直接: 冷启动首个条目卡的不是图片下载而是**拿 URL**
+ * —— 索尼实测全新数据下 TMDB 解析 4.1s (映射热了只要 0.8s, 图片本身 236ms), 而"无样本默认快档"
+ * 给的兜底是 6s, **比解析本身还长, 于是兜底永远轮不到**, 用户就盯着 4 秒空背景 (2026-09-19).
+ * 1.5s 卡在两者中间: 映射热的那条路 (<1s) 不会误触发, 全冷那条路能及时把封面垫上.
  */
-fun tvHeroCoverFallbackMillis(): Long = when (TvImageNetworkSpeed.tier) {
-    TvImageNetworkTier.FAST -> 6_000L
-    TvImageNetworkTier.SLOW -> 2_500L
+fun tvHeroCoverFallbackMillis(): Long = when {
+    !TvImageNetworkSpeed.probed -> UNPROBED_COVER_FALLBACK_MILLIS
+    TvImageNetworkSpeed.tier == TvImageNetworkTier.FAST -> 6_000L
+    else -> 2_500L
 }
+
+private const val UNPROBED_COVER_FALLBACK_MILLIS = 1_500L
 
 /**
  * 背景图预热的在途上限, 见 `TvHeroImagePrefetch`.
