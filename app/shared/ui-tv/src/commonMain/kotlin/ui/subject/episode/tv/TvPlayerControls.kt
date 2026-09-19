@@ -129,8 +129,6 @@ import me.him188.ani.app.ui.foundation.icons.Forward85
 import me.him188.ani.app.ui.foundation.icons.Forward90
 import me.him188.ani.app.ui.foundation.icons.SubtitleGear
 import me.him188.ani.app.ui.foundation.watchtogether.LocalWatchTogetherEntry
-import me.him188.ani.utils.logging.info
-import me.him188.ani.utils.logging.logger
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.episode_comments
 import me.him188.ani.app.ui.lang.subject_details_characters
@@ -440,10 +438,6 @@ internal fun TvPlayerControlsOverlay(
         LaunchedEffect(pillOrder) {
             snapshotFlow { overlay.activePanel }.collect { panel ->
                 if (panel == null || panel in pillOrder) return@collect
-                // 留一行日志: 这条路窄得几乎撞不到 (要播放页被盖住期间恰好把当前这颗胶囊藏掉,
-                // 回来时状态机才会恢复出一个版式里已经没有的面板), 真出事的时候界面上只看得到
-                // "方向键没反应", 只有这一行能还原经过
-                logger.info { "Restored panel $panel is no longer in the layout, closing it and moving focus to the progress bar" }
                 overlay.activePanel = null
                 // **光清面板不够**: 恢复出面板时构造函数把初始落点一并设成了 PANEL (见 TvPlayerOverlayState),
                 // 而那个入口请求器在刚被关掉的面板里, 永远附着不上 —— 解析器空转到放弃, 焦点就此悬空
@@ -1766,5 +1760,3 @@ private val TV_PROGRESS_TOUCH_SLACK_H = 12.dp
 
 /** 触屏设备上进度条行上下各加的触摸高度: 光是 24dp 的滑块对手指太窄. 电视上不加, 布局不变. */
 private val TV_PROGRESS_TOUCH_PAD_V = 8.dp
-
-private val logger = logger("TvPlayerControls")
