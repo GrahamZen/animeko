@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import me.him188.ani.app.data.models.preference.ThemeSettings
 import me.him188.ani.app.data.models.preference.TvVisualEffectsLevel
+import me.him188.ani.app.data.models.preference.TvScheduleLayout
 import me.him188.ani.app.ui.foundation.LocalAniUiBehavior
 import me.him188.ani.app.ui.foundation.LocalPlatform
 import me.him188.ani.app.ui.foundation.theme.AniThemeDefaults
@@ -54,6 +55,11 @@ import me.him188.ani.app.ui.lang.settings_theme_tv_visual_effects_balanced
 import me.him188.ani.app.ui.lang.settings_theme_tv_visual_effects_description
 import me.him188.ani.app.ui.lang.settings_theme_tv_visual_effects_full
 import me.him188.ani.app.ui.lang.settings_theme_tv_visual_effects_smooth
+import me.him188.ani.app.ui.lang.settings_theme_tv_schedule_layout
+import me.him188.ani.app.ui.lang.settings_theme_tv_schedule_layout_description
+import me.him188.ani.app.ui.lang.settings_theme_tv_schedule_upstream
+import me.him188.ani.app.ui.lang.settings_theme_tv_schedule_grid
+import me.him188.ani.app.ui.lang.settings_theme_tv_schedule_timeline
 import me.him188.ani.app.ui.settings.framework.SettingsState
 import me.him188.ani.app.ui.settings.framework.components.DropdownItem
 import me.him188.ani.app.ui.settings.framework.components.SettingsScope
@@ -169,13 +175,24 @@ fun SettingsScope.ThemeGroup(
                 description = { Text(stringResource(Lang.settings_theme_tv_immersive_details_description)) },
             )
 
-            SwitchItem(
-                checked = themeSettings.tvImmersiveSchedule,
-                onCheckedChange = { checked ->
-                    state.update(themeSettings.copy(tvImmersiveSchedule = checked))
+            // 三版都留着可选 (见 TvScheduleLayout): 改版换掉的东西未必人人都想要
+            DropdownItem(
+                selected = { themeSettings.tvScheduleLayout },
+                values = { TvScheduleLayout.entries },
+                itemText = {
+                    Text(
+                        stringResource(
+                            when (it) {
+                                TvScheduleLayout.Upstream -> Lang.settings_theme_tv_schedule_upstream
+                                TvScheduleLayout.Grid -> Lang.settings_theme_tv_schedule_grid
+                                TvScheduleLayout.Timeline -> Lang.settings_theme_tv_schedule_timeline
+                            },
+                        ),
+                    )
                 },
-                title = { Text(stringResource(Lang.settings_theme_tv_immersive_schedule)) },
-                description = { Text(stringResource(Lang.settings_theme_tv_immersive_schedule_description)) },
+                onSelect = { state.update(themeSettings.copy(tvScheduleLayout = it)) },
+                title = { Text(stringResource(Lang.settings_theme_tv_schedule_layout)) },
+                description = { Text(stringResource(Lang.settings_theme_tv_schedule_layout_description)) },
             )
 
             // 三档 (见 TvVisualEffectsLevel). 写 tvVisualEffects 而不是老的布尔: 一旦显式选过, 读取就不再看那个布尔

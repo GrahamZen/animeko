@@ -93,6 +93,7 @@ import me.him188.ani.app.ui.lang.exploration_schedule_weekday_wednesday
 import me.him188.ani.app.ui.search.LoadErrorCard
 import me.him188.ani.utils.platform.annotations.TestOnly
 import me.him188.ani.utils.platform.isDesktop
+import me.him188.ani.app.data.models.preference.TvScheduleLayout
 import org.jetbrains.compose.resources.stringResource
 
 fun ScheduleScreenState(
@@ -153,7 +154,9 @@ fun ScheduleScreen(
 ) {
     // 变体布局 (遥控器形态): 15 天并排的纵向列表在电视上没法用, TV 换成日期胶囊 + 海报网格.
     // 可在设置里关掉回退上游原布局 (同探索页/详情页那两个开关)
-    LocalSchedulePageVariant.current?.takeIf { LocalThemeSettings.current.tvImmersiveSchedule }?.let { variant ->
+    LocalSchedulePageVariant.current
+        ?.takeIf { LocalThemeSettings.current.tvScheduleLayout != TvScheduleLayout.Upstream }
+        ?.let { variant ->
         variant.Page(presentation, onRetry, modifier.fillMaxSize())
         return
     }

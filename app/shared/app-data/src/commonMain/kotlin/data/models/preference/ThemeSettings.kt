@@ -22,6 +22,26 @@ enum class DarkMode {
 }
 
 /** TV: 在主页 (探索页 hero) 上按返回键那一下做什么. 见 [ThemeSettings.tvExitBehavior]. */
+/**
+ * TV 新番时间表的版式. 三版都留着, 设置里可选 —— 改版换掉的东西未必人人都想要
+ * (用户 2026-09-18)。
+ *
+ * 旧的布尔 `tvImmersiveSchedule` 已撤: 存储层是 `ignoreUnknownKeys = true` (见 DataStoreMP),
+ * 旧配置里多出来的那个字段会被忽略, 不会读崩; 代价是原先关掉沉浸式的人会回到默认的 [Timeline],
+ * 再选一次即可。
+ */
+@Serializable
+enum class TvScheduleLayout {
+    /** 上游原布局: 15 天并排的纵向列表. */
+    Upstream,
+
+    /** 日期胶囊行 + **全竖版卡片网格** (2026-09-13 改版之前的 TV 版式). */
+    Grid,
+
+    /** 左侧焦点详情大图大字 + 右侧单列时间线 (改版后, 默认). */
+    Timeline,
+}
+
 @Serializable
 enum class TvExitBehavior {
     /** 直接退出应用 —— 加确认之前的老行为. */
@@ -131,8 +151,8 @@ data class ThemeSettings(
     val tvImmersiveExploration: Boolean = true,
     /** TV: 条目详情页使用沉浸式布局 (Hero 首屏); 关闭则回退上游通用多栏布局. */
     val tvImmersiveDetails: Boolean = true,
-    /** TV: 新番时间表使用日期胶囊 + 海报网格布局; 关闭则回退上游 15 天并排的纵向列表. */
-    val tvImmersiveSchedule: Boolean = true,
+    /** TV: 新番时间表用哪一版版式, 见 [TvScheduleLayout]. */
+    val tvScheduleLayout: TvScheduleLayout = TvScheduleLayout.Timeline,
     /**
      * TV: 退出播放页后保留播放会话 (播放器与整条"搜索数据源 → 选源 → 起播"的流水线),
      * 由侧边栏"正在播放"条目回去; 数据源在后台就绪时弹一次提示.

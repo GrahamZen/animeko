@@ -57,6 +57,7 @@ import me.him188.ani.app.ui.foundation.TvKeyLongPressHost
 import me.him188.ani.app.ui.foundation.TvPageRefreshHost
 import me.him188.ani.app.ui.foundation.playback.PlaybackSessionEntry
 import me.him188.ani.app.data.models.preference.TvLongPressAction
+import me.him188.ani.app.data.models.preference.TvScheduleLayout
 import me.him188.ani.app.ui.foundation.theme.LocalThemeSettings
 import me.him188.ani.app.ui.foundation.tvKeyLongPressInterceptor
 import me.him188.ani.app.ui.foundation.watchtogether.WatchTogetherEntryState
@@ -100,6 +101,7 @@ import me.him188.ani.app.ui.remote.RegisterTvRemoteBackgroundPlayer
 import me.him188.ani.app.ui.remote.TrackTvRemoteForeground
 import me.him188.ani.app.ui.remote.TvRemoteControl
 import me.him188.ani.app.ui.remote.TvRemoteControlDialogHost
+import me.him188.ani.app.ui.exploration.schedule.grid.TvScheduleGridPage
 import org.jetbrains.compose.resources.stringResource
 import org.koin.mp.KoinPlatform
 
@@ -189,7 +191,14 @@ fun InstallTvPageVariants(aniNavigator: AniNavigator, content: @Composable () ->
             ProvideTvScrollActivity { TvExplorationPage(state, modifier) }
         },
         LocalSchedulePageVariant provides SchedulePageVariant { presentation, onRetry, modifier ->
-            ProvideTvScrollActivity { TvSchedulePage(presentation, onRetry, modifier) }
+            // 两版 TV 版式在这里分流 (Upstream 那一档在 ScheduleScreen 就挡住了, 到不了这里).
+            // 改版换掉的东西未必人人都想要, 所以旧版留着可选, 见 TvScheduleLayout
+            ProvideTvScrollActivity {
+                when (LocalThemeSettings.current.tvScheduleLayout) {
+                    TvScheduleLayout.Grid -> TvScheduleGridPage(presentation, onRetry, modifier)
+                    else -> TvSchedulePage(presentation, onRetry, modifier)
+                }
+            }
         },
         LocalSearchPageVariant provides SearchPageVariant { state, onIntent, suggestionsPager, modifier ->
             ProvideTvScrollActivity { TvSearchPage(state, onIntent, suggestionsPager, modifier) }

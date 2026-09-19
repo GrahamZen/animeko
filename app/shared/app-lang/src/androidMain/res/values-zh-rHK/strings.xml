@@ -1429,6 +1429,11 @@
     <string name="settings_theme_tv_remote_reset">重設 Web 控制台地址</string>
     <string name="settings_theme_tv_remote_reset_description">換一個新地址，之前掃碼開啟的頁面和書籤都會失效，要重新掃碼</string>
     <string name="settings_theme_tv_remote_reset_confirm">確定重設地址嗎？正在用目前地址的頁面和書籤都要重新掃碼。</string>
+    <string name="settings_theme_tv_schedule_layout">新番時間表版式 (電視)</string>
+    <string name="settings_theme_tv_schedule_layout_description">選擇電視上新番時間表的版式。</string>
+    <string name="settings_theme_tv_schedule_upstream">經典列表</string>
+    <string name="settings_theme_tv_schedule_grid">豎版卡片網格</string>
+    <string name="settings_theme_tv_schedule_timeline">左側詳情 + 單列時間線</string>
     <string name="rating_requires_collection">請先收藏再評分</string>
     <string name="rating_discard_edit_title">捨棄編輯</string>
     <string name="rating_discard_edit_message">評價尚未保存，確定要捨棄嗎？</string>
