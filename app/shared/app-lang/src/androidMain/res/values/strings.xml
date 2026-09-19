@@ -720,6 +720,11 @@
     <string name="settings_theme_tv_immersive_details_description">Use the immersive hero layout for item details. Turn off to fall back to the classic multi-column layout</string>
     <string name="settings_theme_tv_immersive_schedule">Immersive Airing Schedule (TV)</string>
     <string name="settings_theme_tv_immersive_schedule_description">Show the airing schedule as a date rail plus a poster grid. Turn off to fall back to the classic side-by-side day columns</string>
+    <string name="settings_theme_tv_schedule_layout">Airing schedule layout (TV)</string>
+    <string name="settings_theme_tv_schedule_layout_description">Pick how the airing schedule is laid out on TV.</string>
+    <string name="settings_theme_tv_schedule_upstream">Classic list</string>
+    <string name="settings_theme_tv_schedule_grid">Poster grid</string>
+    <string name="settings_theme_tv_schedule_timeline">Detail panel + timeline</string>
     <string name="settings_theme_tv_ui_scale">Interface scale</string>
     <string name="settings_theme_tv_ui_scale_description">Scale the whole interface up or down. Use this when your TV or box reports a wrong screen density and everything looks too large or too small. 100% follows the system. The interface reloads once when you leave settings so that dialogs and menus match</string>
     <string name="settings_theme_tv_retain_playback_session">Keep playback session after leaving</string>
