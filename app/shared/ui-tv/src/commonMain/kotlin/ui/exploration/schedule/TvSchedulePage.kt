@@ -157,6 +157,7 @@ import me.him188.ani.app.ui.foundation.tv.tvHeroContentColor
 import me.him188.ani.app.ui.foundation.tv.tvHeroSecondaryContentColor
 import me.him188.ani.app.ui.foundation.tv.tvPlayKeyShortPress
 import me.him188.ani.app.ui.foundation.tv.tvTouchFocusOnTap
+import me.him188.ani.app.ui.foundation.tv.tvAnimatedScroll
 import me.him188.ani.app.ui.foundation.tvLongPressKey
 import me.him188.ani.app.ui.foundation.widgets.LocalToaster
 import me.him188.ani.app.ui.foundation.widgets.showLoadError
@@ -475,8 +476,9 @@ fun TvSchedulePage(
     }
     // 固定焦点框: 焦点落到哪一格就把它滚进框 (TvScrollAnimator: 连发按键取消进行中的滚动并继承速度).
     // 有在途送焦且目标不是它: 它是旧下标 (重组后首次取值), 按它滚会把 focusEntry 摆好的位置滚走, 落点一到再滚
-    LaunchedEffect(listState) {
-        val scrollAnimator = TvScrollAnimator()
+    val animatedScroll = tvAnimatedScroll()
+    LaunchedEffect(listState, animatedScroll) {
+        val scrollAnimator = TvScrollAnimator(animated = animatedScroll)
         snapshotFlow { lastFocusedEntry }.collectLatest { focused ->
             if (focused < 0) return@collectLatest
             val pending = gridFocus.pendingIndex

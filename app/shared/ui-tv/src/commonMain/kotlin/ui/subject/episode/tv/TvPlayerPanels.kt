@@ -18,7 +18,6 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
@@ -123,6 +122,7 @@ import me.him188.ani.app.ui.foundation.focus.tvFocusNavSignal
 import me.him188.ani.app.ui.foundation.tv.TV_PILL_ICON_SIZE
 import me.him188.ani.app.ui.foundation.tv.TvPillShell
 import me.him188.ani.app.ui.foundation.tv.tvTouchFocusOnTap
+import me.him188.ani.app.ui.foundation.tv.tvAmbientMarquee
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.comment_reply_to
 import me.him188.ani.app.ui.lang.episode_danmaku
@@ -721,7 +721,7 @@ private fun TvRecommendationsPanel(
                         // 单行, 放不下时聚焦跑马灯 (与选集卡片同规矩)
                         Text(
                             recommendation.nameCn ?: recommendation.name.orEmpty(),
-                            if (focused) Modifier.basicMarquee(iterations = Int.MAX_VALUE) else Modifier,
+                            Modifier.tvAmbientMarquee(enabled = focused, iterations = Int.MAX_VALUE),
                             style = MaterialTheme.typography.titleSmall,
                             maxLines = 1,
                             overflow = if (focused) TextOverflow.Clip else TextOverflow.Ellipsis,
@@ -730,7 +730,7 @@ private fun TvRecommendationsPanel(
                             Spacer(Modifier.height(2.dp))
                             Text(
                                 it,
-                                if (focused) Modifier.basicMarquee(iterations = Int.MAX_VALUE) else Modifier,
+                                Modifier.tvAmbientMarquee(enabled = focused, iterations = Int.MAX_VALUE),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color.White.copy(alpha = 0.6f),
                                 maxLines = 1,

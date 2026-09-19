@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import me.him188.ani.app.ui.foundation.LocalAniUiBehavior
 import me.him188.ani.app.ui.foundation.ifThen
+import me.him188.ani.app.ui.foundation.tv.tvAnimatedScroll
 
 /**
  * 横滑卡片条. **TV (焦点驱动) 形态下是"锚位条"**: 聚焦卡一律停在行首锚位, 整行滑动 —— 与探索页
@@ -96,8 +97,9 @@ fun TvAnchoredStrip(
 
     val density = LocalDensity.current
     val startPadding = contentPadding.calculateStartPadding(LocalLayoutDirection.current)
-    val bringIntoViewSpec = remember(density, startPadding) {
-        tvAnchorBringIntoViewSpec(with(density) { startPadding.toPx() })
+    val animatedScroll = tvAnimatedScroll()
+    val bringIntoViewSpec = remember(density, startPadding, animatedScroll) {
+        tvAnchorBringIntoViewSpec(with(density) { startPadding.toPx() }, animated = animatedScroll)
     }
     // 上次聚焦的下标 (进行落点).
     //

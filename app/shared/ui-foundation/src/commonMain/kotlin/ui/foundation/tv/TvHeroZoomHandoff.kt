@@ -54,7 +54,29 @@ object TvHeroZoomHandoff {
         val treatment: TvBackdropTreatment? = null,
     )
 
-    private class TitleSource(val subjectId: Int, val bounds: Rect, val text: String)
+    /**
+     * 列表页 hero 大标题的登记. [owner] 与 [Source.owner] 同一个用意: 按**登记方身份**对认, 而不是按
+     * 条目号 —— 两个页面同时显示同一条目时 (换 tab 的那几帧, 探索页与追番页的 hero 可能是同一部),
+     * 只按 subjectId 分不出是谁登记的, 离场那个会把留下那个的登记抹掉, 或者缩回读到已经离场那页的框。
+     * 背景侧早就这么防了 (见 [retract] 的注释), 标题侧一直漏着。
+     */
+    private class TitleSource(
+        val owner: Any,
+        val subjectId: Int,
+        val bounds: Rect,
+        val text: String,
+        /** 行数上限与溢出处理: 转场标题要照抄, 否则折行位置不同, 交接那一帧会跳. */
+        val maxLines: Int,
+        val clipOverflow: Boolean,
+    )
+
+    /** 缩回期间根级转场标题的固定部分 (文字 / 定宽 / 样式); 位置每帧变, 见 [shrinkTitlePosition]. */
+    class ShrinkTitleSpec internal constructor(
+        val text: String,
+        val widthPx: Float,
+        val maxLines: Int,
+        val clipOverflow: Boolean,
+    )
 
     @Volatile
     private var source: Source? = null
@@ -87,6 +109,9 @@ object TvHeroZoomHandoff {
         val bounds: Rect,
         /** 列表页大标题的框 (根坐标); 没登记到就 null (标题不平移). */
         val titleBounds: Rect?,
+        /** 标题的行数上限与溢出处理, 进入时一并快照 —— 缩回全程按它画, 不再回头看列表页那份登记. */
+        val titleMaxLines: Int,
+        val titleClipOverflow: Boolean,
         /** 列表页大标题的文字: 占位页组合时连条目信息都还没有, 标题先用它. */
         val title: String?,
         /**
@@ -270,7 +295,11 @@ object TvHeroZoomHandoff {
         val yes = TvPolishFlags.heroZoom && s != null && s.subjectId == subjectId && detailsUrl != null
         session = if (yes && s != null && detailsUrl != null) {
             val ts = titleSource?.takeIf { it.subjectId == subjectId }
-            Session(subjectId, s.url, detailsUrl, s.bounds, ts?.bounds, ts?.text, s.dim, s.treatment)
+            Session(
+                subjectId, s.url, detailsUrl, s.bounds, ts?.bounds,
+                ts?.maxLines ?: 2, ts?.clipOverflow ?: false,
+                ts?.text, s.dim, s.treatment,
+            )
         } else {
             null
         }
@@ -409,8 +438,12 @@ object TvHeroZoomHandoff {
      * 缩回时列表页大标题要额外让开的位移 (本元素坐标系): 从**详情页标题的位置**回到自己的位置, 与进入时
      * `tvHeroZoomTitleShift` 的平移正好反过来 —— 进入是"标题不消失而是变过去", 返回同理 (用户 2026-09-16).
      *
-     * 由**列表页自己的标题**做这个位移, 而不是在缩回层另画一个: 缩回尾段列表页是画着的 (见 [shrinkRevealing]),
-     * 另画一个就会两个标题重影.
+     * **这条现在是退路**: 正常情况下缩回期间绘制权已交给根级转场层 (见 [titleOwnedByOverlay]), 源标题
+     * alpha=0, 本位移不参与。只有转场层画不出来时 (来源页没有 hero 标题 / 详情页那头没量到框) 才回到
+     * 这条老路 —— 那时标题仍会被缩回图挡住, 但至少不会消失。
+     *
+     * 当初不在缩回层另画一个的理由是"会有两个标题重影", 后来的做法是两份都在场、**同一份快照状态**决定
+     * 谁画 (同一帧一个隐一个显), 重影的前提就不成立了.
      *
      * 自己的框直接取登记过的那份 ([publishTitle]): 登记发生在 `onGloballyPositioned`, 而本位移挂在它**之内**的
      * graphicsLayer 上, 所以登记的框不受位移影响, 不会自激. 没在缩回 / 不是这个条目 / 两边框没齐时给 null.
@@ -430,6 +463,59 @@ object TvHeroZoomHandoff {
      * 否则: 标题正滚到中间时被拉去平移, 落位那一刻走马灯重新开始又跳回行首 —— 看起来闪一下
      * (用户 2026-09-16). 在组合里读, 一次返回只翻两次.
      */
+    /**
+     * 缩回期间标题的绘制权是不是在**根级转场层**手里 (见 SubjectDetailsTvPage 的 TvHeroShrinkLayer).
+     *
+     * 缩回层在导航之外 (SubjectDetailsPageVariant.Overlay, 整个 NavDisplay 之后绘制), 列表页的标题
+     * 无论加多大的 zIndex 都越不过去 —— 于是缩回时标题是从缩回图**后面**露出来的。做法是两份标题
+     * 都在场、任意时刻只有一份有绘制权: 源标题与转场标题读**同一份快照状态** (就是这个函数), 同一帧
+     * 一个隐一个显, 不靠两个 effect 对时, 也就不会有重影或错帧。
+     */
+    fun titleOwnedByOverlay(subjectId: Int): Boolean {
+        val s = shrink ?: return false
+        if (s.subjectId != subjectId || !s.armed || s.revealed) return false
+        // **转场层确实画得出来才交权**: 判据与 [shrinkTitleSpec] 逐条一致, 且**都只看会话快照** ——
+        // 看当前 titleSource 的话, 列表页销毁重建那一段会出现"它说没登记所以不画, 列表页那份却按已交权
+        // 隐藏"的两不管窗口。不交权时源标题照旧自己平移 (见 [shrinkTitleOffset]), 那条老路正是这个退路。
+        val from = s.fromSession ?: return false
+        return from.titleTarget != null && from.title != null && from.titleBounds != null
+    }
+
+    /** 转场标题的固定部分; null = 此刻不该画 (没在缩回 / 没有登记过标题). */
+    fun shrinkTitleSpec(): ShrinkTitleSpec? {
+        val s = shrink ?: return null
+        if (!s.armed || s.revealed) return null
+        val from = s.fromSession ?: return null
+        // 与 [titleOwnedByOverlay] **同一套条件**: 一个说"交权"另一个说"画不出"就会两边都没有标题
+        if (from.titleTarget == null) return null
+        val text = from.title ?: return null
+        val width = from.titleBounds?.width ?: return null
+        // **全部取自进入时的会话快照, 不读当前 titleSource**: 列表页在返回途中销毁 (进过播放器 / 更深
+        // 的页面) 时那份登记是 null, 而它又不是快照状态、恢复了也不会让本层重组 —— 于是根级标题从头到尾
+        // 没组合过, 列表页那份却照样按"已交权"隐藏, 两边都没有标题, 直到撤层才突然冒出来。
+        return ShrinkTitleSpec(text, width, from.titleMaxLines, from.titleClipOverflow)
+    }
+
+    /**
+     * 转场标题这一帧的根坐标位置: 从详情页标题处回到列表页标题处, 与 [shrinkTitleOffset] 同一条插值 ——
+     * 后者给的是"源标题要让开多少", 这里给的是绝对位置 (源标题此刻不画)。
+     *
+     * **在 `Modifier.offset { }` 的 lambda 里读**: 每帧只重新布局, 不触发重组。
+     */
+    fun shrinkTitlePosition(): Offset? {
+        val s = shrink ?: return null
+        if (!s.armed || s.revealed) return null
+        val from = s.fromSession?.titleTarget ?: return null
+        // 终点优先用列表页**此刻**那份登记 (重建后滚动位置可能变, 落点要准), 但**只在背景也对得上时** ——
+        // 背景与标题是两个组件各自登记的, 两个页面同时显示同一条目时可能一个来自 A 一个来自 B。
+        // 拿不到就退回进入时的快照; **绝不回退 (0,0)**, 那会让标题当场跳到屏幕左上角。
+        val own = titleSource?.takeIf { it.subjectId == s.subjectId && listAlive(s) }?.bounds
+            ?: s.fromSession?.titleBounds
+            ?: return null
+        val p = (1f - s.t / s.fromT.coerceAtLeast(1e-3f)).coerceIn(0f, 1f)
+        return Offset(own.left + (from.left - own.left) * (1f - p), own.top + (from.top - own.top) * (1f - p))
+    }
+
     fun titleSettling(subjectId: Int): Boolean {
         val s = shrink ?: return false
         return s.subjectId == subjectId && s.armed && !s.revealed
@@ -569,8 +655,23 @@ object TvHeroZoomHandoff {
     /** 列表页此刻还在组合里, 且 hero 画的就是这一次缩回的那张 (同条目同图已登记). */
     fun listAlive(s: Shrink): Boolean = source?.let { it.subjectId == s.subjectId && it.url == s.url } == true
 
-    /** 缩回落地、出栈后, 列表页就绪了没有: hero 已按同一条目同一张图登记, 且这张图已加载好 (重建的列表页也要等到这一步). */
-    fun listReady(s: Shrink): Boolean = listAlive(s) && (s.subjectId to s.url) in sourceLoaded
+    /**
+     * 缩回落地、出栈后, 列表页就绪了没有: hero 已按同一条目同一张图登记, 这张图已加载好 (重建的列表页也要
+     * 等到这一步), **并且标题也已经就位**。
+     *
+     * 标题那一条是后加的: 原先只认背景图, 于是"图 ready -> 撤掉缩回层 -> 列表标题下一帧才出现"是可能的,
+     * 标题会闪一下才落位。
+     *
+     * **只在进入时确实有标题的情况下才要求**: 没有 hero 标题的来源页 (或那一次根本没登记过标题) 若也要求,
+     * 就会永远判不就绪、一路等到超时 —— 那正是"返回列表后黑一秒"那类回归的成因 (见 [sourceLoaded] 的注释)。
+     */
+    fun listReady(s: Shrink): Boolean =
+        listAlive(s) && (s.subjectId to s.url) in sourceLoaded && titleReadyOrAbsent(s)
+
+    private fun titleReadyOrAbsent(s: Shrink): Boolean {
+        s.fromSession?.titleBounds ?: return true // 进入时就没有标题: 不要求
+        return titleSource?.subjectId == s.subjectId
+    }
 
     /**
      * 诊断用: [listReady] 等超时那一刻, 把"缩回要的"与"列表页实际登记的"都打出来.
@@ -605,8 +706,20 @@ object TvHeroZoomHandoff {
      * 列表页 hero 大标题每次定位时登记. 详情页标题从这个框平移到自己的位置, 与放大同步 —— 标题"不消失而是变过去"
      * (用户 2026-09-10). 两边都是 headlineLarge, 只差位置, 不缩放.
      */
-    fun publishTitle(subjectId: Int, bounds: Rect, text: String) {
-        titleSource = TitleSource(subjectId, bounds, text)
+    fun publishTitle(
+        owner: Any,
+        subjectId: Int,
+        bounds: Rect,
+        text: String,
+        maxLines: Int = 2,
+        clipOverflow: Boolean = false,
+    ) {
+        titleSource = TitleSource(owner, subjectId, bounds, text, maxLines, clipOverflow)
+    }
+
+    /** 标题离开组合时撤销; **只撤自己登记的那份** (理由同 [retract])。 */
+    fun retractTitle(owner: Any) {
+        if (titleSource?.owner === owner) titleSource = null
     }
 
     /**

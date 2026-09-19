@@ -102,7 +102,10 @@ enum class TvLongPressAction {
  */
 @Serializable
 enum class TvVisualEffectsLevel {
-    /** 流畅: 只保留进详情页的背景放大 (三档都有); 换分类渐隐渐现、hero 文字整块进场; 没有常驻装饰; 不用原图. */
+    /**
+     * 流畅: 只保留进详情页的背景放大 (三档都有); 没有转场、没有常驻装饰、不用原图,
+     * **焦点滚动也不带动画** (瞬时跳位, 见 [animatedScroll])。给主线程吃紧的弱机。
+     */
     Smooth,
 
     /** 均衡: 在流畅之上开其余转场 (卡片滑动 / 文字错落). */
@@ -112,8 +115,34 @@ enum class TvVisualEffectsLevel {
     Full,
     ;
 
-    /** 按一下动一次的转场: 均衡档起. */
+    /**
+     * 按一下动一次的转场: 均衡档起. 除了页面之间的切换, 还包含**导航期间的内容替换** ——
+     * hero 文字进出、行压暗与两态渐变的插值、图片加载淡入 (见 `tvContentSwapAnimated`).
+     * 流畅档一律直接换到终态, 静止画面逐像素一致.
+     *
+     * **背景图的交叉淡入不在内**: 它还兼着"旧图撑到新图就位", 砍掉会空一段, 理由见 `tvContentSwapAnimated`.
+     */
     val transitions: Boolean get() = this >= Balanced
+
+    /**
+     * 焦点滚动带不带动画 (吸顶 / 锚位条的 spring): 均衡档起; **流畅档瞬时跳位**。
+     *
+     * 这是流畅档上最要紧的一条, 理由是弱机的瓶颈不在绘制而在主线程: 报告者那台投影仪
+     * (mt5877 / Mali-G57, 1080p) 上下切卡片时 GPU 只有 3~15ms, 而"等主线程 80~140ms + 重组 40~73ms",
+     * 按住时 11~14fps、主线程近乎满核 (2026-09-14 诊断日志)。spring 滚动会把**一次按键摊成二十几帧**,
+     * 每帧都重新测量新进入的项 + 重组 —— 瞬时跳位之后一次按键只有一帧有内容变化, 其余帧无事可做。
+     * 静止画面完全一致, 只是没有了滑动过程。
+     */
+    val animatedScroll: Boolean get() = this >= Balanced
+
+    /**
+     * 跑马灯挂不挂 (完整档无限滚, 均衡档滚几趟就停, **流畅档根本不挂**)。
+     *
+     * 不是"滚得少一点"的问题: `basicMarquee` 为了判断要不要滚, 每次测量都要把整串文字按**不换行**
+     * 量一遍 (`getMaxIntrinsicWidth`) —— 弱机诊断里"文字测宽与断行"占主线程卡顿采样的 19%, 仅次于
+     * 重组。流畅档干脆不挂这个 modifier, 长标题直接截断。
+     */
+    val marquee: Boolean get() = this >= Balanced
 
     /** 一直在动的装饰动画: 只有完整档. */
     val ambient: Boolean get() = this == Full

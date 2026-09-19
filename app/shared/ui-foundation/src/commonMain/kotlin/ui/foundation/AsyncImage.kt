@@ -11,6 +11,7 @@ package me.him188.ani.app.ui.foundation
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
@@ -122,6 +123,15 @@ fun rememberAniSketchInstance(client: ScopedHttpClient): Sketch {
     return sketch
 }
 
+/**
+ * 图片加载完要不要淡入 (sketch 的 crossfade). 视觉效果流畅档关掉 —— 见 `tvContentSwapAnimated`,
+ * 终态一致, 省掉的是每张图各自那条 alpha 动画.
+ *
+ * 用独立的 local 而不是在这里读 `LocalThemeSettings`: 后者没提供时会抛, 而本文件的 composable
+ * 用在预览与不装主题的小片段里. 由 `AniApp` 按设置 provide, 默认 true.
+ */
+val LocalImageCrossfade = compositionLocalOf { true }
+
 @Composable
 fun AsyncImage(
     model: String?,
@@ -214,6 +224,7 @@ internal fun AniAsyncImage(
         return
     }
 
+    val imageCrossfade = LocalImageCrossfade.current
     val placeholderStateImage = rememberStateImage(placeholder, "placeholder")
     val errorStateImage = rememberStateImage(error, "error")
     val fallbackStateImage = rememberStateImage(fallback, "fallback")
@@ -233,6 +244,8 @@ internal fun AniAsyncImage(
 
         when {
             crossfade == false -> crossfade(false)
+            // 流畅档一律不淡入: 换一行卡片是八张图同时淡入, 八条 alpha 动画各自产帧, 而终态一样
+            !imageCrossfade -> crossfade(false)
             crossfadeDurationMillis != null -> crossfade(crossfadeDurationMillis)
             crossfade == true -> crossfade(true)
         }

@@ -14,6 +14,7 @@ import androidx.compose.animation.core.AnimationState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateTo
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.snap
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.ScrollableState
@@ -44,7 +45,10 @@ import kotlin.math.abs
  * 不产生常驻负载.
  */
 @Stable
-class TvScrollAnimator {
+class TvScrollAnimator(
+    /** false = 瞬时跳位, 不跑 spring (流畅档, 见 TvVisualEffectsLevel.animatedScroll). */
+    private val animated: Boolean = true,
+) {
     /** 上一段动画被取消那一刻的速度 (px/s), 作为下一段的初速; 自然停靠后归零. */
     private var velocity = 0f
 
@@ -60,6 +64,12 @@ class TvScrollAnimator {
      * 放位后对不上卡片才暴露出来.
      */
     suspend fun animateScrollToItem(state: LazyListState, index: Int, scrollOffset: Int = 0) {
+        if (!animated) {
+            // 流畅档: 一步到位, 不产生中间帧 (见 TvVisualEffectsLevel.animatedScroll)
+            velocity = 0f
+            state.scrollToItem(index, scrollOffset)
+            return
+        }
         val target = state.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
         if (target == null) {
             velocity = 0f
@@ -71,6 +81,12 @@ class TvScrollAnimator {
 
     /** [LazyGridState] 版, 语义同上; 取主轴 offset. */
     suspend fun animateScrollToItem(state: LazyGridState, index: Int, scrollOffset: Int = 0) {
+        if (!animated) {
+            // 流畅档: 一步到位, 不产生中间帧 (见 TvVisualEffectsLevel.animatedScroll)
+            velocity = 0f
+            state.scrollToItem(index, scrollOffset)
+            return
+        }
         val info = state.layoutInfo
         val target = info.visibleItemsInfo.firstOrNull { it.index == index }
         if (target == null) {
@@ -131,7 +147,18 @@ class TvScrollAnimator {
  * 读取 (定制动画曲线目前只有这一条路); 若未来版本移除, pivot 定位仍工作, 只是退回默认
  * spring —— 到时再评估手感. 曲线与 [TvScrollAnimator] 共用 [TV_SCROLL_STIFFNESS].
  */
-fun tvAnchorBringIntoViewSpec(anchorPx: Float): BringIntoViewSpec =
+fun tvAnchorBringIntoViewSpec(anchorPx: Float, animated: Boolean = true): BringIntoViewSpec =
+    if (!animated) {
+        // 流畅档: 瞬时跳到锚位 (见 TvVisualEffectsLevel.animatedScroll)。snap 之后一次按键只产生一帧
+        // 内容变化, 不再是 spring 那二十几帧"每帧重新测量可见项"
+        object : BringIntoViewSpec {
+            @Deprecated("Animation spec customization is no longer supported.")
+            override val scrollAnimationSpec: AnimationSpec<Float> = snap()
+
+            override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float =
+                offset - anchorPx
+        }
+    } else
     object : BringIntoViewSpec {
         // visibilityThreshold 与 [TvScrollAnimator] 同为 0.5px: 默认 0.01px 让 spring 在肉眼已经停下之后
         // 再拖 ~170ms 的尾巴 (2026-09-09 Shield 录屏: 卡片 2.55s 停, isScrollInProgress 2.72s 才 false),

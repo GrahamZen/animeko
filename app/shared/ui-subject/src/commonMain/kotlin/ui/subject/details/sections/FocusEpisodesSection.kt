@@ -11,8 +11,6 @@ package me.him188.ani.app.ui.subject.details.sections
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.basicMarquee
-import me.him188.ani.app.ui.foundation.tv.tvAmbientMarqueeIterations
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
@@ -129,9 +127,13 @@ import me.him188.ani.app.ui.foundation.tv.rememberTvCardsScrollingProvider
 import me.him188.ani.app.ui.foundation.tv.tvTouchFocusOnTap
 import me.him188.ani.app.ui.foundation.tv.rememberTvScrollSettled
 import me.him188.ani.app.ui.foundation.tv.tvScrollHiddenTextEnabled
+import me.him188.ani.app.ui.foundation.tv.tvContentSwapAnimated
 import me.him188.ani.app.ui.foundation.tv.tvScrollHiddenTextFadeTransform
 import me.him188.ani.app.ui.foundation.tv.tvFocusRingBorder
 import me.him188.ani.app.ui.foundation.tv.tvFocusRingCountdownBorder
+import me.him188.ani.app.ui.foundation.tv.tvAnimatedScroll
+import me.him188.ani.app.ui.foundation.tv.tvAmbientMarquee
+import me.him188.ani.app.ui.foundation.tv.TV_INSTANT_CONTENT_SWAP
 import me.him188.ani.app.ui.foundation.theme.glassContainerColor
 import me.him188.ani.app.ui.lang.Lang
 import me.him188.ani.app.ui.lang.subject_details_episodes
@@ -420,7 +422,8 @@ fun FocusEpisodeCarousel(
     // 焦点不在卡片上时的两处滚动 (简介块左右切换 / 弹窗左右切换) 共用: 同一 listState 的
     // 动画互相取消时速度经它继承, 连发左右键时轮播连续流动. 卡片自己的吸附不走这里 ——
     // 那是焦点驱动的, 交给 pivot 式 BringIntoViewSpec (见下方 LazyRow)
-    val scrollAnimator = remember { TvScrollAnimator() }
+    val animatedScroll = tvAnimatedScroll()
+    val scrollAnimator = remember(animatedScroll) { TvScrollAnimator(animated = animatedScroll) }
     val moveDisplayedBy: (Int) -> Unit = moveDisplayed@{ delta ->
         val displayedId = focusedEpisodeId ?: landingId
         val index = episodes.indexOfFirst { it.episodeId == displayedId }.coerceAtLeast(0)
@@ -618,7 +621,7 @@ fun FocusEpisodeCarousel(
         // 锚位 = 停靠位, 无需补偏差: 卡片的可聚焦节点就是卡片外框本身 (聚焦框是行层的
         // overlay, 向外探出而不内缩卡片), 焦点目标矩形与卡片外框一致
         val bringIntoViewSpec = remember(density, horizontalPadding) {
-            tvAnchorBringIntoViewSpec(with(density) { horizontalPadding.toPx() })
+            tvAnchorBringIntoViewSpec(with(density) { horizontalPadding.toPx() }, animated = animatedScroll)
         }
         CompositionLocalProvider(LocalBringIntoViewSpec provides bringIntoViewSpec) {
             // 高度锁死在卡片高: 聚焦框是向外探出的 (offset 只挪位置不改上报尺寸, 见
@@ -1287,7 +1290,7 @@ fun FocusEpisodeCard(
                         name,
                         Modifier.alignByBaseline()
                             // 完整档以外滚几次就停: 播放器片尾自动展开选集条时焦点停在这张卡上, 无限滚会把叠在视频上的界面一直顶到 60fps
-                            .then(if (focused) Modifier.basicMarquee(iterations = tvAmbientMarqueeIterations()) else Modifier),
+                            .tvAmbientMarquee(enabled = focused),
                         color = Color.White.copy(alpha = 0.85f),
                         style = MaterialTheme.typography.bodySmall,
                         maxLines = 1,
@@ -1357,7 +1360,7 @@ fun FocusEpisodeCard(
                     // 集名单独一行, 行首恒是文字: 补满一个三角内白才与上一行的墨迹同线
                     // (上一行行首可能是三角/声浪图标/数字, 已各自补到同一线上)
                     Modifier.padding(start = playInkInset)
-                        .then(if (focused) Modifier.basicMarquee(iterations = tvAmbientMarqueeIterations()) else Modifier),
+                        .tvAmbientMarquee(enabled = focused),
                     color = nameColor,
                     style = MaterialTheme.typography.bodySmall,
                     maxLines = 1,
@@ -1715,7 +1718,8 @@ private fun FocusEpisodeInfoRow(
     val displayed = episodes.firstOrNull { it.episodeId == (focusedEpisodeId() ?: currentEpisodeId) }
         ?: episodes.firstOrNull()
         ?: return
-    val fade = tvScrollHiddenTextEnabled()
+    // 流畅档直接换字 (见 tvContentSwapAnimated); 滚动隐藏本身不分档
+    val fade = tvScrollHiddenTextEnabled() && tvContentSwapAnimated()
     AnimatedContent(
         // null = 藏起来. 两态结构相同、等高 (简介传空串由 minLines 撑高, 元数据列不画), 不会触发尺寸动画
         targetState = if (hidden()) null else displayed,
@@ -1724,7 +1728,8 @@ private fun FocusEpisodeInfoRow(
             if (fade) {
                 tvScrollHiddenTextFadeTransform(sequential = initialState != null, hiding = targetState == null)
             } else {
-                EnterTransition.None togetherWith ExitTransition.None
+                // 退场用 snap 淡出而不是 ExitTransition.None, 见 TV_INSTANT_CONTENT_SWAP
+                TV_INSTANT_CONTENT_SWAP
             }
         },
         contentKey = { it?.episodeId },
@@ -1809,7 +1814,7 @@ private fun FocusEpisodeGridHeaderLine(
     ) {
         Text(
             "${displayed.sort}. ${displayed.nameCn.ifBlank { displayed.name }}",
-            Modifier.weight(1f).basicMarquee(iterations = Int.MAX_VALUE),
+            Modifier.weight(1f).tvAmbientMarquee(iterations = Int.MAX_VALUE),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodyMedium,
             maxLines = 1,

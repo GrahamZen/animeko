@@ -224,6 +224,7 @@ import me.him188.ani.app.ui.foundation.tv.TvCapsuleButton
 import me.him188.ani.app.ui.foundation.tv.TvZoomedImageOverlay
 import me.him188.ani.app.ui.foundation.tv.rememberTvImageZoomState
 import me.him188.ani.app.ui.foundation.tv.tvImageZoomKeys
+import me.him188.ani.app.ui.foundation.tv.tvHeroContentColor
 import me.him188.ani.app.ui.foundation.session.buildTvRailItems
 import me.him188.ani.app.ui.foundation.theme.AniThemeDefaults
 import me.him188.ani.app.ui.foundation.theme.GLASS_CONTAINER_ALPHA
@@ -612,25 +613,30 @@ fun SubjectDetailsTvPage(
     // "停稳后第一下按键"上 (用户要停稳即可操作). 分三帧后 UI 出现后 300ms 内最长帧 39~47ms (2026-09-13 Shield AOT).
     // 这些区块都在首屏之下, 晚几帧出现看不见; 角色区没轮到时先放等高骨架, 布局不跳. 只在放大进来时这么做 (常规进页照旧一次组合)
     // 区块组合出来之前按的下键由首屏信息带扣住, 选集页出来再把焦点送过去 (focusEpisodesWhenReady)
-    var sectionsReady by remember { mutableStateOf(!enteredWithZoom) }
-    var sectionsStage by remember { mutableStateOf(if (enteredWithZoom) 0 else 3) }
+    // **不分档, 也不分进入方式**: 放大那条路本来就一直这么做 (默认均衡档的既有行为), 常规进页没有
+    // 理由一次组合整页 —— 那正是进详情页最长的那一帧 (索尼实测: 关掉放大后整帧 >=53ms 从 29 涨到 39,
+    // 涨的就是这一下; 分帧后 >=100ms 的帧 25 → 17). 推迟的都在首屏之下, 晚三帧看不见. 2026-09-19
+    var sectionsReady by remember { mutableStateOf(false) }
+    var sectionsStage by remember { mutableStateOf(0) }
     var focusEpisodesWhenReady by remember { mutableStateOf(false) }
     LaunchedEffect(revealed) {
-        if (!revealed || sectionsReady) return@LaunchedEffect
-        // 缩回已经开始: 本页正在离场 (快速路径下只是藏着, 组合还在), 这三帧的区块组合全是白干, 而且恰好落在缩回起步的
+        if (!revealed) return@LaunchedEffect
+        // 缩回已经开始: 本页正在离场 (快速路径下只是藏着, 组合还在), 这几帧的区块组合全是白干, 而且恰好落在缩回起步的
         // 那几帧上 —— "刚放大完成就立刻返回"正是这条路 (2026-09-16 审查). 预画早就有同一道闸, 这里补齐
-        // **每一阶段都重查**: 只在开头查一次的话, 查过之后用户才按返回, 后面两帧的区块组合照样跑进缩回动画里
-        // (快速路径保留详情页组合, 这些重活是实打实的) —— 2026-09-16 审查
-        if (TvHeroZoomHandoff.shrinking) return@LaunchedEffect
-        withFrameNanos { }
-        sectionsReady = true
-        sectionsStage = 1
-        withFrameNanos { }
-        if (TvHeroZoomHandoff.shrinking) return@LaunchedEffect
-        sectionsStage = 2
-        withFrameNanos { }
-        if (TvHeroZoomHandoff.shrinking) return@LaunchedEffect
-        sectionsStage = 3
+        // **每一阶段都重查**: 只在开头查一次的话, 查过之后用户才按返回, 后面两帧的区块组合照样跑进缩回动画里.
+        //
+        // **等它结束, 不是就此放弃** (2026-09-19): 快速路径下缩回不销毁本页, 只是藏起来, 组合还在 —— 早先三处
+        // `return` 一旦被缩回撞上, 这个一次性 effect 就再也不会重跑 (key 只有 revealed, 而 revealed 不会再变),
+        // 阶段永久停在 0/1/2, 藏着的那份少了首屏以下的区块; 用户再进同一条目看到的就是半截页面.
+        // 改成按阶段推进的循环: 缩回期间挂起在 shrinking 上, 结束 (或中途被取消) 后接着把剩下的阶段补完.
+        while (sectionsStage < SECTIONS_STAGE_LAST) {
+            snapshotFlow { TvHeroZoomHandoff.shrinking }.first { !it }
+            withFrameNanos { }
+            // 让位后又开始缩回: 回到上面继续等, 这一帧不推进
+            if (TvHeroZoomHandoff.shrinking) continue
+            sectionsReady = true
+            sectionsStage++
+        }
     }
     // 看门狗: 无论如何 (图没到 / 接手条件凑不齐) 都在限时内放行, 别让页面停在只有标题的状态
     LaunchedEffect(Unit) {
@@ -3419,6 +3425,47 @@ fun TvHeroShrinkLayer() {
                 sharpen = false,
             )
         }
+        // 转场标题: 缩回期间由**这一层**画标题, 列表页那份同时隐掉 (见 TvHeroZoomHandoff.titleOwnedByOverlay).
+        //
+        // 必须是这两个 backdrop 的**后一个 sibling**, 不能塞进 TvHeroBackdrop 里 —— 那里是离屏层, 进去
+        // 就会跟着吃边缘 DstOut 擦除、整层缩放与全屏重绘。放在这里每帧只多一次小 Text 的平移。
+        //
+        // 之所以要在根级另画一份: 本层在导航之外 (SubjectDetailsPageVariant.Overlay, 整个 NavDisplay 之后
+        // 绘制), 列表页的标题无论加多大 zIndex 都排不到缩回图前面, 于是缩回时标题是从图**后面**露出来的
+        // (用户 2026-09-18)。两份都在场、同一份状态决定谁画, 所以没有重影。
+        TvHeroZoomHandoff.shrinkTitleSpec()?.let { spec ->
+            val density = LocalDensity.current
+            // 起点那一帧要跟详情页标题长得一样: 那边是白字 + 柔和黑影 (压在全屏大图上), 不带阴影的话
+            // 缩回第一帧阴影凭空消失, 亮背景上看着像闪了一下 (2026-09-18 审查)。落地交回列表页标题时
+            // 图已经缩回卡片大小、标题也压在列表页 backdrop 上, 那边本来就不带阴影
+            val transitionShadow = with(density) {
+                Shadow(
+                    color = Color.Black.copy(alpha = 0.6f),
+                    offset = Offset(0f, 1.dp.toPx()),
+                    blurRadius = 6.dp.toPx(),
+                )
+            }
+            // 上一帧的位置: 位置算不出来时**绝不退回 (0,0)** —— 那会让标题当场跳到屏幕左上角,
+            // 比短暂消失还显眼。spec 与 position 现在同出会话快照, 正常不会走到这里
+            var lastPos by remember { mutableStateOf<Offset?>(null) }
+            Text(
+                spec.text,
+                Modifier
+                    // 位置在 lambda 里读: 每帧只重新布局, 不触发重组
+                    .offset {
+                        val p = TvHeroZoomHandoff.shrinkTitlePosition()?.also { lastPos = it }
+                            ?: lastPos
+                            ?: return@offset IntOffset.Zero
+                        IntOffset(p.x.roundToInt(), p.y.roundToInt())
+                    }
+                    // **定宽照抄源标题**: 折行位置由宽度决定, 差一点两行标题的断行就不同, 落位那帧会跳
+                    .width(with(density) { spec.widthPx.toDp() }),
+                color = tvHeroContentColor(),
+                style = MaterialTheme.typography.headlineLarge.copy(shadow = transitionShadow),
+                maxLines = spec.maxLines,
+                overflow = if (spec.clipOverflow) TextOverflow.Clip else TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -3532,6 +3579,9 @@ private fun HeroBackdropSharpeningOverlay(imageUrl: String) {
 
 
 /** 放大转场没能回调 (图迟迟不到 / 背景没组合) 时放行其余 UI 的兜底. */
+/** 首屏以下的区块分几帧放出 (见 `sectionsStage`): 1 选集页 / 2 角色 + 制作人员 / 3 作品信息 + 关联 + 评价. */
+private const val SECTIONS_STAGE_LAST = 3
+
 private const val TV_HERO_REVEAL_WATCHDOG_MILLIS = 1_000L
 
 private val zoomLogger = logger("TvHeroZoom")

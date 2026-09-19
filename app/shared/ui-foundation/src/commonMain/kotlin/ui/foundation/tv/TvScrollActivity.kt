@@ -15,6 +15,7 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -244,7 +245,12 @@ fun <T> rememberTvScrollSettled(target: () -> T): TvScrollSettled<T> {
     // 种子值"不被观察地"读: 直接 target() 会把热状态的读算到调用方的 body 上
     val state = remember { TvScrollSettled(Snapshot.withoutReadObservation { target() }) }
     state.navKeys = navKeys
-    LaunchedEffect(activity, navKeys) {
+    // **流畅档不等滚动**: 藏文字是为了"滚动的那 300ms 里不逐帧重排三行 CJK", 而流畅档的焦点滚动是
+    // 瞬时跳位 (见 tvAnimatedScroll), 根本没有那段滚动期 —— 收益没了, 代价 (文字空窗) 却还在.
+    // 实测未缓存条目单击换行, 文字空白 0.18~0.25s, 观感就是"等一下才出字" (用户 2026-09-19).
+    // 那一档只保留"连发静默合并"与"按住期间不换" (下面 navKeys 那段), 松手即出字.
+    val waitForScroll = tvContentSwapAnimated()
+    LaunchedEffect(activity, navKeys, waitForScroll) {
         state.burst = false
         val settle = TvNavigationSettle(TV_NAV_SETTLE_MILLIS)
         snapshotFlow { latest.value.invoke() }.collectLatest { value ->
@@ -260,7 +266,7 @@ fun <T> rememberTvScrollSettled(target: () -> T): TvScrollSettled<T> {
                 state.latched = true
                 delay(TV_NAV_SETTLE_MILLIS)
             }
-            if (activity != null) {
+            if (activity != null && waitForScroll) {
                 withFrameNanos { }
                 withFrameNanos { }
                 snapshotFlow { activity.isScrolling }.first { scrolling ->
@@ -271,15 +277,19 @@ fun <T> rememberTvScrollSettled(target: () -> T): TvScrollSettled<T> {
                     !scrolling
                 }
             }
-            // 按住的第一格: 单击的抬起早在停稳之前, 这里不等; 按住则一直等到松手
-            if (navKeys != null && !bypass) {
+            // 按住的第一格: 单击的抬起早在停稳之前, 这里不等; 按住则一直等到松手.
+            //
+            // **流畅档整段跳过** (2026-09-19): 不等滚动之后, "等按键抬起"就成了新的瓶颈 —— 单击一次
+            // 按下到抬起 0.13~0.2s, 文字就空这么久 (逐帧实测, 用户: "两张卡反复切还是有空白").
+            // 连发本来就由上面的 settle (静默 300ms 合并) 管着, 这一段在那一档没有别的用处.
+            if (navKeys != null && !bypass && waitForScroll) {
                 snapshotFlow { navKeys.held }.first { held ->
                     if (held && navKeys.repeating) state.latched = true
                     !held
                 }
                 // 松手之后再看一眼: bring-into-view 偶尔比两帧还晚才起步 (TvHoldProbe 日志抓到过 86ms),
                 // 上面那次等待读到的是"没在滚", 不补这一眼文字会在卡片还滑着的时候就出来
-                if (activity != null) {
+                if (activity != null && waitForScroll) {
                     snapshotFlow { activity.isScrolling }.first { scrolling ->
                         if (scrolling) state.latched = true
                         !scrolling
@@ -287,8 +297,12 @@ fun <T> rememberTvScrollSettled(target: () -> T): TvScrollSettled<T> {
                 }
             }
             // 藏过的话, 进场起点不早于直接切换的起点 (TV_SCROLL_HIDDEN_TEXT_ENTER_AT_MILLIS): 滚得近的行 +210ms
-            // 就停稳, 不等的话新文字压在旧文字的淡出上 (crossfade), 与轮播按键翻页 / 滚得远的行节奏不一
-            if (state.latched) {
+            // 就停稳, 不等的话新文字压在旧文字的淡出上 (crossfade), 与轮播按键翻页 / 滚得远的行节奏不一.
+            //
+            // **流畅档不等** (2026-09-19): 那一档根本没有淡出可压 (退场那份当帧就不画, 见
+            // TV_INSTANT_CONTENT_SWAP 的说明), 这 310ms 纯粹是让文字凭空多藏一会儿 —— 探索页上
+            // 它还会与"新条目 backdrop 尚未就绪"叠在一起, 观感是上半屏全黑 (用户 2026-09-19 录屏).
+            if (state.latched && waitForScroll) {
                 val left = TV_SCROLL_HIDDEN_TEXT_ENTER_AT_MILLIS - changedAt.elapsedNow().inWholeMilliseconds
                 if (left > 0) delay(left)
             }
@@ -401,7 +415,9 @@ fun tvScrollHiddenTextTransform(
     sequential: Boolean,
     childrenEnter: Boolean = false,
     hiding: Boolean = false,
+    animated: Boolean = true,
 ): ContentTransform {
+    if (!animated) return TV_INSTANT_CONTENT_SWAP
     val enterDelay = tvHeroTextEnterBaseDelay(sequential)
     val enter = if (childrenEnter) EnterTransition.None else (slideInHorizontally(
         tween(TV_SCROLL_HIDDEN_TEXT_IN_MILLIS, delayMillis = enterDelay, easing = LinearOutSlowInEasing),
@@ -434,14 +450,15 @@ fun tvHeroTextStaggerEnabled(): Boolean =
  * ([tvHeroTextStaggerEnabled]), 低档整块同进. [enabled] 为 false 时原样返回, 什么都不挂.
  */
 fun Modifier.tvHeroLineEnter(
-    scope: AnimatedVisibilityScope,
+    /** 流畅档不进 `AnimatedContent` (见 [TV_INSTANT_CONTENT_SWAP] 的说明), 那时没有 scope 也不需要错落. */
+    scope: AnimatedVisibilityScope?,
     enabled: Boolean,
     baseDelayMillis: Int,
     line: Int,
     slidePx: Int,
     carousel: Boolean = false,
 ): Modifier {
-    if (!enabled) return this
+    if (!enabled || scope == null) return this
     val delay = baseDelayMillis + line * TV_HERO_TEXT_STAGGER_MILLIS
     val duration = if (carousel) TV_CAROUSEL_TEXT_IN_MILLIS else TV_SCROLL_HIDDEN_TEXT_IN_MILLIS
     return with(scope) {
@@ -453,6 +470,29 @@ fun Modifier.tvHeroLineEnter(
     }
 }
 
+/**
+ * 流畅档的"过渡": 新内容同帧顶上, 旧的同帧**透明**.
+ *
+ * 退场**必须给一个 snap 的淡出, 不能给 [ExitTransition.None]** (2026-09-19 修): `None` 的语义是
+ * "不做退场动画, 内容保持原样直到被移除", 而 `AnimatedContent` 要等 `transition.currentState`
+ * 追上 `targetState` 才移除退场项 —— 那是**下一帧**. 于是有整整一帧新旧两份文字都以 alpha 1
+ * 叠着 (release 逐帧取证: 标题行的白色像素数单帧从 139 跳到 429, 导出来看是完整的双重影;
+ * debug 包帧更长, 肉眼直接可见). 弱机帧更长, 反而最容易撞上.
+ *
+ * `snap()` 在 playTime = 0 就返回终值, 所以退场项当帧 alpha 即为 0; alpha 0 的层不绘制,
+ * 也就没有"零时长淡出仍开一次离屏"的顾虑.
+ */
+/**
+ * **注意: 它治不了"新旧两份并存一帧"** —— `AnimatedContent` 要等 `transition.currentState` 追上
+ * `targetState` 才移除退场项, 而 `Transition` 在 targetState 变化的那次组合里返回的仍是旧值,
+ * 连 `snap()` 也要等下一帧。真要同帧换人, 只能**整个绕开 `AnimatedContent`**, 直接
+ * `key(contentKey) { body(target) }` (各页流畅档分支就是这么做的).
+ *
+ * 这个常量留给"换了也无所谓"的场合: 内容几乎一样、或者上面另有一层盖着。
+ */
+val TV_INSTANT_CONTENT_SWAP =
+    ContentTransform(EnterTransition.None, fadeOut(snap()), sizeTransform = null)
+
 /** 相邻两行进场的错开量 (毫秒). */
 private const val TV_HERO_TEXT_STAGGER_MILLIS = 40
 
@@ -463,7 +503,12 @@ private const val TV_HERO_TEXT_STAGGER_MILLIS = 40
  * 标题位置不动、没有横向滑入. "按键瞬间换字"我们做不起 (那正是滚动帧里重排三行 CJK 简介的开销), 所以取
  * 它的观感 —— 暗下去、亮回来 —— 而把换字放到停稳之后 (用户 2026-09-09 定).
  */
-fun tvScrollHiddenTextFadeTransform(sequential: Boolean, hiding: Boolean = false): ContentTransform {
+fun tvScrollHiddenTextFadeTransform(
+    sequential: Boolean,
+    hiding: Boolean = false,
+    animated: Boolean = true,
+): ContentTransform {
+    if (!animated) return TV_INSTANT_CONTENT_SWAP
     val enterDelay = tvHeroTextEnterBaseDelay(sequential)
     return ContentTransform(
         fadeIn(tween(TV_SCROLL_HIDDEN_TEXT_IN_MILLIS, delayMillis = enterDelay, easing = LinearEasing)),
@@ -478,7 +523,12 @@ fun tvScrollHiddenTextFadeTransform(sequential: Boolean, hiding: Boolean = false
  * 滑入 [TV_CAROUSEL_TEXT_IN_MILLIS]. 轮播没有按键节奏可跟, 用卡片那套 300/200 显得急 (用户 2026-09-10: 改之前是
  * 500ms 交叉淡化, "现在轮播的文字运动似乎更快"); 其余直接切换的地方 (网格横移) 仍用快的那套.
  */
-fun tvCarouselTextTransform(slidePx: Int, childrenEnter: Boolean = false): ContentTransform {
+fun tvCarouselTextTransform(
+    slidePx: Int,
+    childrenEnter: Boolean = false,
+    animated: Boolean = true,
+): ContentTransform {
+    if (!animated) return TV_INSTANT_CONTENT_SWAP
     val enter = if (childrenEnter) EnterTransition.None else (slideInHorizontally(
         tween(TV_CAROUSEL_TEXT_IN_MILLIS, delayMillis = TV_CAROUSEL_TEXT_OUT_MILLIS, easing = LinearOutSlowInEasing),
     ) { slidePx } + fadeIn(tween(TV_CAROUSEL_TEXT_IN_MILLIS, delayMillis = TV_CAROUSEL_TEXT_OUT_MILLIS, easing = LinearEasing)))

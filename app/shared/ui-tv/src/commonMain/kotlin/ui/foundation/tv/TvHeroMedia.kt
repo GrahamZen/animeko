@@ -282,17 +282,27 @@ object TvHeroPrefetch {
             resolved
         }
         try {
-            // 等待封顶: 合流对象可能已挂死在断掉的连接上 (见类文档), 超时按"没等到"处理
-            val completed = withTimeoutOrNull(MERGE_AWAIT_MILLIS) { task.job.await() } != null
-            // 合流到的可能是跳数更少的预取版 (补跑才不丢活), 也可能压根没等到 (自己重发才有救).
-            // 异常处理与任务体一致: 调用方只关心"跑完了", 失败与否看缓存里有没有值
-            if (joined || !completed) {
+            if (joined) {
+                // 合流到**别人的**任务: 等待封顶 —— 它可能已挂死在断掉的连接上 (见类文档),
+                // 超时按"没等到"处理.
+                withTimeoutOrNull(MERGE_AWAIT_MILLIS) { task.job.await() }
+                // 补跑: 合流到的可能是跳数更少的预取版 (补跑才不丢活), 也可能压根没等到
+                // (自己重发才有救). 异常处理与任务体一致: 调用方只关心"跑完了", 失败与否看缓存
                 try {
                     load()
                 } catch (e: CancellationException) {
                     throw e
                 } catch (_: Exception) {
                 }
+            } else {
+                // 自己刚建的任务: **等到底**, 不设合流上限、也不再发第二份 (2026-09-19).
+                //
+                // 早先这里对两种情形一视同仁 (`withTimeoutOrNull(MERGE_AWAIT) ...; if (joined || !completed) load()`),
+                // 于是自己刚 start、还在正常跑的任务一超过 MERGE_AWAIT 就被再发一份: 冷启动那一下的解析要
+                // 3~4s (Bangumi 条目 0.8s + TMDB 2.5s), **必然**超, 每次都双发, 两份请求互相抢带宽, 把本来
+                // 就慢的冷解析拖得更慢 (真机埋点抓到同一 subjectId 两条 resolve, 第二条的栈停在本函数).
+                // 挂死由任务自己的 LOAD_TIMEOUT_MILLIS 封顶, 这段时间里封面兜底照样把图垫上.
+                task.job.await()
             }
         } finally {
             foregroundCount.update { it - 1 }
@@ -302,7 +312,9 @@ object TvHeroPrefetch {
     /** 后台预取: 前台空闲时才开工; 已在途 (无论前后台) 就什么都不做. */
     fun background(subjectId: Int, load: suspend () -> Unit) {
         scope.launch {
-            mutex.withLock { if (subjectId !in running) start(subjectId, false, load) }
+            mutex.withLock {
+                if (subjectId !in running) start(subjectId, false, load)
+            }
         }
     }
 
@@ -408,7 +420,15 @@ object TvHeroPrefetch {
      * 2.5s 会让"明显小于"这条不变式当场失效 —— 等待时长等于兜底时长, 合流一挂死就必然翻出
      * 兜底. 取 2/5 保持原先 2.5s : 6s 的比例, 不变式由代码结构保证, 不靠两个魔数各自不飘.
      */
-    private val MERGE_AWAIT_MILLIS get() = tvHeroCoverFallbackMillis() * 2 / 5
+    /**
+     * 合流到别人的任务时最多等多久; 超时就自己重发 (见 [foreground]).
+     *
+     * 取封面兜底的 2/5 —— "在上封面之前先给合流一个机会". **但不跟未知期那一档缩**:
+     * 那一档 (1.5s) 缩短的理由是"冷启动首个条目要尽早把封面垫上", 与"合流该等多久"无关,
+     * 跟着缩只会让合流者过早放弃、多发一份 (2026-09-19).
+     */
+    private val MERGE_AWAIT_MILLIS
+        get() = if (TvImageNetworkSpeed.probed) tvHeroCoverFallbackMillis() * 2 / 5 else 1_000L
 }
 
 /**
