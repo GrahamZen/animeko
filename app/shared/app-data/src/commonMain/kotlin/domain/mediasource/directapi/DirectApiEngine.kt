@@ -10,11 +10,14 @@
 package me.him188.ani.app.domain.mediasource.directapi
 
 import io.ktor.client.request.get
+import io.ktor.client.request.header
 import io.ktor.client.statement.readRawBytes
 import io.ktor.http.encodeURLParameter
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
+import me.him188.ani.app.domain.foundation.DeviceBrowserUserAgentHolder
+import me.him188.ani.app.domain.foundation.RequestUserAgentAttribute
 import me.him188.ani.datasources.api.source.MediaFetchRequest
 import me.him188.ani.datasources.api.source.direct.DirectLink
 import me.him188.ani.utils.ktor.ScopedHttpClient
@@ -31,6 +34,9 @@ internal class DirectApiEngine(
     private val client: ScopedHttpClient,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
+
+    private val userAgent: String?
+        get() = config.userAgent.takeIf { it.isNotBlank() } ?: DeviceBrowserUserAgentHolder.current
 
     /** bangumi 条目 id -> 站内条目 id. 站内搜索要好几次请求, 值得缓存, 包括"找不到"这个结果. */
     private val subjectIdCacheLock = Mutex()
@@ -133,7 +139,13 @@ internal class DirectApiEngine(
     }
 
     private suspend fun fetchBytes(url: String): ByteArray? = try {
-        client.use { get(url).readRawBytes() }
+        client.use {
+            get(url) {
+                // client 自带的 UA 是写死的常量, 每台设备一样; 有本机 UA 就用本机的.
+                // 走属性而不是直接写 header: client 的 UA 是 append 上去的, 直接写会变成两个值
+                userAgent?.let { ua -> attributes.put(RequestUserAgentAttribute, ua) }
+            }.readRawBytes()
+        }
     } catch (e: Exception) {
         logger.warn(e) { "Request failed: $url" }
         null

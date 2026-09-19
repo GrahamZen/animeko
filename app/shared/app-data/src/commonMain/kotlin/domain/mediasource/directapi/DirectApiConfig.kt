@@ -31,6 +31,11 @@ data class DirectApiConfig(
     val episode: EpisodeConfig = EpisodeConfig(),
     /** 第三步: 取该集的播放地址. */
     val lines: LinesConfig = LinesConfig(),
+    /**
+     * 请求时使用的 User-Agent. 留空则用本机浏览器的真实 UA, 取不到时才退回 HTTP client 自带的那个
+     * (那个是写死的常量, 每台设备一模一样, 站点按它就能认出这个应用的全部用户).
+     */
+    val userAgent: String = "",
 ) {
     @Serializable
     data class SubjectConfig(
