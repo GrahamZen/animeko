@@ -38,7 +38,9 @@ import me.him188.ani.datasources.api.topic.titles.parse
  * @param title 用于展示的标题, 同时用于解析清晰度、字幕语言、字幕类型.
  * @param channel 线路名. 会显示在数据源选择器里 (对应 [MediaProperties.alliance]). 为 `null` 时使用数据源 id.
  * @param id 该资源的稳定标识, 用于拼接 [DefaultMedia.mediaId]. 为 `null` 时使用 [url].
- * @param episodeRange 该资源对应的剧集. 为 `null` 时使用查询请求里的集数 (按集查询的数据源应当保持 `null`).
+ * @param episodeRange 该资源对应的剧集. 数据源要返回条目的全部剧集, 每条带自己的剧集号;
+ * 确实判断不出来时留 `null`, **不要**填成查询请求里的那一集 —— 查询请求里的剧集只是提示,
+ * 按集裁剪由数据源选择器完成, 填错会导致切集后本源的资源被整批排除.
  */
 class DirectLink(
     val url: String,
@@ -86,12 +88,12 @@ abstract class DirectLinkMediaSource : HttpMediaSource() {
 
     final override suspend fun fetch(query: MediaFetchRequest): SizedSource<MediaMatch> {
         val medias = queryLinks(query).mapNotNull { link ->
-            convertToMedia(link, query)?.let { MediaMatch(it, MatchKind.EXACT) }
+            convertToMedia(link)?.let { MediaMatch(it, MatchKind.EXACT) }
         }
         return SinglePagePagedSource { medias.asFlow() }
     }
 
-    private fun convertToMedia(link: DirectLink, request: MediaFetchRequest): DefaultMedia? {
+    private fun convertToMedia(link: DirectLink): DefaultMedia? {
         val download = ResourceLocation.guessFromUrl(link.url)
             ?: ResourceLocation.guessHttpStreamingFromUrl(link.url)
             ?: if (link.url.startsWith("http", ignoreCase = true)) {
@@ -120,9 +122,9 @@ abstract class DirectLinkMediaSource : HttpMediaSource() {
                 size = link.size,
                 subtitleKind = link.subtitleKind ?: details.subtitleKind,
             ),
-            // 按集查询的数据源, 标题里的集号可能是当季集号 (例如第四季第 12 集), 与请求的集号不一致,
-            // 直接用标题解析的结果会被选择器过滤掉, 所以默认以请求的集数为准.
-            episodeRange = link.episodeRange ?: EpisodeRange.single(request.episodeSort),
+            // 不信标题解析的集号: 按集查询的站点, 标题里常是当季集号 (第四季第 12 集对应系列第 78 集).
+            // 也不回退到请求里的那一集, 见 [DirectLink.episodeRange].
+            episodeRange = link.episodeRange,
             extraFiles = link.extraFiles,
             location = location,
             kind = kind,

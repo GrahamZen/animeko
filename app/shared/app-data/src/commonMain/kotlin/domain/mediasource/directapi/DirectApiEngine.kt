@@ -13,13 +13,20 @@ import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.statement.readRawBytes
 import io.ktor.http.encodeURLParameter
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.json.Json
 import me.him188.ani.app.domain.foundation.DeviceBrowserUserAgentHolder
 import me.him188.ani.app.domain.foundation.RequestUserAgentAttribute
+import me.him188.ani.datasources.api.EpisodeSort
 import me.him188.ani.datasources.api.source.MediaFetchRequest
 import me.him188.ani.datasources.api.source.direct.DirectLink
+import me.him188.ani.datasources.api.topic.EpisodeRange
 import me.him188.ani.utils.ktor.ScopedHttpClient
 import me.him188.ani.utils.logging.logger
 import me.him188.ani.utils.logging.warn
@@ -47,14 +54,21 @@ internal class DirectApiEngine(
         return runCatching { fetchBytes(url) != null }.getOrElse { false }
     }
 
+    /**
+     * 返回该条目在本源上**全部剧集**的地址, 每条带自己的剧集号.
+     *
+     * 不能只返回当前集: 同一条目的各集共用一个 `MediaFetchSession`, 切集不会重新 fetch, 而选择器会把
+     * 剧集号不是当前集的资源排除掉 —— 只返回当前集的话, 切到第二集时本源就一条都不剩了.
+     * 按集裁剪是选择器的事, 数据源不该自己裁.
+     */
     suspend fun queryLinks(request: MediaFetchRequest): List<DirectLink> {
         val bangumiSubjectId = request.subjectId.takeIf { it.isNotBlank() } ?: return emptyList()
         val subjectId = resolveSubjectId(bangumiSubjectId, request.subjectNames) ?: return emptyList()
 
         val variables = baseVariables(request) + ("subjectId" to subjectId)
-        val episodeValue = resolveEpisodeValue(request, variables) ?: return emptyList()
+        val episodes = resolveEpisodes(request, variables)
 
-        return fetchLines(variables + ("episodeId" to episodeValue))
+        return fetchLinesOfAllEpisodes(episodes, variables)
     }
 
     // ============================ 三步 ============================
@@ -93,34 +107,83 @@ internal class DirectApiEngine(
         return null
     }
 
-    private suspend fun resolveEpisodeValue(request: MediaFetchRequest, variables: Map<String, String>): String? {
+    /**
+     * 站点的剧集列表 (一次请求拿全), 对应到条目的剧集上.
+     *
+     * 条目的剧集已知时以它为准 (先用 bangumi 分集 id 精确对, 对不上再按集号), 这样每条资源的剧集号
+     * 与条目一致; 条目剧集未知时退回站点自己的集号.
+     */
+    private suspend fun resolveEpisodes(
+        request: MediaFetchRequest,
+        variables: Map<String, String>,
+    ): List<SiteEpisode> {
         val episode = config.episode
         val items = fetchItems(episode.request, variables)
-        if (items.isEmpty()) return null
+        if (items.isEmpty()) return emptyList()
 
-        // 有 bangumi 分集 id 就精确命中
-        if (episode.matchPath.isNotBlank() && request.episodeId.isNotBlank()) {
-            items.firstOrNull { item ->
-                item.selectByPath(episode.matchPath).any { it.asStringOrNull() == request.episodeId }
-            }?.let { return it.stringByPath(episode.valuePath) }
+        if (request.episodes.isEmpty()) {
+            return items.mapNotNull { item ->
+                val value = item.stringByPath(episode.valuePath) ?: return@mapNotNull null
+                val sort = item.stringByPath(episode.sortPath)?.takeIf { it.isNotBlank() }?.let { EpisodeSort(it) }
+                SiteEpisode(value, sort)
+            }
         }
 
-        // 否则按集号. 注意站点的集号可能写成 "1.0" 或 "01", 所以按数值比
+        return request.episodes.mapNotNull { wanted ->
+            val item = findEpisodeItem(items, wanted) ?: return@mapNotNull null
+            val value = item.stringByPath(episode.valuePath) ?: return@mapNotNull null
+            SiteEpisode(value, wanted.sort)
+        }
+    }
+
+    private fun findEpisodeItem(items: List<DataNode>, wanted: MediaFetchRequest.Episode): DataNode? {
+        val episode = config.episode
+        // 有 bangumi 分集 id 就精确命中
+        if (episode.matchPath.isNotBlank() && wanted.episodeId.isNotBlank()) {
+            items.firstOrNull { item ->
+                item.selectByPath(episode.matchPath).any { it.asStringOrNull() == wanted.episodeId }
+            }?.let { return it }
+        }
+        // 否则按集号. 站点的集号可能写成 "1.0" 或 "01", 所以按数值比
         if (episode.sortPath.isNotBlank()) {
-            val target = request.episodeSort.toString().toFloatOrNull()
+            val target = wanted.sort.toString().toFloatOrNull()
             if (target != null) {
-                items.firstOrNull { item ->
+                return items.firstOrNull { item ->
                     item.stringByPath(episode.sortPath)?.toFloatOrNull() == target
-                }?.let { return it.stringByPath(episode.valuePath) }
+                }
             }
         }
         return null
     }
 
-    private suspend fun fetchLines(variables: Map<String, String>): List<DirectLink> {
+    /**
+     * 取地址通常是一集一个请求, 所以按集并发, 并用 [MAX_PARALLEL_EPISODE_REQUESTS] 限住并发数,
+     * 免得一部长番一次打出几百个请求.
+     */
+    private suspend fun fetchLinesOfAllEpisodes(
+        episodes: List<SiteEpisode>,
+        variables: Map<String, String>,
+    ): List<DirectLink> {
+        if (episodes.isEmpty()) return emptyList()
         val lines = config.lines
-        return buildDirectLinks(fetchItems(lines.request, variables), lines)
+        val semaphore = Semaphore(MAX_PARALLEL_EPISODE_REQUESTS)
+        return coroutineScope {
+            episodes.map { siteEpisode ->
+                async {
+                    semaphore.withPermit {
+                        buildDirectLinks(
+                            fetchItems(lines.request, variables + ("episodeId" to siteEpisode.value)),
+                            lines,
+                            episodeRange = siteEpisode.sort?.let { EpisodeRange.single(it) },
+                        )
+                    }
+                }
+            }.awaitAll().flatten()
+        }
     }
+
+    /** 站点上的一集: [value] 传给取地址的请求, [sort] 是它对应的剧集号 (未知为 null). */
+    private class SiteEpisode(val value: String, val sort: EpisodeSort?)
 
     // ============================ 请求与取值 ============================
 
@@ -175,6 +238,7 @@ internal class DirectApiEngine(
 
     private companion object {
         private const val SUBJECT_ID_CACHE_SIZE = 64
+        private const val MAX_PARALLEL_EPISODE_REQUESTS = 6
         private val logger = logger<DirectApiEngine>()
     }
 }
@@ -182,12 +246,20 @@ internal class DirectApiEngine(
 /**
  * 把取到的条目按 [lines] 组装成 [DirectLink]. 与 HTTP 无关, 便于用录下来的响应做测试.
  */
-internal fun buildDirectLinks(items: List<DataNode>, lines: DirectApiConfig.LinesConfig): List<DirectLink> =
-    items.mapNotNull { item -> toDirectLink(item, lines) }
+internal fun buildDirectLinks(
+    items: List<DataNode>,
+    lines: DirectApiConfig.LinesConfig,
+    episodeRange: EpisodeRange? = null,
+): List<DirectLink> =
+    items.mapNotNull { item -> toDirectLink(item, lines, episodeRange) }
         .distinctBy { it.url }
         .limitPerChannel(lines.maxPerChannel)
 
-private fun toDirectLink(item: DataNode, lines: DirectApiConfig.LinesConfig): DirectLink? {
+private fun toDirectLink(
+    item: DataNode,
+    lines: DirectApiConfig.LinesConfig,
+    episodeRange: EpisodeRange?,
+): DirectLink? {
     val rawUrl = item.stringByPath(lines.urlPath) ?: return null
     val url = applyTransforms(rawUrl, lines.urlTransforms) ?: return null
     val channel = lines.channelPath.takeIf { it.isNotBlank() }
@@ -200,6 +272,7 @@ private fun toDirectLink(item: DataNode, lines: DirectApiConfig.LinesConfig): Di
         url = url,
         title = listOfNotNull(subjectName, title).joinToString(" ").ifBlank { url },
         channel = channel?.takeIf { it.isNotBlank() },
+        episodeRange = episodeRange,
         subjectName = subjectName,
     )
 }
