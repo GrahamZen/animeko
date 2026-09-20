@@ -72,7 +72,12 @@ open class TvKeyLongPressHost(
     /**
      * 计时器作用域 (主线程): 给了就**按住满 [TV_LONG_PRESS_HOLD] 当场触发**, 不必等系统连发 ——
      * 安卓的第一发连发在按下约 400ms 之后, 那是"长按多久出面板"的地板 (用户 2026-09-15: 动作面板反应一直很慢).
-     * null = 只按连发计数 (旧行为, 供测试 / 非 TV 用).
+     * null = 只按连发计数.
+     *
+     * **当前 TV 装配处传的是 null** (2026-09-19 退回, 见 `InstallTvPageVariants`): 按住计时的前提是
+     * "到点还没松手就一定是长按", 而**主线程一卡这个前提就不成立** —— KeyUp 挤在卡住的主线程后面,
+     * 计时器先到点, 短按被判成长按. 系统连发不会凭空出现, 按连发计数天然免疫这一类误判.
+     * 要再启用它, 得先有一个不依赖"事件准时到达"的在按判据.
      */
     private val scope: CoroutineScope? = null,
 ) {
@@ -187,7 +192,11 @@ internal val TV_BACK_KEYS = setOf(Key.Back, Key.Escape)
 
 /**
  * 根部长按宿主"按住多久算长按" (见 [TvKeyLongPressHost] 的 scope): 按住到点当场触发, 不等系统连发.
- * 280ms —— 比系统第一发连发 (~400ms) 早一大截, 又远长于正常短按的按住时长 (~100ms), 不会把"按一下返回"误判成长按.
+ * 280ms —— 比系统第一发连发 (~400ms) 早一大截, 又长于正常短按的按住时长 (~100ms).
+ *
+ * **只在传了 scope 时才生效, 而 TV 装配处现已不传** (2026-09-19): "长于正常短按"这个前提在主线程
+ * 卡顿时不成立, 详见 scope 的说明. 常量留着供测试与将来重启用.
+ *
  * 节点级的 [tvLongPressKey] 仍按连发计数 ([LONG_PRESS_KEY_DOWN_COUNT] + [LONG_PRESS_MIN_HOLD]), 两套并存规则见类文档.
  */
 val TV_LONG_PRESS_HOLD = 280.milliseconds

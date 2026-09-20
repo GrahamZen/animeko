@@ -23,7 +23,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.key
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -124,10 +123,14 @@ fun MaybeInstallTvPageVariants(isTv: Boolean, aniNavigator: AniNavigator, conten
 fun InstallTvPageVariants(aniNavigator: AniNavigator, content: @Composable () -> Unit) {
     // 遥控器全局长按手势 (机制与分层见 TvKeyLongPressHost 的 KDoc): 每个键集一份跟踪器,
     // 挂在下方根 Box 上; "长按之后干什么"由在场的界面注册 (播放器收叠层在栈顶, 这里只有兜底)
-    // 作用域给宿主跑"按住计时": 按住到 TV_LONG_PRESS_HOLD 当场触发, 不等系统第一发连发 (~400ms)
-    val longPressScope = rememberCoroutineScope()
-    val backLongPress = remember(longPressScope) { TvBackLongPressHost(longPressScope) }
-    val playLongPress = remember(longPressScope) { TvKeyLongPressHost(TV_PLAY_KEYS, longPressScope) }
+    //
+    // **不给作用域 = 只按系统连发计数** (2026-09-19 退回): 早先给了它, 让"按住满 TV_LONG_PRESS_HOLD
+    // 当场触发"以求更跟手 (用户 2026-09-15 嫌动作面板反应慢). 但那条路的前提是"280ms 远长于正常
+    // 短按", 而**主线程一卡这个前提就不成立** —— 从详情页返回时 KeyUp 挤在卡住的主线程后面,
+    // 计时器先到点, 短按就被判成长按、弹出动作面板 (用户 2026-09-19). 系统连发不会凭空出现,
+    // 按连发计数天然免疫这一类误判; 代价是首发连发要 ~400ms, 面板慢一点.
+    val backLongPress = remember { TvBackLongPressHost() }
+    val playLongPress = remember { TvKeyLongPressHost(TV_PLAY_KEYS) }
     // 方向键按住的真信号 (hero 文字 / 背景图 / 集信息行按住期间不换), 见 TvNavKeyTracker
     val navKeys = rememberTvNavKeyTracker()
     // 放大转场的导航规则要在详情页组合之前知道目标背景 URL: 注册进程内热表的取法 (见 TvHeroZoomHandoff.willZoom)
