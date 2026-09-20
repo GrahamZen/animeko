@@ -108,13 +108,17 @@ import me.him188.ani.utils.httpdownloader.DownloadState
         AutoMigration(from = 17, to = 18, spec = Migrations.Migration_17_18::class),
         AutoMigration(from = 18, to = 19, spec = Migrations.Migration_18_19::class),
         AutoMigration(from = 20, to = 21, spec = Migrations.Migration_20_21::class),
-        AutoMigration(from = 21, to = 22, spec = Migrations.Migration_21_22::class),
+        // 21 -> 22 由手写的 [MIGRATION_21_22] 提供 (fork 的"按集拆 torrent 缓存", 已随 5.7.1 发出去).
+        // **22/23/24 必须保持 fork 已发布的定义**: 老用户机上的 24 就是这个形态, 版本号相同而
+        // schema 不同会让 Room 的 identityHash 校验失败, 应用直接打不开 (踩过两次).
+        // 上游同期也用掉了 22/23/24 三个号, 内容完全不同 —— 它那三步合并成下面一步 24 -> 25.
         AutoMigration(from = 22, to = 23, spec = Migrations.Migration_22_23::class),
-        AutoMigration(from = 23, to = 24, spec = Migrations.Migration_23_24::class),
+        // 23 -> 24: subject_collection 加 screeningYear / theatrical 两列 (纯加列, 有默认值, 不需要 spec).
+        AutoMigration(from = 23, to = 24),
         // 24 -> 25: subject_collection 加 screeningYear / theatrical 两列 (纯加列, 有默认值,
         // 不需要 spec). 供 TMDB 匹配判断"是不是只在影院放映"与"真正的上映年份", 见
         // [SubjectCollectionEntity.screeningYear].
-        AutoMigration(from = 24, to = 25),
+        AutoMigration(from = 24, to = 25, spec = Migrations.Migration_24_25::class),
     ],
     exportSchema = true,
 )
@@ -195,6 +199,47 @@ val MIGRATION_19_20 = object : Migration(startVersion = 19, endVersion = 20) {
         )
         connection.execSQL(
             "CREATE INDEX IF NOT EXISTS `index_episode_comment_parentCommentId` ON `episode_comment` (`parentCommentId`)",
+        )
+    }
+}
+
+val MIGRATION_21_22 = object : Migration(startVersion = 21, endVersion = 22) {
+    override fun migrate(connection: SQLiteConnection) {
+        // 1. 把 torrent_cache 重建为"种子级"表 (去掉按集字段), 保留 torrentData / relativeDir
+        connection.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `torrent_cache_new` (
+                `mediaId` TEXT NOT NULL,
+                `torrentData` BLOB NOT NULL,
+                `relativeDir` TEXT NOT NULL,
+                PRIMARY KEY(`mediaId`)
+            )
+            """.trimIndent(),
+        )
+        connection.execSQL(
+            """INSERT OR IGNORE INTO `torrent_cache_new` (`mediaId`, `torrentData`, `relativeDir`)
+                SELECT `mediaId`, `torrentData`, `relativeDir` FROM `torrent_cache`""",
+        )
+        connection.execSQL("DROP TABLE `torrent_cache`")
+        connection.execSQL("ALTER TABLE `torrent_cache_new` RENAME TO `torrent_cache`")
+        connection.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS `index_torrent_cache_mediaId` ON `torrent_cache` (`mediaId`)",
+        )
+
+        // 2. 新建按集文件表 (留空, 自愈)
+        connection.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `torrent_cache_file` (
+                `mediaId` TEXT NOT NULL,
+                `subjectId` TEXT NOT NULL,
+                `episodeId` TEXT NOT NULL,
+                `pathInTorrent` TEXT NOT NULL,
+                `completed` INTEGER NOT NULL,
+                `downloadSize` INTEGER NOT NULL,
+                `uploadSize` INTEGER NOT NULL,
+                PRIMARY KEY(`mediaId`, `subjectId`, `episodeId`)
+            )
+            """.trimIndent(),
         )
     }
 }
@@ -397,27 +442,27 @@ internal object Migrations {
     /**
      * Web 源搜索缓存改用新表 [WebSearchSessionCacheEntity] (播放 session 级缓存, 完整复合唯一键),
      * 删除旧的 `web_search_subject` / `web_search_episode`.
+     *
+     * **上游把这一步放在 21 -> 22, fork 挪到了 22 -> 23**: fork 的 22 已经发出去了 (那一版是
+     * 按集拆分 torrent 缓存, 见 [MIGRATION_21_22]), 两边的 22 内容不同.
      */
     @DeleteTable("web_search_episode")
     @DeleteTable("web_search_subject")
-    class Migration_21_22 : AutoMigrationSpec {
-        override fun onPostMigrate(connection: SQLiteConnection) {
-        }
-    }
-
-    /**
-     * Added [EpisodeCollectionEntity.imageMedium] and [EpisodeCollectionEntity.imageLarge] (TMDB 剧照直链, 可空).
-     */
     class Migration_22_23 : AutoMigrationSpec {
         override fun onPostMigrate(connection: SQLiteConnection) {
         }
     }
 
     /**
-     * Added [TorrentCacheEpisodeEntity]: BT 缓存按 (资源, 剧集) 记录完成状态与文件路径.
-     * `torrent_cache` 中原有的按资源记录的列保留, 供尚无剧集记录的旧数据回退读取.
+     * 同步上游 (2026-09-20 rebase): 上游那边的 22 -> 23 与 23 -> 24 两步, 在 fork 这边合并成这一步.
+     *
+     * - 加 [EpisodeCollectionEntity.imageMedium] / [EpisodeCollectionEntity.imageLarge] (TMDB 剧照直链);
+     * - 加 [TorrentCacheEpisodeEntity]: BT 缓存按 (资源, 剧集) 记完成状态与文件路径 ——
+     *   它是 fork 那张 `torrent_cache_file` 的超集 (上游 #3442), 所以后者一并删掉,
+     *   已缓存的 BT 资源会走上游的回退逻辑从 `torrent_cache` 重新认领文件.
      */
-    class Migration_23_24 : AutoMigrationSpec {
+    @DeleteTable("torrent_cache_file")
+    class Migration_24_25 : AutoMigrationSpec {
         override fun onPostMigrate(connection: SQLiteConnection) {
         }
     }
