@@ -504,6 +504,7 @@ private fun part3() = listOf(
     RemoteText("在线源", "Online sources", "在線源", "線上源"),
     RemoteText("BT 源", "BT sources", "BT 源", "BT 源"),
     RemoteText("已缓存", "Cached", "已緩存", "已快取"),
+    RemoteText("已下完 · 做种中", "Downloaded · seeding", "已下完 · 做種中", "已下完 · 做種中"),
     RemoteText("已排除：", "Excluded: ", "已排除：", "已排除："),
     RemoteText("当前", "Current", "當前", "當前"),
     RemoteText("还有 {0} 条未列出，", "{0} more not listed. ", "還有 {0} 條未列出，", "還有 {0} 條未列出，"),
@@ -548,6 +549,9 @@ private fun part3() = listOf(
 private fun part4() = listOf(
     RemoteText("暂停", "Pause", "暫停", "暫停"),
     RemoteText("取消静音", "Unmute", "取消靜音", "取消靜音"),
+    RemoteText("全屏（可转小窗）", "Fullscreen (then small window)", "全屏（可轉小窗）", "全螢幕（可轉子母畫面）"),
+    RemoteText("全屏（正在准备）", "Fullscreen (getting ready)", "全屏（正在準備）", "全螢幕（正在準備）"),
+    RemoteText("这个浏览器不让网页全屏", "This browser won't let a web page go fullscreen", "這個瀏覽器不讓網頁全屏", "這個瀏覽器不讓網頁全螢幕"),
     RemoteText("跳到 {0}", "Jump to {0}", "跳到 {0}", "跳到 {0}"),
     RemoteText("如 21:30", "e.g. 21:30", "如 21:30", "如 21:30"),
     RemoteText("跳到的时间", "Time to jump to", "跳到的時間", "跳到的時間"),

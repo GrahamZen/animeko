@@ -811,8 +811,10 @@ input[type=checkbox], input[type=radio] { accent-color: var(--p); }
 /* 跳片头的 85 秒: 跟在前进 10 秒后面, 同一个图标只是数字不同; 略小一圈并淡一档, 与前后退那两颗分出主次 */
 .pb-ctrls .pb-skip { color: var(--now-fg2); }
 .pb-ctrls .pb-skip svg { width: 28px; height: 28px; }
-.pb-system { display: flex; justify-content: center; margin-top: 10px; }
+.pb-system { display: flex; justify-content: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 .pb-system[hidden] { display: none; }
+.pb-system button[hidden] { display: none; }
+.pb-system button[disabled] { opacity: .45; }
 .pb-system button { padding: 7px 12px; border-radius: 16px; background: var(--now-accent-pill); color: var(--p); font-size: 12px; font-weight: 600;
   -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
 .pb-system button.on { background: var(--p); color: var(--on-p); }
@@ -1138,6 +1140,28 @@ private val SCRIPT = """
   var srcFilter = null, lastState = null;
   // login: 电视刚登录上 (账号卡片发现的), 评论与评分区据此重新读一次
   var hooks = { render: [], unavailable: [], playback: [], login: [] };
+  /**
+   * 逐个跑钩子, 一个抛异常不影响其他的。
+   *
+   * 原先是 `list.forEach(function (h) { h(arg); })` —— 排在前面的钩子一抛, 后面的全不执行。
+   * 而画播放控件的 paint() 恰恰排在较后面, 于是任意一个无关的钩子 (系统媒体控件 /
+   * 弹幕 / 统计) 出事, 进度条和播放键就整个不出现。
+   * 2026-09-20 用户报「来回切番剧之后控件不加载」。
+   *
+   * 异常另外发回电视: 手机上的控制台看不到, 这是这类问题唯一的现场 (见 RemoteClientLog)。
+   * clientLog 自带 10 秒去重, 每秒轮询一直抛也不会刷爆日志。
+   */
+  function runHooks(name, list, arg) {
+    for (var i = 0; i < list.length; i++) {
+      try {
+        list[i](arg);
+      } catch (e) {
+        console.error(name + ' hook #' + i + ' failed', e);
+        if (window.clientLog) window.clientLog(name + ' hook #' + i + ' failed: ' + (e && e.message || e));
+      }
+    }
+  }
+  window.runHooks = runHooks;
   window.remoteHooks = hooks;
 
   function esc(s) {
@@ -1568,10 +1592,15 @@ private val SCRIPT = """
       .then(function (r) { return r.json(); })
       .then(function (s) {
         resBusy = false;
-        if (!s.same) { resVer = s.v; renderResults(s); }
+        // 同播放器轮询: 渲染成功了才能推进版本号, 否则一次异常就把列表永久卡在旧内容上
+        if (!s.same) { renderResults(s); resVer = s.v; }
         if (resAgain) { resAgain = false; pollResults(true); }
       })
-      .catch(function (e) { resBusy = false; console.error(e); });
+      .catch(function (e) {
+        resBusy = false;
+        console.error(e);
+        if (window.clientLog) window.clientLog('search poll/render failed: ' + (e && e.message || e));
+      });
   }
   setInterval(function () { pollResults(false); }, 1000);
   document.addEventListener('visibilitychange', function () { if (!document.hidden) pollResults(true); });
@@ -2230,14 +2259,25 @@ private val SCRIPT = """
       .then(function (s) {
         busy = false;
         if (!s.same) {
-          ver = s.v;
+          // **先渲染成功再记版本号**: 反过来的话 render 一抛异常, 版本号却已经推进了 ——
+          // 下一轮轮询带着它去问, 服务端只回 same:true, 完整状态再也不会下发,
+          // 控件就永远停在渲染失败那一刻。
+          // 2026-09-20 用户报「来回切番剧后控件不加载, 按一下播放键或者进设置再回来就好了」:
+          // 那两条路恰恰都走 poll(true) (版本号置空强制全量), 绕过了这个死锁。
           render(s);
+          ver = s.v;
         }
-        if (s.playback) hooks.playback.forEach(function (h) { h(s.playback); });
+        if (s.playback) window.runHooks('playback', hooks.playback, s.playback);
         if (again) { again = false; poll(true); }
       })
       // 打出来: 渲染里的异常也落在这个 catch 里, 不打的话界面画一半就停、控制台一行字都没有
-      .catch(function (e) { busy = false; console.error(e); });
+      .catch(function (e) {
+        busy = false;
+        console.error(e);
+        // 手机上的控制台看不到, 而这是"控件不加载"这类问题唯一的现场 (见 RemoteClientLog).
+        // clientLog 在另一个 IIFE 里, 走 window; 它自带 10 秒去重, 连续失败也不会刷爆日志。
+        if (window.clientLog) window.clientLog('player poll/render failed: ' + (e && e.message || e));
+      });
   }
   window.poll = poll;
   // 接入系统控件后页面隐藏 (多半是锁屏) 仍要拉状态, 但锁屏上的进度不需要 1.5 秒的精度, 而每拉一次就是
@@ -2311,7 +2351,7 @@ private val SCRIPT = """
       document.getElementById('player-filters').innerHTML = '';
       lastFiltersHtml = '';
       src.innerHTML = '';
-      hooks.unavailable.forEach(function (h) { h(s); });
+      window.runHooks('unavailable', hooks.unavailable, s);
       return;
     }
     // 正在播哪个数据源放在剧名下、播放键上方: 候选列表里的「正在播放」角标要往下翻很远才看得到
@@ -2334,7 +2374,7 @@ private val SCRIPT = """
     chips.innerHTML = renderChips(s);
     renderFilters(s);
     src.innerHTML = renderList(s);
-    hooks.render.forEach(function (h) { h(s); });
+    window.runHooks('render', hooks.render, s);
   }
 
   function renderChips(s) {
@@ -2658,6 +2698,27 @@ private val REQUEST_SCRIPT = """
 """.trimIndent()
 
 /**
+ * 静音载体那一帧画面的 H.264 数据 (480x270 的深色底 + 电视图标 + Animeko 字样)。
+ *
+ * 载体是现拼的 MP4 (见 CONTROL_SCRIPT 的 silentClipUrl): 视频轨**只有这一帧**, 靠 sample duration 撑满
+ * 整集; 音频轨是 N 个一模一样的静音 AAC 帧。画面是死的 —— 想画实时内容得 canvas.captureStream() ->
+ * video.srcObject, 那条在 iOS 上根本播不出来 (WebKit #181663), 所以封面 / 标题 / 进度进不去。画个图案
+ * 只是免得小窗是一块纯黑让人以为坏了。
+ *
+ * 重新生成 (pip.png 是那张底图):
+ *
+ *     ffmpeg -loop 1 -i pip.png -frames:v 1 -vf scale=480:270 -c:v libx264 -profile:v baseline
+ *            -level 3.0 -pix_fmt yuv420p -bsf:v h264_mp4toannexb -f h264 one.h264
+ *
+ * 再把 Annex B 切成 NAL, 取 type 7 / 8 / 5 分别做 SPS / PPS / IDR (type 6 的 SEI 丢掉), 各自 base64。
+ * baseline + yuv420p 别改: iOS 对这一帧挑剔, 换了可能解不出来而小窗一片黑。
+ */
+private const val CARRIER_SPS_BASE64 = "Z0LAHtkB4I/qEAAAAwAQAAADAyDxYuSA"
+private const val CARRIER_PPS_BASE64 = "aMuDyyA="
+private const val CARRIER_IDR_BASE64 =
+    "ZYiECvEYoAAoex9JycnJycnJycnJycnJycnJycnJycnJycnJycnJyddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddf+W0Ntgq5ZQE1B0nwAJHfQksDgIHnZ6PFxJgYCUoWD9gSDPo8Dx/v/hPz++93333334rXOqQQB3BGbnl4R9dI6WE6xSXONoE0ivJTUFdddddddddddddddddddcdBUhf5r9a3BXfffffff///DwKteoK66666666666666666666666/wqcOHCwKoBLcGhPpPAA/xr1f+qgupwrBI3sac+PytMFdddQVOoK666666666666666666666666/6+TuJYwFXgJBZJl5AJL6x4AKPQoUqwyadMo8B+pu3/7DxwSmb7c7s07UEtdddddddddddddddddddddddddfCN3L/hIFHATmCR/QAosLP4UtnqGsxCDp4BjVLja6666666666666666666666+H/TU4VBVwytmWXCF5P/wwCCAfjbpbffa33338P8i2wqOwR+MT3lDNQV11111111111111111118+q/+EgUbwJfI0m/wk4wof/+HvUNd5Mfj+vw4U8BNS3Ov8fw4f+F/4LABCywaUz/VvffvF//4S4RqxgEtc353Q3p9QU1111111111111111111311/AYaf2CiAj3z8kE1TW95rtX2kf/h/w/gJhnJ+f4gAf/D3wHSGkt/rD7+FIEvqZ6qiTMI8qG/6YKa7666666666666666666666646GP/wCVpPHz///+CHwAIdW3ok2v/qHwQG76rjRpX3pB///9AhBFgBFirrBcZq9QR11111111111111111111111///wQhrgBEXynzmDUpZo0XYQiheewAUfgm//BDkRCOnT9sO5wIKsPUoTeJ2nEJeY8zb4CDDftoeYHb9tCmz5lOyOe9FcB0DvgAkn2Pd+NYYPhpHnlYbuwu/XtjlT12pPiYcAA/igP3vRQW1HxXxTut0qJYrdbIh7gcpw93ca6xR2D9T6S2lI+XJh2jAAAZmh+WR//7rg5BtvfCFDbd0F95e3I3t0ATHMdiJQAAGLAD1nO6P7MtAPkRgCG9TijhOBoFzqfuEosd8L/kOdPpZe74AtihuTEBWteYBYFExvH6ZnNwF5GNA8N0fQn+0YhOoHvxYGTm+K2NKG18Ug3OmysJzDdvGlQNoWCX9bwDRGs8sBsmmitse0fvJwxMVaz0dP7fggEgN5SzJ763lcoz1BHXXXXXXXXXXXXXXXXXXXXX/CH/D4ILaGGlruf7Bm0P+EiV+spbn3/8AxPeGbffz8ecB/4SjGAvYa1cv+AGATh1Kmrw7WaF49/3PnD/hKMdItI+4NEcLEkZe/+QA0RwsTZl7+cBX/4S+AGiHCxIjL3wAGV3CQbLfiEBP/4Sh6nFzfmW7+ENHX0NrqD/ZMX/+EoAYlo0BM2/2bfv4f5IDFRjPMZ2lJJf5IdDUTXXXXXXXXXXXXXXXXXXXXXXXfffffXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXg"
+
+/**
  * 播放控制的脚本: 「正在播放」卡片里的进度条 + 后退 10 秒 / 播放暂停 / 前进 10 秒.
  * 卡片随候选变化整块重画, 所以控件在每次 render 后补上; 进度由每次轮询附带的 `playback` 刷新.
  * 点播放暂停先在本地翻转一次按钮文字, 不等下一次轮询 —— 否则按下去要过一秒才有反应, 像没按到.
@@ -2670,9 +2731,12 @@ private val CONTROL_SCRIPT = """
   var mediaSupported = !!(navigator.mediaSession && window.MediaMetadata);
   // 设置页据此决定显不显示「锁屏 / 控制中心」那一项 (LOOK_SCRIPT)
   window.mediaSessionSupported = mediaSupported;
-  var mediaEnabled = false, mediaAudio = null, mediaAudioUrl = '', mediaState = null;
+  var mediaEnabled = false, mediaCarrier = null, carrierUrl = '', mediaState = null;
+  var CARRIER_SPS = '$CARRIER_SPS_BASE64', CARRIER_PPS = '$CARRIER_PPS_BASE64', CARRIER_IDR = '$CARRIER_IDR_BASE64';
   // 上一次推给系统的内容; 每轮轮询都重建 MediaMetadata / 调 setPositionState 是白工, 变了才推
   var lastMetaKey = '', lastPlayKey = '';
+  // 上一次真贴上去的封面, 新的还没探到时沿用它 (见 updateMediaMetadata 里的说明)
+  var lastArtwork = [];
   function mediaMode() {
     try {
       var v = localStorage.getItem('ani-media-session-auto');
@@ -2697,77 +2761,456 @@ private val CONTROL_SCRIPT = """
   //      只是补充 —— 拿一秒的循环当载体, 进度条就在 0 与 1 秒之间跳。
   // 两条合起来只剩一条路: **让载体的时间轴就是电视这一集的时间轴** —— 时长按剧集长度生成, currentTime 跟着
   // 电视位置走。这样系统读元素也对, 读 setPositionState 也对。
+  /*
+   * 把这一侧的状态发回电视的日志 (见 RemoteClientLog)。**电视那边只记慢请求**, 网页里出的事在 logcat 里
+   * 本来一点痕迹都没有 —— 2026-09-20 排"全屏里总时长只有几秒"时手机侧整个是盲的, 只能靠电视日志里的副作用
+   * 反推, 绕了两轮。所以留这条单向通道, 只在关键节点发。
+   *
+   * 自带去重与限流: 这些地方万一进了循环 (占位片每秒绕一次就是活生生的例子), 不能把 logcat 和局域网一起刷爆。
+   */
+  var lastClientLog = '', lastClientLogAt = 0;
+  function clientLog(msg) {
+    try {
+      var text = String(msg);
+      var now = Date.now();
+      if (text === lastClientLog && now - lastClientLogAt < 10000) return;
+      lastClientLog = text;
+      lastClientLogAt = now;
+      post('api/client-log', { msg: text }).catch(function () {});
+    } catch (e) { /* 诊断而已, 失败就算了 */ }
+  }
+  // 轮询那几块在别的 IIFE 里, 它们的 catch 要用这条路把渲染异常发回电视
+  window.clientLog = clientLog;
   var carrierSeconds = 0;
   var carrierReady = false;
-  // 静音 8-bit PCM (无符号, 静音值 0x80). 采样率按时长自适应, 把 Blob 压在 8 MB 以内 —— 反正是静音, 采样率
-  // 多低都不影响, 只影响时间轴精度.
-  function silentWavUrl(seconds) {
-    var rate = Math.max(1000, Math.min(8000, Math.floor(8 * 1024 * 1024 / Math.max(1, seconds))));
-    var samples = Math.max(1, Math.round(rate * seconds));
-    var buffer = new ArrayBuffer(44 + samples), view = new DataView(buffer);
-    function textAt(offset, text) { for (var i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i)); }
-    textAt(0, 'RIFF'); view.setUint32(4, 36 + samples, true); textAt(8, 'WAVE'); textAt(12, 'fmt ');
-    view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
-    view.setUint32(24, rate, true); view.setUint32(28, rate, true); view.setUint16(32, 1, true); view.setUint16(34, 8, true);
-    textAt(36, 'data'); view.setUint32(40, samples, true);
-    new Uint8Array(buffer, 44).fill(128);
-    return URL.createObjectURL(new Blob([buffer], { type: 'audio/wav' }));
+  var carrierSelfActAt = 0, carrierSelfSeekAt = 0;
+  /*
+   * 载体是**一个带静音音轨的 `<video>`**, 不是 `<audio>`:
+   *   - 换成 video 才进得了全屏和小窗 (画中画), 而那两处的进度条 / 快进快退 / 拖动**全是系统原生的**,
+   *     用户直接就能用 —— 这正是 `<audio>` 给不了的。
+   *   - **有音轨这件事是关键**: iOS 只暂停"无音轨 / muted"的后台视频, 带音轨的和 `<audio>` 一样能接着播
+   *     (2026-09-20 用户拿在线视频站实测过)。所以别为了省事去掉音轨或加 muted。
+   *
+   * 文件是按集长现拼的 MP4: 视频轨**只有 1 帧** (见 CARRIER_IDR_BASE64), 靠 sample duration 撑满全程;
+   * 音频轨是 N 个一模一样的静音 AAC 帧。每帧等长等大又全塞在一个 chunk 里, 于是 stts/stsc/stsz/stco
+   * 四张表都与时长无关 —— 只有 mdat 变长, 约 173 字节/秒 (24 分钟 250 KB, 2 小时 1.2 MB)。
+   */
+  var AAC_RATE = 44100, AAC_FRAME = 1024, MP4_TS = 1000;
+  var CARRIER_W = 480, CARRIER_H = 270;
+  var SILENT_AAC = [0x01, 0x18, 0x20, 0x07];
+  var MP4_MATRIX = null;
+  function b64bytes(str) {
+    var bin = atob(str), a = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
+    return a;
+  }
+  function u32(n) { return [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255]; }
+  function u16(n) { return [(n >>> 8) & 255, n & 255]; }
+  function zeros(n) { var a = []; while (a.length < n) a.push(0); return a; }
+  function chars(str) { var a = []; for (var i = 0; i < str.length; i++) a.push(str.charCodeAt(i)); return a; }
+  function mbox(type, parts) {
+    var body = [];
+    for (var i = 0; i < parts.length; i++) body = body.concat(parts[i]);
+    return u32(8 + body.length).concat(chars(type), body);
+  }
+  function mfull(type, flags, parts) { return mbox(type, [[0].concat(u32(flags).slice(1))].concat(parts)); }
+  // MPEG-4 描述符: 长度是 7 位一组的变长编码
+  function mdesc(tag, body) {
+    var n = body.length;
+    return [tag].concat(n < 0x80 ? [n] : [0x80 | (n >> 7), n & 0x7F], body);
+  }
+  function esdsBox() {
+    var dsi = mdesc(0x05, [0x12, 0x08]);   // AudioSpecificConfig: AAC-LC / 44100 / 单声道
+    var dcd = mdesc(0x04, [0x40, 0x15].concat(zeros(3), u32(0), u32(0), dsi));
+    return mfull('esds', 0, [mdesc(0x03, u16(1).concat([0], dcd, mdesc(0x06, [0x02])))]);
+  }
+  function avcCBox(sps, pps) {
+    return mbox('avcC', [[1, sps[1], sps[2], sps[3], 0xFF, 0xE1].concat(
+      u16(sps.length), Array.prototype.slice.call(sps),
+      [1], u16(pps.length), Array.prototype.slice.call(pps))]);
+  }
+  function videoStbl(sps, pps, sampleLen, dur, off) {
+    var avc1 = mbox('avc1', [
+      zeros(6).concat(u16(1), zeros(16), u16(CARRIER_W), u16(CARRIER_H),
+        u32(0x00480000), u32(0x00480000), zeros(4), u16(1), zeros(32), u16(0x0018), [255, 255]),
+      avcCBox(sps, pps)]);
+    return mbox('stbl', [
+      mfull('stsd', 0, [u32(1), avc1]),
+      mfull('stts', 0, [u32(1), u32(1), u32(dur)]),   // 就这一帧, 一直显示到片尾
+      mfull('stss', 0, [u32(1), u32(1)]),
+      mfull('stsc', 0, [u32(1), u32(1), u32(1), u32(1)]),
+      mfull('stsz', 0, [u32(sampleLen), u32(1)]),
+      mfull('stco', 0, [u32(1), u32(off)])]);
+  }
+  function audioStbl(n, off) {
+    var mp4a = mbox('mp4a', [
+      zeros(6).concat(u16(1), zeros(8), u16(1), u16(16), zeros(4), u32(AAC_RATE * 65536)),
+      esdsBox()]);
+    return mbox('stbl', [
+      mfull('stsd', 0, [u32(1), mp4a]),
+      mfull('stts', 0, [u32(1), u32(n), u32(AAC_FRAME)]),
+      mfull('stsc', 0, [u32(1), u32(1), u32(n), u32(1)]),
+      mfull('stsz', 0, [u32(SILENT_AAC.length), u32(n)]),
+      mfull('stco', 0, [u32(1), u32(off)])]);
+  }
+  function trakBox(id, timescale, dur, handler, name, stbl, movieDur, w, h) {
+    var tkhd = mfull('tkhd', 7, [u32(0).concat(u32(0), u32(id), zeros(4), u32(movieDur), zeros(8),
+      u16(0), u16(0), u16(handler === 'soun' ? 0x0100 : 0), zeros(2), MP4_MATRIX,
+      u32(w * 65536), u32(h * 65536))]);
+    var mdhd = mfull('mdhd', 0, [u32(0).concat(u32(0), u32(timescale), u32(dur), [0x55, 0xC4, 0, 0])]);
+    var hdlr = mfull('hdlr', 0, [zeros(4).concat(chars(handler), zeros(12), chars(name), [0])]);
+    var dinf = mbox('dinf', [mfull('dref', 0, [u32(1), mfull('url ', 1, [])])]);
+    var mh = handler === 'vide' ? mfull('vmhd', 1, [zeros(8)]) : mfull('smhd', 0, [zeros(4)]);
+    return mbox('trak', [tkhd, mbox('mdia', [mdhd, hdlr, mbox('minf', [mh, dinf, stbl])])]);
+  }
+  function silentClipUrl(seconds) {
+    if (!MP4_MATRIX) {
+      MP4_MATRIX = u32(0x10000).concat(u32(0), u32(0), u32(0), u32(0x10000), u32(0), u32(0), u32(0), u32(0x40000000));
+    }
+    var sps = b64bytes(CARRIER_SPS), pps = b64bytes(CARRIER_PPS), idr = b64bytes(CARRIER_IDR);
+    var n = Math.max(1, Math.round(seconds * AAC_RATE / AAC_FRAME));
+    var videoDur = Math.max(1, Math.round(seconds * MP4_TS)), sampleLen = 4 + idr.length;
+    var ftyp = mbox('ftyp', [chars('isom').concat(u32(0x200), chars('isomiso2avc1mp41'))]);
+    function moov(vOff, aOff) {
+      var mvhd = mfull('mvhd', 0, [u32(0).concat(u32(0), u32(MP4_TS), u32(videoDur),
+        u32(0x00010000), u16(0x0100), zeros(10), MP4_MATRIX, zeros(24), u32(3))]);
+      return mbox('moov', [mvhd,
+        trakBox(1, MP4_TS, videoDur, 'vide', 'VideoHandler',
+          videoStbl(sps, pps, sampleLen, videoDur, vOff), videoDur, CARRIER_W, CARRIER_H),
+        trakBox(2, AAC_RATE, n * AAC_FRAME, 'soun', 'SoundHandler',
+          audioStbl(n, aOff), videoDur, 0, 0)]);
+    }
+    // chunk 偏移要指进 mdat, 而 mdat 在哪又取决于 moov 有多长 —— 先拿假偏移量算一份长度 (长度与偏移无关)
+    var probe = moov(0, 0);
+    var mdatStart = ftyp.length + probe.length + 8;
+    var head = ftyp.concat(moov(mdatStart, mdatStart + sampleLen));
+    var mdatLen = 8 + sampleLen + SILENT_AAC.length * n;
+    var out = new Uint8Array(head.length + mdatLen), at = head.length;
+    out.set(head, 0);
+    out.set(u32(mdatLen), at); out.set(chars('mdat'), at + 4); at += 8;
+    out.set(u32(idr.length), at); at += 4;          // avcC 是长度前缀格式, 不是 Annex B
+    out.set(idr, at); at += idr.length;
+    // 几十万帧逐个 set 太慢: 铺一帧之后成倍往后复制
+    var tail = out.subarray(at);
+    tail.set(SILENT_AAC, 0);
+    for (var filled = SILENT_AAC.length; filled < tail.length;) {
+      var take = Math.min(filled, tail.length - filled);
+      tail.set(tail.subarray(0, take), filled);
+      filled += take;
+    }
+    return URL.createObjectURL(new Blob([out], { type: 'video/mp4' }));
   }
   // 换集 / 第一次拿到片长时重建载体. 换 src 会短暂中断音频 (= 松一下焦点), 所以只在片长真的变了时做.
+  var carrierPendingSeconds = 0;
+  /** 上一条「推迟重建」日志记的是哪个长度; 只用于去重, 不参与任何逻辑. */
+  var carrierDeferNoted = 0;
   function ensureCarrier(seconds) {
-    if (!mediaAudio || !(seconds > 0)) return;
+    if (!mediaCarrier || !(seconds > 0)) return;
     if (Math.abs(carrierSeconds - seconds) < 1) return;
+    /*
+     * **正在全屏 / 小窗里时不能换 src**: iOS 的原生播放器还认着换之前那一份, 时长和进度都不跟着变。
+     * 2026-09-20 真机就是这么坏的 —— 加载还没完就按了全屏 (那时载体是一秒的循环占位片), 之后正确长度
+     * 那份再也顶不上去, 于是全屏里总时长只有几秒、进度在 0 和 1 秒之间绕, 而占位片每绕回一次都引出一个
+     * currentTime≈0 的 seeked, 被当成"用户拖到了片头"发给电视 (电视日志: jumped back 1049262ms -> 0ms)。
+     * 记下来, 等退出全屏 / 小窗再换。
+     */
+    /*
+     * **页面在后台时同样不能换**: 换 src 会在两份媒体之间留下一个空档, 前台时新的那份
+     * 马上 play() 就接上了; 而页面隐藏 / 锁屏时 iOS 不允许自动播新源, 空档就成了永久的 ——
+     * 控制中心那张卡被系统清掉, 手机上看着还在, 实际已经是个死壳 (进度 0、按钮无效)。
+     * 同类报告: Safari 锁屏时播放列表换曲, "the playback card in Control Center is cleared
+     * once one track stops before the next can play" (discussions.apple.com/thread/253331448),
+     * 以及锁屏后无法自动播下一首 (developer.apple.com/forums/thread/706499)。
+     * 2026-09-20 用户复现: 切番剧时赶在加载完成前把网页最小化 (那时载体还是一秒占位片,
+     * 拿到片长后必定要重建一次), 控件就被抢走。
+     *
+     * 代价是后台期间锁屏进度条还按旧时间轴画 (iOS 画的是载体自己的时间轴, 见下面
+     * updateMediaPlayback 的说明) —— 比起整个控件被收走, 这个代价小得多, 而且回前台立刻补正。
+     */
+    if (carrierPresenting() || document.hidden) {
+      var why = document.hidden ? 'hidden' : 'presenting';
+      // 这一句每轮轮询都会走到 (carrierSeconds 没变), 只在想要的长度真的变了时记一条。
+      // 去重用独立的 [carrierDeferNoted], 不跟 carrierPendingSeconds 共用 —— 后者还被
+      // applyPendingCarrier 改, 拿它当判据压不住 (2026-09-20 实测: PiP 期间每 10 秒漏一条,
+      // 恰好是 clientLog 自带去重的周期)。
+      if (carrierDeferNoted !== seconds) {
+        carrierDeferNoted = seconds;
+        clientLog('carrier rebuild deferred (' + why + '): want ' + seconds.toFixed(1) + 's, have ' + carrierSeconds.toFixed(1) + 's');
+      }
+      carrierPendingSeconds = seconds;
+      return;
+    }
+    carrierDeferNoted = 0;
+    carrierPendingSeconds = 0;
+    // 先把文件拼出来再改状态: 反过来写的话, 一次失败就会让 carrierSeconds 停在新值上, 此后每一轮都在
+    // 上面那行提前返回, 载体永远换不过去
+    var next;
+    try {
+      next = silentClipUrl(seconds);
+    } catch (e) {
+      console.warn('Carrier build failed for ' + seconds + 's', e);
+      clientLog('carrier build FAILED for ' + seconds.toFixed(1) + 's: ' + (e && e.message || e));
+      return;
+    }
+    clientLog('carrier rebuilt: ' + seconds.toFixed(1) + 's (was ' + carrierSeconds.toFixed(1) + 's)');
     carrierSeconds = seconds;
     carrierReady = false;
-    var wasPlaying = !mediaAudio.paused;
-    var stale = mediaAudioUrl;
-    mediaAudioUrl = silentWavUrl(seconds);
-    mediaAudio.loop = false;
-    mediaAudio.src = mediaAudioUrl;
+    // 换 src 会把 currentTime 打回 0 并引出 seeked —— 不按住这一下, 它就会被当成"用户拖到了片头"发给电视
+    carrierSelfSeekAt = Date.now();
+    var wasPlaying = !mediaCarrier.paused;
+    var stale = carrierUrl;
+    carrierUrl = next;
+    mediaCarrier.loop = false;
+    mediaCarrier.src = carrierUrl;
     // 换完再撤旧的, 别在元素还指着它时就回收
     if (stale) URL.revokeObjectURL(stale);
     if (wasPlaying) {
-      var again = mediaAudio.play();
+      var again = mediaCarrier.play();
       if (again && again.catch) again.catch(function () {});
     }
   }
   // 载体与电视对表. 差得不多就别动 —— 每次都写 currentTime 会让系统频繁重画, 反而抖.
   function syncCarrier(seconds) {
-    if (!mediaAudio || !carrierReady || !(carrierSeconds > 0)) return;
+    if (!mediaCarrier || !carrierReady || !(carrierSeconds > 0)) return;
     var target = Math.max(0, Math.min(carrierSeconds - 0.25, seconds));
-    if (Math.abs(mediaAudio.currentTime - target) < 2) return;
-    try { mediaAudio.currentTime = target; } catch (e) { console.warn('Silent carrier seek rejected', e); }
+    if (Math.abs(mediaCarrier.currentTime - target) < 2) return;
+    // 自己写的这一下会引出 seeked, 别把它当成"用户在全屏里拖了进度条"再发回电视
+    carrierSelfSeekAt = Date.now();
+    try { mediaCarrier.currentTime = target; } catch (e) { console.warn('Silent carrier seek rejected', e); }
   }
-  function createSilentAudio() {
-    var audio = document.createElement('audio');
-    // 还不知道片长时先拿一秒循环顶着 (至少先把焦点占住), 拿到 pb.duration 再由 ensureCarrier 换成等长的
-    mediaAudioUrl = silentWavUrl(1);
-    audio.src = mediaAudioUrl;
-    audio.loop = true;
-    audio.preload = 'auto';
-    audio.setAttribute('playsinline', '');
-    audio.setAttribute('aria-hidden', 'true');
-    audio.style.display = 'none';
+  /*
+   * ====== 全屏与小窗 (画中画) ======
+   * 载体本身就是那个 video, 所以全屏 / 小窗里的进度条、快进快退、拖动**全是系统原生的** —— 载体的时长
+   * 就是这一集的时长, 位置也一直跟电视对着表, 用户拖到哪我们就把哪转给电视。
+   *
+   * **只给一颗「全屏」按钮就够**: iOS 原生全屏播放器的退出键旁边自带画中画按钮, 小窗从那里进;
+   * 小窗还能拖到屏幕边上藏成一个把手, 于是不用每次下拉控制中心。所以这边不另做进小窗的按钮,
+   * 但**照样要盯着 pipActive** —— 用户从全屏转进小窗之后, 那上面的按键还得转发给电视。
+   *
+   * **画面是死的**: 想画实时内容得 canvas.captureStream() -> video.srcObject, iOS 上播不出来
+   * (WebKit #181663)。**图标也不会实时跟着电视变**: 页面切后台后 JS 基本停跑, 与锁屏控件同一个老限制。
+   */
+  var pipActive = false, fsActive = false;
+  function carrierPresenting() { return pipActive || fsActive; }
+  /*
+   * 自己调 play/pause/playbackRate 时按一下时间戳, 免得自家动作被当成"用户按的"又发回电视。
+   * **别用"布尔 + setTimeout(0) 清掉"那种写法**: 媒体元素的事件是排队派发的, 不保证比那个 0 毫秒
+   * 定时器先到 —— 标记先被清掉, 自家这一下就原样发回电视了。时间戳没有这个时序问题。
+   */
+  var CARRIER_SELF_MS = 500;
+  function carrierSelfJustActed() { return Date.now() - carrierSelfActAt < CARRIER_SELF_MS; }
+  function carrierQuiet(fn) {
+    carrierSelfActAt = Date.now();
+    try { fn(); } finally { carrierSelfActAt = Date.now(); }
+  }
+  function carrierFullscreenCan() {
+    var v = mediaCarrier;
+    if (v) return typeof v.webkitEnterFullscreen === 'function' || typeof v.requestFullscreen === 'function';
+    return !!(window.HTMLVideoElement && (HTMLVideoElement.prototype.webkitEnterFullscreen
+      || HTMLVideoElement.prototype.requestFullscreen));
+  }
+  /*
+   * **载体还是占位片的时候不许进全屏**。iOS 的全屏播放器认死进去时的那一份, 带着一秒的占位片进去之后
+   * 就回不了头了 (见 ensureCarrier)。所以片长还没到、或者载体还没换过来时, 按钮置灰。
+   * 载体还没建 (没接入) 时是可以的 —— 点下去会当场按这一集的长度建好再进。
+   */
+  function carrierFullscreenReady() {
+    // 已经在全屏 / 小窗里了, 这颗按钮只是个状态显示, 不用再拦
+    if (carrierPresenting()) return true;
+    if (!(pb && pb.duration > 0)) return false;
+    var v = mediaCarrier;
+    if (!v) return true;
+    return !v.loop && Math.abs(carrierSeconds - pb.duration / 1000) < 2;
+  }
+  function enterCarrierFullscreen() {
+    var v = mediaCarrier;
+    if (!v || !carrierFullscreenReady()) return;
+    // iOS 两条硬要求: 得在用户手势的调用栈里, 而且视频要正在播。所以 play() 之后**同步**就切, 等 promise 会掉出手势栈。
+    carrierQuiet(function () {
+      var started = v.play();
+      if (started && started.catch) started.catch(function (e) { console.warn('Carrier play rejected', e); });
+      try {
+        // iPhone 上 requestFullscreen 对 video 不管用, 得用 webkit 这个才进原生播放器 (画中画按钮也在那上面)
+        if (typeof v.webkitEnterFullscreen === 'function') v.webkitEnterFullscreen();
+        else if (v.requestFullscreen) {
+          v.requestFullscreen().catch(function (e) {
+            console.warn('Fullscreen rejected', e);
+            toast(T('这个浏览器不让网页全屏'));
+          });
+        }
+      } catch (e) {
+        console.warn('Fullscreen rejected', e);
+        toast(T('这个浏览器不让网页全屏'));
+      }
+    });
+  }
+  // 呈现期间 / 页面在后台时欠下的那次重建, 回来之后补上
+  function applyPendingCarrier() {
+    if (carrierPresenting() || document.hidden || !(carrierPendingSeconds > 0)) return;
+    var want = carrierPendingSeconds;
+    carrierPendingSeconds = 0;
+    ensureCarrier(want);
+  }
+  // 回到前台: 把后台期间欠下的载体重建补上 (这时 play() 不再需要用户手势,
+  // 见 keepMediaAudioAlive), 锁屏进度条的时间轴随之对回来
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) applyPendingCarrier();
+  });
+  // 全屏 / 小窗里的播放状态跟电视走 —— 那上面的图标认的是这个元素自己在不在播
+  function syncCarrierPlayback() {
+    var v = mediaCarrier;
+    if (!v || !carrierPresenting()) return;
+    var want = !!(pb && pb.playing);
+    if (want === !v.paused) return;
+    carrierQuiet(function () {
+      if (want) {
+        var again = v.play();
+        if (again && again.catch) again.catch(function (e) { console.warn('Carrier resume rejected', e); });
+      } else v.pause();
+    });
+  }
+  function createCarrier() {
+    var v = document.createElement('video');
+    /*
+     * 一上来就按这一集的长度建。**别先上占位片再换** —— 用户点「全屏」那一下是同步执行的, 而把载体换成
+     * 整集那份要等下一轮轮询, 于是进全屏时手上还是占位片, 而 iOS 的全屏播放器会认死进去时那一份 (见
+     * ensureCarrier 里的说明)。只有连片长都还不知道时才退回一秒的循环占位片, 先把音频焦点占住。
+     */
+    var known = pb && pb.duration > 0 ? pb.duration / 1000 : 0;
+    try {
+      carrierUrl = silentClipUrl(known > 0 ? known : 1);
+      carrierSeconds = known;
+    } catch (e) {
+      console.warn('Carrier build failed for ' + known + 's', e);
+      clientLog('carrier create FAILED for ' + known.toFixed(1) + 's, falling back to the 1s placeholder: ' + (e && e.message || e));
+      carrierUrl = silentClipUrl(1);
+      carrierSeconds = 0;
+      known = 0;
+    }
+    clientLog('carrier created: ' + (known > 0 ? known.toFixed(1) + 's' : '1s placeholder (duration unknown)'));
+    v.src = carrierUrl;
+    v.loop = !(known > 0);
+    v.preload = 'auto';
+    // 原生控件: 页面里看不见 (元素在屏幕外), 但全屏播放器靠它才给出进度条和那颗画中画按钮
+    v.controls = true;
+    v.setAttribute('playsinline', '');
+    v.setAttribute('aria-hidden', 'true');
+    // 不能 display:none —— 那样的元素进不了全屏 / 小窗; 挪到屏幕外就行
+    v.style.cssText = 'position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;pointer-events:none';
     // currentTime 必须等元数据到了再写, 否则静默失败或者跳回 0
-    audio.addEventListener('loadedmetadata', function () {
+    v.addEventListener('loadedmetadata', function () {
       carrierReady = true;
+      // 这一行是判断"载体到底换过去没有"的硬证据: 想要的和 iOS 真读出来的时长摆在一起
+      clientLog('carrier ready: element ' + (isFinite(v.duration) ? v.duration.toFixed(1) + 's' : String(v.duration))
+        + ', wanted ' + carrierSeconds.toFixed(1) + 's, loop=' + v.loop);
       if (pb) syncCarrier((pb.position || 0) / 1000);
     });
+    // iOS 挑不挑我们这份手拼的 MP4, 只有这里看得出来 (挑的话全屏里就是一片黑 / 没时长)
+    v.addEventListener('error', function () {
+      var err = v.error;
+      console.warn('Carrier failed to load', err);
+      clientLog('carrier LOAD ERROR code=' + (err && err.code) + ' wanted=' + carrierSeconds.toFixed(1) + 's');
+    });
     // 载体放到头了 (电视这一集也快完了): 电视还在播就停在末尾接着占位, 别让 ended 把焦点交还
-    audio.addEventListener('ended', function () {
+    v.addEventListener('ended', function () {
       if (!mediaEnabled || !(pb && pb.playing)) return;
-      try { audio.currentTime = Math.max(0, carrierSeconds - 0.25); } catch (e) {}
-      var back = audio.play();
+      carrierQuiet(function () {
+        try { v.currentTime = Math.max(0, carrierSeconds - 0.25); } catch (e) {}
+        var back = v.play();
+        if (back && back.catch) back.catch(function () {});
+      });
+    });
+    v.addEventListener('pause', function () {
+      if (!mediaEnabled || carrierSelfJustActed()) return;
+      // 全屏 / 小窗里按的暂停 = 用户的意思, 转给电视; 其它情况是系统把我们按停了, 自己接回来
+      // (页面被切走时定时器会被冻住, 只能挂事件等回到前台那一刻自愈)
+      if (carrierPresenting()) {
+        if (pb && pb.playing) sendMediaControl('pause');
+        return;
+      }
+      if (!(pb && pb.playing)) return;
+      var back = v.play();
       if (back && back.catch) back.catch(function () {});
     });
-    // 系统按停了音轨而电视还在播: 自己接回来. 页面被切走时定时器会被冻住, 只能挂事件等回到前台那一刻自愈.
-    audio.addEventListener('pause', function () {
-      if (!mediaEnabled || !(pb && pb.playing)) return;
-      var back = audio.play();
-      if (back && back.catch) back.catch(function () {});
+    v.addEventListener('play', function () {
+      if (!mediaEnabled || carrierSelfJustActed()) return;
+      if (carrierPresenting() && pb && !pb.playing) sendMediaControl('play');
     });
-    document.body.appendChild(audio);
-    return audio;
+    // 全屏 / 小窗里拖进度条、按 ±15 秒: 走与控件同一条路 (seek 里有 pending 闸, 轮询不会把它拽回去)
+    v.addEventListener('seeked', function () {
+      if (!mediaEnabled || carrierSelfJustActed()) return;
+      if (!carrierPresenting() || Date.now() - carrierSelfSeekAt < 1000) return;
+      /*
+       * 要挡的是**占位片** —— 它的时间轴根本不是这一集的: 一秒绕回一次, 每次都引出 currentTime≈0 的
+       * seeked, 不挡就是每秒给电视发一次 seek(0) (2026-09-20 真机, 电视日志里连着出现
+       * "jumped back: 1049262ms -> 0ms")。
+       *
+       * **但"载体比电视长几秒/短几秒"不算这种情况, 不能一起挡掉。** 在全屏 / 小窗里换集时载体的重建
+       * 是挂起的 (见 ensureCarrier), 载体还是上一集的时长 —— 我起初要求两边时长对得上才转发, 结果
+       * 换完集快进快退整个失灵, 得退出小窗才好 (2026-09-20 用户实测, 日志:
+       * "carrier rebuild deferred (presenting): want 1377.0s, have 1402.1s")。
+       * 位置是按秒对表的, 差那么点只影响显示的总长, 拖到哪就是哪 —— 夹进这一集的范围里发出去就行。
+       */
+      var tvDur = (pb && pb.duration || 0) / 1000;
+      if (!carrierReady || v.loop || !(carrierSeconds > 0) || !(tvDur > 0)) {
+        clientLog('seek from ' + (carrierPresenting() ? 'presentation' : 'page') + ' dropped: ready=' + carrierReady
+          + ' loop=' + v.loop + ' carrier=' + carrierSeconds.toFixed(1) + 's tv=' + tvDur.toFixed(1) + 's');
+        return;
+      }
+      seek(Math.round(Math.max(0, Math.min(tvDur, v.currentTime)) * 1000));
+    });
+    // 原生全屏播放器里的倍速菜单: 它改的是这个元素的 playbackRate, 转给电视才算数
+    v.addEventListener('ratechange', function () {
+      if (!mediaEnabled || carrierSelfJustActed()) return;
+      if (!carrierPresenting() || !pb || pb.speed == null) return;
+      // 档位与范围跟电视走 (speedMin/speedMax/speedStep 来自 RemotePlayerHandle) —— 同一个常量别在这边
+      // 再抄一份, 倍速那次的教训就是抄完悄悄偏掉
+      var step = Math.max(1, Math.round((pb.speedStep || 0.25) * 100));
+      var lo = Math.round((pb.speedMin || 0.25) * 100), hi = Math.round((pb.speedMax || 4) * 100);
+      var pct = Math.max(lo, Math.min(hi, Math.round(Math.round(v.playbackRate * 100) / step) * step));
+      if (pct === Math.round(pb.speed * 100)) return;
+      spDragging = false;
+      spHoldUntil = Date.now() + 2000;
+      spLocal = pct;
+      clearTimeout(spTimer);
+      spTimer = null;
+      sendSpeed(pct);
+      paint();
+    });
+    // 用户可能从全屏里转进小窗, 那之后按键还得照样转发, 所以这两个状态都要盯着
+    function modeChanged() {
+      var on = v.webkitPresentationMode ? v.webkitPresentationMode === 'picture-in-picture'
+        : document.pictureInPictureElement === v;
+      if (on === pipActive) return;
+      pipActive = on;
+      clientLog('pip ' + (on ? 'entered' : 'left') + ', carrier ' + carrierSeconds.toFixed(1) + 's');
+      applyPendingCarrier();
+      paint();
+    }
+    v.addEventListener('webkitpresentationmodechanged', modeChanged);
+    v.addEventListener('enterpictureinpicture', modeChanged);
+    v.addEventListener('leavepictureinpicture', modeChanged);
+    v.addEventListener('webkitbeginfullscreen', function () {
+      fsActive = true;
+      clientLog('fullscreen entered, carrier ' + carrierSeconds.toFixed(1) + 's, element '
+        + (isFinite(v.duration) ? v.duration.toFixed(1) + 's' : String(v.duration)) + ', loop=' + v.loop);
+      paint();
+    });
+    v.addEventListener('webkitendfullscreen', function () {
+      fsActive = false;
+      clientLog('fullscreen left');
+      applyPendingCarrier();
+      paint();
+    });
+    document.addEventListener('fullscreenchange', function () {
+      var on = document.fullscreenElement === v;
+      if (on === fsActive) return;
+      fsActive = on;
+      applyPendingCarrier();
+      paint();
+    });
+    document.body.appendChild(v);
+    return v;
   }
   function setMediaHandler(action, handler) {
     try { navigator.mediaSession.setActionHandler(action, handler); } catch (e) { console.debug('MediaSession action unavailable: ' + action, e); }
@@ -2779,10 +3222,18 @@ private val CONTROL_SCRIPT = """
   function pickArtwork(list, done) {
     var i = 0;
     (function next() {
-      if (i >= list.length) { done([]); return; }
+      if (i >= list.length) {
+        // 一条都没取到 = 交给系统的 artwork 是空的, 锁屏上那块就是白的 (2026-09-20 用户报"封面变成全白")
+        clientLog('artwork: none of ' + list.length + ' candidates loaded');
+        done([]);
+        return;
+      }
       var url = list[i++];
       var img = new Image();
-      img.onload = function () { done([{ src: url }]); };
+      img.onload = function () {
+        if (i > 1) clientLog('artwork: candidate ' + i + '/' + list.length + ' won');
+        done([{ src: url }]);
+      };
       img.onerror = next;
       img.src = url;
     })();
@@ -2800,23 +3251,39 @@ private val CONTROL_SCRIPT = """
     function apply(artwork) {
       // 探测期间换集了就作废, 别把上一集的图贴到这一集上
       if (lastMetaKey !== metaKey) return;
+      var use = artwork && artwork.length ? artwork : lastArtwork;
+      if (artwork && artwork.length) lastArtwork = artwork;
+      else if (!use.length) clientLog('artwork: nothing to show (no candidate yet, no previous one)');
       navigator.mediaSession.metadata = new MediaMetadata({
         title: title,
         artist: artist,
         album: 'Animeko',
-        artwork: artwork
+        artwork: use
       });
     }
-    // 标题先上, 不等图 (图还在查的那几秒里控件也该是对的)
+    /*
+     * 标题先上, 不等图 (图还在查的那几秒里控件也该是对的)。**但空着上等于把封面擦成白的。**
+     *
+     * 2026-09-20 用户报"换了两集之后封面变成全白"。排查时否掉了两个想当然的解释:
+     *   - **不是"页在后台所以图加载不了"**: 后台里轮询、updateMediaMetadata、clientLog 的 POST 全都照跑。
+     *     (进度条走 hooks.playback 每轮都更新, 封面走 hooks.render, 两条路不同, 但后台都不拦。)
+     *   - **不是手机连不上 TMDB**: 这些地址是经电视 `api/img` 转发的 (见 RemoteEpisodeArt), 手机只连电视。
+     *
+     * 真正的判据来自电视日志: [RemoteImageProxy] **只记失败**, 而那一段一条都没有 —— 也就是手机压根
+     * 没去请求过图, 说明 `s.art` 是空列表 (电视没给出这一集的候选图, TMDB 没匹配到 still)。于是
+     * [pickArtwork] 立刻 done([]), 空 artwork 一交上去, 锁屏上那块就是白的。
+     *
+     * 所以没拿到新的之前沿用上一张: 旧封面总比一块白好, 探到了立刻换掉。
+     */
     apply([]);
     pickArtwork(list, apply);
   }
   // 该占着焦点时确认音轨还在播 (解锁过一次之后 play() 不再需要用户手势). 与 audio 的 pause 监听一道,
   // 页面每次被唤醒都自愈一次.
   function keepMediaAudioAlive() {
-    if (!mediaEnabled || !mediaAudio || !mediaAudio.paused) return;
+    if (!mediaEnabled || !mediaCarrier || !mediaCarrier.paused) return;
     if (!(pb && pb.playing)) return;
-    var back = mediaAudio.play();
+    var back = mediaCarrier.play();
     if (back && back.catch) back.catch(function () {});
   }
   function updateMediaPlayback() {
@@ -2851,30 +3318,37 @@ private val CONTROL_SCRIPT = """
         position: Math.max(0, Math.min(duration, (pb.position || 0) / 1000))
       });
     } catch (e) { console.warn('MediaSession position rejected', e); }
-    if (!mediaAudio) return;
+    if (!mediaCarrier) return;
     // 电视没在播却还得占着焦点 (刚叫醒还没起播 / 后台保持) 时, 让载体几乎不走 —— iOS 画的是它自己的时间轴,
     // 由着它 1 倍速跑, 电视一停就越跑越偏 (电视后台时连播放数据都收不到, 想校正都没得校). 夹不住这个速率的
     // 浏览器会照常 1 倍速, 还有上面每轮 2 秒内的对表兜底.
-    try { mediaAudio.playbackRate = playing ? 1 : 0.05; } catch (e) { console.debug('Carrier rate rejected', e); }
+    // 电视在倍速时载体也得跟着走: 由着它 1 倍跑, 每两秒被对表拽一下, 全屏的进度条就会一跳一跳;
+    // 而且原生全屏里那个倍速菜单读的就是这个值, 跟上了才显示得对 (setPositionState 那边保持 1, 见上面)
+    var wantRate = playing ? Math.max(0.05, (pb && pb.speed) || 1) : 0.05;
+    if (Math.abs(mediaCarrier.playbackRate - wantRate) > 0.001) {
+      carrierQuiet(function () {
+        try { mediaCarrier.playbackRate = wantRate; } catch (e) { console.debug('Carrier rate rejected', e); }
+      });
+    }
     if (playing) {
-      var started = mediaAudio.play();
+      var started = mediaCarrier.play();
       if (started && started.catch) started.catch(function () {});
     } else {
       // 必须真的 pause: iOS 的锁屏按钮与进度条跟的是这个元素在不在播, 不是 playbackState —— 让音轨一直
       // 播着、只把 playbackState 设成 paused 的写法试过, 按钮永远停在"暂停"图标, 怎么按都切不动
       // (2026-09-18 实测). 代价是交还音频焦点: iOS 上网页音频停了约 30 秒系统就收走 Now Playing,
       // 所以电视暂停久了控件会消失 —— 这是网页播放器的固有行为, 想留住它只能一直出声, 不做那个取舍.
-      mediaAudio.pause();
+      mediaCarrier.pause();
     }
   }
   function sendMediaControl(action) {
     if (pb) pb.playing = action === 'play';
     holdPlayState(action === 'play');
-    if (mediaAudio) {
+    if (mediaCarrier) {
       if (action === 'play') {
-        var started = mediaAudio.play();
+        var started = mediaCarrier.play();
         if (started && started.catch) started.catch(function () {});
-      } else mediaAudio.pause();
+      } else mediaCarrier.pause();
     }
     updateMediaPlayback();
     paint();
@@ -2942,11 +3416,12 @@ private val CONTROL_SCRIPT = """
     });
   }
   function disableMediaSession(quiet) {
-    if (!mediaEnabled && !mediaAudio) return;
+    cancelPendingDisable();
+    if (!mediaEnabled && !mediaCarrier) return;
     mediaEnabled = false;
     window.mediaSessionActive = false;
-    if (mediaAudio) { mediaAudio.pause(); mediaAudio.remove(); mediaAudio = null; }
-    if (mediaAudioUrl) { URL.revokeObjectURL(mediaAudioUrl); mediaAudioUrl = ''; }
+    if (mediaCarrier) { mediaCarrier.pause(); mediaCarrier.remove(); mediaCarrier = null; }
+    if (carrierUrl) { URL.revokeObjectURL(carrierUrl); carrierUrl = ''; }
     clearMediaHandlers();
     lastMetaKey = '';
     lastPlayKey = '';
@@ -2958,10 +3433,10 @@ private val CONTROL_SCRIPT = """
   }
   function enableMediaSession(silent) {
     if (!mediaSupported || mediaEnabled) return;
-    mediaAudio = createSilentAudio();
+    mediaCarrier = createCarrier();
     registerMediaHandlers();
     // play 必须直接发生在这次点击里; 等它成功后再把电视的暂停状态同步回来.
-    var started = mediaAudio.play();
+    var started = mediaCarrier.play();
     Promise.resolve(started).then(function () {
       mediaEnabled = true;
       window.mediaSessionActive = true;
@@ -3106,7 +3581,8 @@ private val CONTROL_SCRIPT = """
         '<div class="pb-speed" id="pb-speedrow" hidden><button type="button" id="pb-speed-reset" aria-label="' + T('恢复正常倍速') + '" title="' + T('恢复正常倍速') + '">' + window.ICONS.speed + '</button>' +
         '<input type="range" id="pb-speed" min="25" max="400" step="25" value="100" aria-label="' + T('倍速') + '">' +
         '<span class="pb-speed-val" id="pb-speed-val"></span></div>' +
-        '<div class="pb-system" id="pb-system-row"' + (mediaSupported && !mediaAutoEnabled() ? '' : ' hidden') + '><button type="button" id="pb-system"></button></div>';
+        '<div class="pb-system" id="pb-system-row" hidden><button type="button" id="pb-system" hidden></button>' +
+        '<button type="button" id="pb-fs" hidden></button></div>';
     }
     // 正改着时间时卡片被整张重画了: 把输入框 (连同已输入的字) 补回去
     if (editing && !document.getElementById('pb-jump')) openEdit(editText, true);
@@ -3176,9 +3652,22 @@ private val CONTROL_SCRIPT = """
     }
     var sb = document.getElementById('pb-system');
     if (sb) {
+      sb.hidden = !(mediaSupported && !mediaAutoEnabled());
       sb.classList.toggle('on', mediaEnabled);
       sb.textContent = T(mediaEnabled ? '退出锁屏 / 控制中心' : '接入锁屏 / 控制中心');
     }
+    var fsBtn = document.getElementById('pb-fs');
+    if (fsBtn) {
+      // 载体只在接入之后才有 —— 没接入时也把按钮显出来, 点了会先接入再全屏
+      fsBtn.hidden = !carrierFullscreenCan();
+      var fsReady = carrierFullscreenReady();
+      fsBtn.disabled = !fsReady;
+      fsBtn.classList.toggle('on', carrierPresenting());
+      fsBtn.textContent = T(fsReady ? '全屏（可转小窗）' : '全屏（正在准备）');
+    }
+    var sysRow = document.getElementById('pb-system-row');
+    if (sysRow) sysRow.hidden = (!sb || sb.hidden) && (!fsBtn || fsBtn.hidden);
+    syncCarrierPlayback();
     var range = document.getElementById('pb-range');
     range.disabled = !p.duration;
     if (!dragging) {
@@ -3193,13 +3682,47 @@ private val CONTROL_SCRIPT = """
       else if (!editing) tm.innerHTML = '<span>' + fmt(p.position) + '</span><span>' + remain + '</span>';
     }
   }
+  /*
+   * **拆控件要等它稳下来**。
+   *
+   * 切番剧 / 换集时服务端会有一小段 `available:false` (旧会话已注销、新会话还没注册,
+   * 见 TvRemoteControl.registerPlayer)。原先这一下就把系统控件整个拆掉 —— 而拆了之后要重新
+   * enable, enable 必须 play() 一个新载体; 页面在后台 / 锁屏时 iOS 不允许自动播放, play() 被拒,
+   * catch 里又 disable —— 循环下去控件就永久空了。
+   * 2026-09-20 真机: 切番剧时赶在加载完成前最小化网页, 控制中心剩个死壳; 日志里是 12 秒内
+   * 四条 `carrier created: 1s placeholder` (拆了建、建不起来又拆)。
+   *
+   * 而且“电视不在播放页就拆控件”本身就跟设计意图矛盾: 见 registerMediaHandlers 里
+   * seekbackward 的说明 —— 控件恰恰要在那阵子能用来把电视唤醒。
+   *
+   * 所以改成: 状态稳定持续 [DISABLE_SETTLE_MS] 才真的拆, 期间恢复就撤销。同
+   * SwitchMediaOnPlayerErrorExtension 里「缓存从列表消失要稳定 2 秒才算被删除」的做法。
+   * 拆之前控件显示成暂停 (updateMediaPlayback 已经把 background 当成“肯定没在播”), 不会误导。
+   */
+  var DISABLE_SETTLE_MS = 8000;
+  var disableTimer = null;
+  function scheduleDisableMediaSession() {
+    if (disableTimer || (!mediaEnabled && !mediaCarrier)) return;
+    disableTimer = setTimeout(function () {
+      disableTimer = null;
+      disableMediaSession(true);
+    }, DISABLE_SETTLE_MS);
+  }
+  function cancelPendingDisable() {
+    if (disableTimer) { clearTimeout(disableTimer); disableTimer = null; }
+  }
   hooks.render.push(function (s) {
     mediaState = s;
-    if (s.background) disableMediaSession(true);
-    else { updateMediaMetadata(); tryAutoMediaSession(); keepMediaAudioAlive(); }
+    if (s.background) scheduleDisableMediaSession();
+    else {
+      cancelPendingDisable();
+      updateMediaMetadata();
+      tryAutoMediaSession();
+      keepMediaAudioAlive();
+    }
     paint();
   });
-  hooks.unavailable.push(function () { mediaState = null; disableMediaSession(true); });
+  hooks.unavailable.push(function () { mediaState = null; scheduleDisableMediaSession(); });
   hooks.playback.push(function (p) { pb = stateGuard(p); updateMediaPlayback(); paint(); });
 
   // 从控件发出的指令要走一个来回 (POST + 电视上真的执行 + 下一次轮询), 这中间回报的还是操作前的状态。锁屏时
@@ -3291,6 +3814,14 @@ private val CONTROL_SCRIPT = """
   nowBox.addEventListener('click', function (e) {
     if (e.target.closest('#pb-system')) {
       if (mediaEnabled) disableMediaSession(false); else enableMediaSession();
+      return;
+    }
+    if (e.target.closest('#pb-fs')) {
+      if (!carrierFullscreenReady()) return;
+      // 全屏要有载体在播, 所以没接入的先接入 (接入本身也要在这次手势里完成; createCarrier 会直接按
+      // 这一集的长度建, 所以这一下进去的就是对的时间轴)
+      if (!mediaEnabled) enableMediaSession();
+      enterCarrierFullscreen();
       return;
     }
     if (e.target.closest('#pb-speed-reset')) {
@@ -4530,7 +5061,10 @@ private val CACHE_SCRIPT = """
     }
     d.episodes.forEach(function (x) {
       var size = x.size ? ' · ' + x.size : '';
-      var st = x.status === 'cached' ? ['ok', T('已缓存') + size] : x.status === 'caching' ? ['run', T('缓存中 {0}%', x.progress) + size]
+      var st = x.status === 'cached' ? ['ok', T('已缓存') + size] : x.status === 'caching'
+        // 进度满了还是 caching = 文件已经下完, 在等做种达标 (或 10 分钟没有上传活动) 才会标成已完成,
+        // 见 TorrentMediaCacheEngine.subscribeStats. 这时再显示「缓存中 100%」会让人以为卡住了.
+        ? ['run', (x.progress >= 100 ? T('已下完 · 做种中') : T('缓存中 {0}%', x.progress)) + size]
         : x.error ? ['bad', x.error] : x.pack ? ['', T('未缓存 · 已缓存的合集里有这一集')] : ['', T('未缓存')];
       var free = x.status === 'none';
       if (!free) delete picked[x.id];
@@ -5356,7 +5890,7 @@ private val ACCOUNT_SCRIPT = """
     if (em && em.bind !== !!d.loggedIn) em = null;
     var l = d.login || { state: 'idle' }, full = !!(d.loggedIn && d.bangumi);
     // 刚登录上 (手机这边发起的, 或者电视上自己登的): 让评论与评分区重新读一次
-    if (wasIn === false && full) hooks.login.forEach(function (h) { h(); });
+    if (wasIn === false && full) window.runHooks('login', hooks.login, undefined);
     wasIn = full;
     waiting = l.state === 'waiting';
     var h = '<div class="card set-card"><div class="set-title">' + T('账号') + '</div>';

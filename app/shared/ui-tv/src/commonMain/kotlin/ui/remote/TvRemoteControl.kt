@@ -882,6 +882,10 @@ object TvRemoteControl {
             path == "api/img" && get -> RemoteImageProxy.handle(request)
             // 数据源名字前的图标 (内置源的打包图标 / 源自己配置的图标地址), 见 RemoteSourceIcons
             path == "api/source-icon" && get -> RemoteSourceIcons.handle(request)
+            // 手机那侧的诊断回传 (载体建了多长 / 元数据到没到 / 加载失败码), 见 RemoteClientLog.
+            // 网页里出的事在电视日志里本来没有任何痕迹, 这条是唯一的通路.
+            path == "api/client-log" ->
+                RemoteClientLog.handle(request)?.let(::json) ?: LanHttpResponse.status(405, "Method Not Allowed")
             path.isEmpty() || path.startsWith("api/") -> LanHttpResponse.status(405, "Method Not Allowed")
             else -> LanHttpResponse.status(404, "Not Found")
         }
