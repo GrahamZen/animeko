@@ -145,6 +145,8 @@ import me.him188.ani.app.ui.subject.episode.list.EpisodeListItem
 import me.him188.ani.datasources.api.PackedDate
 import me.him188.ani.datasources.api.topic.UnifiedCollectionType
 import org.jetbrains.compose.resources.stringResource
+import me.him188.ani.app.ui.foundation.focus.TvNoBringIntoViewSpec
+import androidx.compose.foundation.clickable
 
 /**
  * TV 选集: 单行固定锚点轮播 (Prime Video 式) —— 聚焦框钉在行首停靠位不动,
@@ -620,9 +622,17 @@ fun FocusEpisodeCarousel(
         val density = LocalDensity.current
         // 锚位 = 停靠位, 无需补偏差: 卡片的可聚焦节点就是卡片外框本身 (聚焦框是行层的
         // overlay, 向外探出而不内缩卡片), 焦点目标矩形与卡片外框一致
-        val bringIntoViewSpec = remember(density, horizontalPadding) {
-            tvAnchorBringIntoViewSpec(with(density) { horizontalPadding.toPx() }, animated = animatedScroll)
+        // 框架从 Compose 1.12 起忽略 scrollAnimationSpec (默认动画没有减速停靠, 与 TvScrollAnimator
+        // 那条路的手感分叉), 所以这里不让它自动滚, 改由下面按焦点索引驱动. 见 TvNoBringIntoViewSpec.
+        // 锚位由 LazyRow 的 contentPadding(start) 实现, scrollToItem 自然停在那里, 不用额外 offset
+        // (与上面 moveDisplayedBy / 换集跟焦那两处调用一致)
+        val focusedCardIndex = remember(episodes, activeFocusEpisodeId) {
+            activeFocusEpisodeId?.let { id -> episodes.indexOfFirst { it.episodeId == id } } ?: -1
         }
+        LaunchedEffect(focusedCardIndex) {
+            if (focusedCardIndex >= 0) scrollAnimator.animateScrollToItem(listState, focusedCardIndex)
+        }
+        val bringIntoViewSpec = TvNoBringIntoViewSpec
         CompositionLocalProvider(LocalBringIntoViewSpec provides bringIntoViewSpec) {
             // 高度锁死在卡片高: 聚焦框是向外探出的 (offset 只挪位置不改上报尺寸, 见
             // [FocusEpisodeAnchorRing]), 它上报的高度是 cellHeight + 2*TvFocusRing.Gap, 而框只在
@@ -1101,9 +1111,11 @@ fun FocusEpisodeCard(
     val interactionSource = remember { MutableInteractionSource() }
     val focused by interactionSource.collectIsFocusedAsState()
     val containerColor = when {
-        // 黑白态: 底一律半透明白 (与胶囊按钮同一档 alpha), 聚焦即实心白
+        // 黑白态: 底一律半透明白 (与胶囊按钮同一档 alpha).
+        // **聚焦不改底色**: 焦点由固定锚位的描边框表达. 早先聚焦即实心白, 而那层白跟着卡片滚、
+        // 框却钉在锚位 —— 滚动期间两个焦点指示分处两地 (2026-09-20 录屏比对 Prime Video:
+        // 它只有一个固定框, 卡片自身完全不变).
         monochrome -> when {
-            focused -> Color.White
             isPlaying -> Color.White.copy(alpha = 0.28f)
             isWatched -> Color.White.copy(alpha = 0.08f)
             else -> Color.White.copy(alpha = 0.14f)
@@ -1127,22 +1139,18 @@ fun FocusEpisodeCard(
         MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
     }
     val sortColor = when {
-        // 白底上一律黑字 (反色示焦, 同胶囊按钮)
-        monochrome && focused -> Color.Black
         monochrome -> if (isWatched) dimmed else Color.White
         isPlaying -> MaterialTheme.colorScheme.primary
         isWatched -> dimmed
         else -> LocalContentColor.current
     }
     val nameColor = when {
-        monochrome && focused -> Color.Black.copy(alpha = 0.75f)
         monochrome -> if (isWatched) dimmed else Color.White.copy(alpha = 0.85f)
         isWatched -> dimmed
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     // 进度条: 黑白态下白底上用黑, 否则白 (图上) / 主色 (纯文字卡)
     val progressColor = when {
-        monochrome && focused -> Color.Black
         monochrome -> Color.White
         else -> MaterialTheme.colorScheme.primary
     }
@@ -1212,13 +1220,21 @@ fun FocusEpisodeCard(
         LaunchedEffect(pressing) { onPressingChanged(pressing) }
     }
     Surface(
-        onClick = onClick,
         // scale 放链最外层: 按住缩小时整张卡 (含调用方 modifier 里的装饰) 一起缩;
         // 行层的固定锚位聚焦框按同一比例同步缩 —— 框不缩的话按住时卡与框脱开一圈, 像焦点掉了
-        modifier = Modifier.scale(pressScale).then(modifier).height(height).then(longPressModifier).tvTouchFocusOnTap(),
+        modifier = Modifier.scale(pressScale).then(modifier).height(height)
+            // **indication = null**: Material3 可点击 Surface 自带的 ripple 会在聚焦时给整张卡盖一层
+            // 发白的遮罩, 而它画在卡片上**跟着卡片滚**, 聚焦框却钉在锚位 —— 滚动期间两个焦点指示
+            // 分处两地, 看着就是"高亮已经跳到下一张, 框还在原地等" (2026-09-20 录屏比对 Prime Video:
+            // 它只有一个固定框, 卡片自身完全不变). 焦点由框表达, 按住反馈由 pressScale 表达, 都不靠它.
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            )
+            .then(longPressModifier).tvTouchFocusOnTap(),
         shape = RoundedCornerShape(EPISODE_CARD_CORNER),
         color = containerColor,
-        interactionSource = interactionSource,
     ) {
         if (stillUrl != null) {
             Box(Modifier.fillMaxSize()) {
@@ -1369,9 +1385,7 @@ fun FocusEpisodeCard(
                 }
                 FocusEpisodeProgressBar(
                     effectiveProgress,
-                    trackColor = if (monochrome && focused) {
-                        Color.Black.copy(alpha = 0.2f)
-                    } else if (monochrome) {
+                    trackColor = if (monochrome) {
                         Color.White.copy(alpha = 0.3f)
                     } else {
                         MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
