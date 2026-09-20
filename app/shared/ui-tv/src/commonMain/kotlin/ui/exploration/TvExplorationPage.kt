@@ -210,6 +210,7 @@ import me.him188.ani.utils.analytics.Analytics
 import me.him188.ani.utils.analytics.AnalyticsEvent.Companion.SubjectEnter
 import me.him188.ani.utils.analytics.recordEvent
 import org.jetbrains.compose.resources.stringResource
+import me.him188.ani.app.ui.foundation.focus.TvNoBringIntoViewSpec
 
 /**
  * TV 沉浸式探索页: 全屏背景为聚焦条目的 TMDB backdrop (左/下渐隐入背景色),
@@ -697,6 +698,22 @@ fun TvExplorationPage(
     // 聚焦时工作, 这一条是它管不到的唯一滚动, 用同款 spring 动画器.
     val animatedScroll = tvAnimatedScroll()
     val toTopAnimator = remember(animatedScroll) { TvScrollAnimator(animated = animatedScroll) }
+    // 纵向落点: 焦点换行时把那一行滚到锚位 (锚位 = LazyColumn 的 contentPadding top).
+    // **必须放在页面级**: 早先写在卡片区内层, 那个作用域会随重组重建, 快速操作时滚动协程被
+    // 反复取消 ("LeftCompositionCancellationException: The coroutine scope left the composition"),
+    // 滚一半就断、断了又从新位置重算 —— 表现为行停不到锚位, 而固定框钉死, 看着就是框比卡片高出一截.
+    // **用 itemIndexOfRowKey 而不是 rowIndexOfKey**: 前者是 LazyColumn 的 item 下标 (标题项也占位).
+    val rowScrollAnimator = remember(animatedScroll) { TvScrollAnimator(animated = animatedScroll) }
+    val focusedRowItem = focusedRowKey?.let(itemIndexOfRowKey) ?: -1
+    // **key 必须带 cardAreaHasFocus**: focusedRowKey 是"记住的焦点行", 焦点退回 hero 按钮时
+    // 它不清空. 只以行号做 key 的话, "进第一行 → 返回按钮 (hero 把列表滚回顶部, 位置被改了)
+    // → 再按下回第一行" 这条路上 key 自始至终没变过, effect 不重跑, 那一行就补不回锚位.
+    // 横向那条 (rowHasFocus) 一直带着这个条件.
+    LaunchedEffect(focusedRowItem, cardAreaHasFocus) {
+        if (cardAreaHasFocus && focusedRowItem >= 0) {
+            rowScrollAnimator.animateScrollToItem(listState, focusedRowItem)
+        }
+    }
     LaunchedEffect(heroExpanded) {
         if (!heroExpanded) return@LaunchedEffect
         if (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0) {
@@ -714,9 +731,20 @@ fun TvExplorationPage(
         // hero 按钮永久 alpha=0 (节点还在, 所以"看不见但确定键照常进详情", 退出重进才好).
         // 跑在 measure 之前还是之后不确定, 所以是偶发. 这里不再赌顺序, 改成对实际位置反应.
         // 滚动中不插手 (回顶动画/校正本身), 钉回后新位置是 (0,0), 不会自激.
+        // **每次都要再问一遍状态**: 焦点离开 hero 到本 effect 被取消之间有一个窗口, 而卡片区
+        // 的落点滚动 (见上方 rowScrollAnimator) 正好挤在这里. requestScrollToItem 是瞬时的、
+        // 不走 scroll{} 互斥, 光靠"滚动中不插手"挡不住, 会把刚滚开的一点按回 0.
         snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
             .collect { (index, offset) ->
-                if ((index != 0 || offset != 0) && !listState.isScrollInProgress) {
+                // 判据加 cardAreaHasFocus 而不是只看 heroExpanded: 后者是 derivedStateOf, 焦点
+                // 刚进卡片区那一帧它可能还没翻转, 而 cardAreaHasFocus 由 onFocusChanged 当场
+                // 写入; 那一帧正是落点滚动启动的时刻, 判据慢一拍就会插手到它头上.
+                // 判据顺序有意为之: 本 collect 在滚动期间每帧都跑, 而 heroExpanded 是
+                // derivedStateOf —— 让最便宜的位置判断和 isScrollInProgress 先短路, 滚动途中
+                // 就完全不去读它.
+                if ((index != 0 || offset != 0) && !listState.isScrollInProgress &&
+                    heroExpanded && !cardAreaHasFocus
+                ) {
                     listState.requestScrollToItem(0)
                 }
             }
@@ -728,7 +756,7 @@ fun TvExplorationPage(
     // (冷启动必现, 往下导航一次才恢复). requestScrollToItem 顺带清掉那个键锚点, 正是这里要的.
     // 不做动画: 数据到达不是用户动作. 滚动中 (hero 回顶动画) 不插手, 那条动画本身就停在 0.
     LaunchedEffect(hasFollowed, rowCount) {
-        if (heroExpanded && !listState.isScrollInProgress &&
+        if (heroExpanded && !cardAreaHasFocus && !listState.isScrollInProgress &&
             (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0)
         ) {
             listState.requestScrollToItem(0)
@@ -1051,12 +1079,10 @@ fun TvExplorationPage(
         // **加上 [TvFocusRing.Gap]**: bring-into-view 拿到的是**焦点目标**矩形, 而焦点目标是
         // 卡片内缩一圈之后的封面, 聚焦框却画在外框上 —— 不加这一点点, 框与卡片就差 3dp 对不齐
         // (真机肉眼可见), 且 rest 位置与 pivot 目标不一致会让首行永远差这一段.
-        val verticalBringIntoViewSpec = remember(density) {
-            tvAnchorBringIntoViewSpec(with(density) { (TV_EXPLORATION_TOP_BLEED + TvFocusRing.Gap).toPx() }, animated = animatedScroll)
-        }
-        val horizontalBringIntoViewSpec = remember(density) {
-            tvAnchorBringIntoViewSpec(with(density) { (TV_EXPLORATION_ROW_START_BLEED + TvFocusRing.Gap).toPx() }, animated = animatedScroll)
-        }
+        // 框架从 Compose 1.12 起忽略 scrollAnimationSpec (默认动画没有减速停靠), 所以不让它自动滚,
+        // 改由焦点索引驱动 TvScrollAnimator —— 与选集轮播、回顶部那几处同一条 spring. 见 TvNoBringIntoViewSpec.
+        val verticalBringIntoViewSpec = TvNoBringIntoViewSpec
+        val horizontalBringIntoViewSpec = TvNoBringIntoViewSpec
         BoxWithConstraints(
             Modifier.fillMaxSize()
                 .padding(start = TV_EXPLORATION_START_PAD, top = TV_EXPLORATION_CARD_TOP)
@@ -1789,6 +1815,13 @@ private fun TvAnchoredCardRow(
     val listState = rememberLazyListState()
     // 行内吸附滚动登记进页面级信号: 低特效档下 hero 文字块在滚动期间不画, 见 TvScrollActivity
     ReportTvScrollActivity(listState)
+    // 框架不再自动滚 (见 TvNoBringIntoViewSpec), 行内吸附由焦点卡索引驱动, 与页面纵向同一条 spring.
+    // 锚位由 LazyRow 的 contentPadding start 实现, 所以不用额外 offset.
+    val rowAnimatedScroll = tvAnimatedScroll()
+    val cardScrollAnimator = remember(rowAnimatedScroll) { TvScrollAnimator(animated = rowAnimatedScroll) }
+    LaunchedEffect(focusedIndex, rowHasFocus) {
+        if (rowHasFocus && focusedIndex >= 0) cardScrollAnimator.animateScrollToItem(listState, focusedIndex)
+    }
     val focus = rememberTvFocusScope()
     // 从行外进入本行的落点: 挂在"上次聚焦的那张卡"上 (见 KDoc 为何不用 focusRestorer).
     // 请求失败 (那张卡还没组合出来) 时不做任何事, 让默认进组行为兜住这一帧.

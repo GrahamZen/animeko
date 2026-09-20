@@ -16,7 +16,6 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
-import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -184,7 +183,11 @@ fun TvPortraitCard(
                     .tvTouchFocusOnTap()
                     .combinedClickable(
                         interactionSource = interactionSource,
-                        indication = LocalIndication.current,
+                        // **不要 indication**: 默认涟漪在聚焦时给封面叠一层白色 scrim, 而它是
+                        // 画在卡片上的 —— 跟着卡片一起滑, 聚焦框却钉在锚位, 导航途中两者分家
+                        // (高亮已经瞬移到下一张, 框还在原地等卡片滑过来). 聚焦态一律只由描边
+                        // 表达, 与选集卡一致.
+                        indication = null,
                         onClick = onClick,
                         onLongClick = menu?.let { { setMenuExpanded(true) } },
                     ),

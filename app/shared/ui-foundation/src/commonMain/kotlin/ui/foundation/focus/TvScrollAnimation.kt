@@ -22,6 +22,13 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.runtime.Stable
 import kotlin.math.abs
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.collectLatest
 
 /**
  * TV 焦点驱动滚动的动画器: 替代 [LazyListState.animateScrollToItem], 补上它缺的两样东西 ——
@@ -103,7 +110,14 @@ class TvScrollAnimator(
             velocity = 0f
             return
         }
-        val initialVelocity = velocity
+        // **反向的继承初速必须丢弃**: [velocity] 是上一段被取消时留下的, 用途是连按同方向时
+        // 的速度连续. 若这一段的目标在反方向, 带着它启动会让第一帧朝反方向滚 —— 而列表此刻
+        // 往往正停在那一侧的边界上 (最典型的一条路: 焦点退回 hero 时那段往回滚的动画被回顶
+        // 动画抢占取消, 残速朝上; 用户紧接着按下键进卡片区, 列表已被回顶动画放在顶部), 反
+        // 方向滚不动, consumed=0, 下面那条边界判据当场 cancelAnimation: 整段动画 25ms 内收场
+        // 且一格没动, 而固定聚焦框钉在锚位 —— 看着就是"框比卡片高出一截".
+        // (2026-09-20 真机日志钉死: dist=72 的一次 25ms 就返回, first 始终 0/0.)
+        val initialVelocity = if (velocity * distance < 0f) 0f else velocity
         state.scroll {
             var consumedTotal = 0f
             AnimationState(initialValue = 0f, initialVelocity = initialVelocity).animateTo(
@@ -147,6 +161,26 @@ class TvScrollAnimator(
  * 读取 (定制动画曲线目前只有这一条路); 若未来版本移除, pivot 定位仍工作, 只是退回默认
  * spring —— 到时再评估手感. 曲线与 [TvScrollAnimator] 共用 [TV_SCROLL_STIFFNESS].
  */
+/**
+ * 一个**什么都不滚**的 [BringIntoViewSpec]: 焦点进入时框架不自动滚动, 由调用方自己按焦点索引
+ * 用 [TvScrollAnimator] 驱动.
+ *
+ * 为什么要绕开框架: `BringIntoViewSpec.scrollAnimationSpec` 从 **Compose 1.12 起被彻底忽略**
+ * ("Animation spec customization is no longer supported" —— 1.11 只是标废弃, 仍生效)。框架改用
+ * 自己的默认动画: 快、没有减速停靠, 与 [TvScrollAnimator] 那条路的手感分叉。2026-09-20 实测把
+ * 刚度从 260f 改到 40f (理论上慢 2.5 倍) 画面毫无变化, 定案; 官方没有替代 API, TV 文档如今也
+ * 只讲 `calculateScrollDistance` ("滚到哪"), 不再谈"怎么滚"。
+ *
+ * **试过但不可行的路**: 让 spec 算出距离、返回 0, 自己按那个距离跑动画。框架在自滚期间每帧都会
+ * 回调, 要从一串相对距离里分辨"这是我自己滚出来的"还是"用户换目标了", 信息不够 ——
+ * 按收敛性判 (距离变大就算换目标) 在 LazyRow 首次测量时误判, 真机是"第一轮每隔两张卡跟不上一次,
+ * 滑到底回来就再也不犯"; 把阈值放大到半个卡片宽又会漏掉真正的换目标。按**焦点索引**驱动没有这个
+ * 歧义: 索引变了就是换目标, 没变就不滚。
+ */
+val TvNoBringIntoViewSpec: BringIntoViewSpec = object : BringIntoViewSpec {
+    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float = 0f
+}
+
 fun tvAnchorBringIntoViewSpec(anchorPx: Float, animated: Boolean = true): BringIntoViewSpec =
     if (!animated) {
         // 流畅档: 瞬时跳到锚位 (见 TvVisualEffectsLevel.animatedScroll)。snap 之后一次按键只产生一帧
