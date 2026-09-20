@@ -115,10 +115,9 @@ import me.him188.ani.utils.httpdownloader.DownloadState
         AutoMigration(from = 22, to = 23, spec = Migrations.Migration_22_23::class),
         // 23 -> 24: subject_collection 加 screeningYear / theatrical 两列 (纯加列, 有默认值, 不需要 spec).
         AutoMigration(from = 23, to = 24),
-        // 24 -> 25: 上游的 22 -> 23 与 23 -> 24 两步在这里合并成一步, 一次动四处
-        // (剧照列 / 按集缓存表 / torrent_cache 加回四列 / 删掉 fork 的 torrent_cache_file),
-        // 是迁移链上最重的一步 —— 逐项说明见 [Migrations.Migration_24_25], 逐项断言见 MIG-08.
-        AutoMigration(from = 24, to = 25, spec = Migrations.Migration_24_25::class),
+        // 24 -> 25 由手写的 [MIGRATION_24_25] 提供 —— **不能用 AutoMigration**: 这一步要删掉 fork 的
+        // `torrent_cache_file`, 而 @DeleteTable 生成的 DROP 跑在 onPostMigrate 之前, 表里的数据没机会搬走.
+        // 逐项说明见 [MIGRATION_24_25], 逐项断言见 MIG-08.
     ],
     exportSchema = true,
 )
@@ -241,6 +240,77 @@ val MIGRATION_21_22 = object : Migration(startVersion = 21, endVersion = 22) {
             )
             """.trimIndent(),
         )
+    }
+}
+
+/**
+ * 同步上游 (2026-09-20 rebase): 上游那边的 22 -> 23 与 23 -> 24 两步, 在 fork 这边合并成这一步.
+ *
+ * - 加 [EpisodeCollectionEntity.imageMedium] / [EpisodeCollectionEntity.imageLarge] (TMDB 剧照直链);
+ * - `torrent_cache` 加回上游的四列 (fork 的 21 -> 22 曾把它们拆走);
+ * - 加 [TorrentCacheEpisodeEntity]: BT 缓存按 (资源, 剧集) 记完成状态与文件路径, 它是 fork 那张
+ *   `torrent_cache_file` 的超集 (上游 #3442), 所以后者一并删掉 —— **但要先把数据搬过去**.
+ *
+ * ## 为什么必须手写
+ *
+ * 原先这一步是 `AutoMigration(spec = @DeleteTable("torrent_cache_file"))`, 当时认为"已缓存的 BT 资源
+ * 会走上游的回退逻辑从 `torrent_cache` 重新认领文件", 于是没搬数据。**这个前提是错的**:
+ *
+ * - 上游的回退 (`TorrentMediaCacheEngine.getOrMigrateEpisodeRecord`) 第一行就是
+ *   `if (!torrent.completed || torrent.pathInTorrent.isEmpty()) return null`;
+ * - 而 `torrent_cache` 上那两列**正是这一步新加的**, 取 `@ColumnInfo` 的默认值 `0` / `""`。
+ *
+ * 也就是说回退的入口条件永远不成立。上游用户没事 (它的完成状态一直记在 `torrent_cache` 上, 迁移后
+ * 列里有值); fork 用户的这份数据在 `torrent_cache_file` 里, 而那张表恰好被这一步删掉 —— 结果是
+ * **升级后所有 BT 缓存的"已完成"记录全丢**, 整包番会被当成没缓存重下 (2026-09-20 真机实证:
+ * `torrent_cache` 行是 `completed=0, pathInTorrent=''`, 全是默认值)。
+ *
+ * 而 `@DeleteTable` 生成的 `DROP TABLE` 跑在 `onPostMigrate` 之前, 回调里再想搬已经没得搬, 所以只能手写。
+ *
+ * SQL 与 Room 为这一步生成的那份逐条对齐 (顺序无关的部分保持原样), 只是把 DROP 挪到最后, 中间插入搬运。
+ */
+val MIGRATION_24_25 = object : Migration(startVersion = 24, endVersion = 25) {
+    override fun migrate(connection: SQLiteConnection) {
+        // 1. 剧照直链 (上游 22 -> 23)
+        connection.execSQL("ALTER TABLE `episode_collection` ADD COLUMN `imageMedium` TEXT DEFAULT NULL")
+        connection.execSQL("ALTER TABLE `episode_collection` ADD COLUMN `imageLarge` TEXT DEFAULT NULL")
+
+        // 2. torrent_cache 加回上游的四列
+        connection.execSQL("ALTER TABLE `torrent_cache` ADD COLUMN `completed` INTEGER NOT NULL DEFAULT 0")
+        connection.execSQL("ALTER TABLE `torrent_cache` ADD COLUMN `pathInTorrent` TEXT NOT NULL DEFAULT ''")
+        connection.execSQL("ALTER TABLE `torrent_cache` ADD COLUMN `downloadSize` INTEGER NOT NULL DEFAULT 0")
+        connection.execSQL("ALTER TABLE `torrent_cache` ADD COLUMN `uploadSize` INTEGER NOT NULL DEFAULT 0")
+
+        // 3. 上游的按集表
+        connection.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `torrent_cache_episode` (
+                `mediaId` TEXT NOT NULL,
+                `episodeId` TEXT NOT NULL,
+                `completed` INTEGER NOT NULL,
+                `pathInTorrent` TEXT NOT NULL,
+                `downloadSize` INTEGER NOT NULL,
+                `uploadSize` INTEGER NOT NULL,
+                PRIMARY KEY(`mediaId`, `episodeId`)
+            )
+            """.trimIndent(),
+        )
+
+        // 4. **把 fork 那张按集表的数据搬过去** (这一步就是手写的理由).
+        //    旧表主键是 (mediaId, subjectId, episodeId), 新表少了 subjectId —— 同一集理论上只会属于一个条目,
+        //    真撞上就取 completed 大的那条: SQLite 保证 max() 聚合时同行的裸列取自命中最大值的那一行.
+        connection.execSQL(
+            """
+            INSERT OR REPLACE INTO `torrent_cache_episode`
+                (`mediaId`, `episodeId`, `completed`, `pathInTorrent`, `downloadSize`, `uploadSize`)
+            SELECT `mediaId`, `episodeId`, MAX(`completed`), `pathInTorrent`, `downloadSize`, `uploadSize`
+            FROM `torrent_cache_file`
+            GROUP BY `mediaId`, `episodeId`
+            """.trimIndent(),
+        )
+
+        // 5. 搬完才删
+        connection.execSQL("DROP TABLE `torrent_cache_file`")
     }
 }
 
@@ -453,17 +523,4 @@ internal object Migrations {
         }
     }
 
-    /**
-     * 同步上游 (2026-09-20 rebase): 上游那边的 22 -> 23 与 23 -> 24 两步, 在 fork 这边合并成这一步.
-     *
-     * - 加 [EpisodeCollectionEntity.imageMedium] / [EpisodeCollectionEntity.imageLarge] (TMDB 剧照直链);
-     * - 加 [TorrentCacheEpisodeEntity]: BT 缓存按 (资源, 剧集) 记完成状态与文件路径 ——
-     *   它是 fork 那张 `torrent_cache_file` 的超集 (上游 #3442), 所以后者一并删掉,
-     *   已缓存的 BT 资源会走上游的回退逻辑从 `torrent_cache` 重新认领文件.
-     */
-    @DeleteTable("torrent_cache_file")
-    class Migration_24_25 : AutoMigrationSpec {
-        override fun onPostMigrate(connection: SQLiteConnection) {
-        }
-    }
 }
