@@ -115,9 +115,9 @@ import me.him188.ani.utils.httpdownloader.DownloadState
         AutoMigration(from = 22, to = 23, spec = Migrations.Migration_22_23::class),
         // 23 -> 24: subject_collection 加 screeningYear / theatrical 两列 (纯加列, 有默认值, 不需要 spec).
         AutoMigration(from = 23, to = 24),
-        // 24 -> 25: subject_collection 加 screeningYear / theatrical 两列 (纯加列, 有默认值,
-        // 不需要 spec). 供 TMDB 匹配判断"是不是只在影院放映"与"真正的上映年份", 见
-        // [SubjectCollectionEntity.screeningYear].
+        // 24 -> 25: 上游的 22 -> 23 与 23 -> 24 两步在这里合并成一步, 一次动四处
+        // (剧照列 / 按集缓存表 / torrent_cache 加回四列 / 删掉 fork 的 torrent_cache_file),
+        // 是迁移链上最重的一步 —— 逐项说明见 [Migrations.Migration_24_25], 逐项断言见 MIG-08.
         AutoMigration(from = 24, to = 25, spec = Migrations.Migration_24_25::class),
     ],
     exportSchema = true,
