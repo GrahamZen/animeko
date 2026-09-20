@@ -266,6 +266,7 @@ import me.him188.ani.app.ui.remote.TvRemoteControl
 import me.him188.ani.datasources.api.topic.UnifiedCollectionType
 import org.jetbrains.compose.resources.stringResource
 import kotlin.time.Duration.Companion.seconds
+import me.him188.ani.app.ui.foundation.focus.TvFocusRestoreGate
 
 /**
  * `railExitRestore` 的结果. 布尔不够用: "没送成"要分成**两种**, 否则调用方只能一律退到搜索框 ——
@@ -444,13 +445,26 @@ fun TvSearchPage(
     var pageHasFocus by remember { mutableStateOf(false) }
     val pageIsForeground = LocalPageIsForeground.current
     LaunchedEffect(Unit) {
-        snapshotFlow { pageHasFocus }.collect { has ->
-            if (has || !pageIsForeground.value) return@collect
-            // NotReady = 落点正在等数据, 它会自己送焦; 这时退到搜索框就是那一下"闪"
-            if (railExitRestore.value?.invoke() == RailExitRestoreResult.NoTarget) {
-                searchRestoreLogger.info { "[restore] page fallback -> search field" }
-                runCatching { inputFieldFocus.requestFocus() }
-            }
+        // 必须把 pageIsForeground 一并纳入: 从详情页返回时本页不一定重建 (hero 缩回走
+        // TvZoomStackScene, 两页都留在组合里), pageHasFocus 在**进**详情页那一刻就已经
+        // true -> false, 那时本页还不是栈顶而被下面的守卫跳过; 返回时它没有新的变化,
+        // 只听它的话这条流再也不发射, 落点就没人补了 —— 表现为焦点停在页顶的搜索框
+        // (2026-09-20 实测: 遥控器进详情页必现; 从手机控制台进的不走 zoom、本页正常重建,
+        // 走的是进页恢复那条路, 所以反而正常).
+        snapshotFlow { pageHasFocus to pageIsForeground.value }.collect { (has, foreground) ->
+            if (has || !foreground) return@collect
+            // 页面自己的进页恢复流程正在派落点时不插手 —— 那条路会送到同一张卡, 这里再送一次
+            // 就是肉眼可见的那一下"闪" (2026-09-20 实测: 页面重建时两条路都跑, Done -> card 8
+            // 连打两遍). 本页不重建时 (hero 缩回) 恢复流程根本不跑, 门是关的, 这里照常兜底.
+            if (TvFocusRestoreGate.restoring) return@collect
+            // **不在这里自己调 railExitRestore**: 内容区 onEnter 里那套判据才是唯一送焦入口
+            // (① 落点在途放行 / ② 回上次那张卡 / ③ 默认进组). 在它之外先送一次, 会撞上档 ②
+            // 自己的送焦 —— 档 ① 的判据 gridSendInFlight 要等 switching 置位, 中间有十几毫秒
+            // 的空档, onEnter 正好落进去走了档 ②, 于是同一张卡被送两遍
+            // (2026-09-20 实测: Done -> card 8 连打两遍, 相隔 189ms, 就是那一下"闪").
+            // 这里只发起"进入内容区"的请求, 落到哪交给 onEnter 判.
+            searchRestoreLogger.info { "[restore] page fallback -> content" }
+            runCatching { contentFocus.requestFocus() }
         }
     }
     // **筛选弹窗提到页面级**: 输入态与结果态共用同一个入口. 它原先只挂在结果态里, 而进结果态
@@ -1270,6 +1284,11 @@ private fun TvSearchResultsPane(
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
     val items = state.searchState.collectItemsWithLifecycle()
+    // **长生命周期的闭包必须读这个而不是 items 本身**: 提交一次搜索就会换一个新的 pager,
+    // collectItemsWithLifecycle 跟着产出新的 LazyPagingItems 实例. 而 LaunchedEffect(Unit) /
+    // DisposableEffect(Unit) 里的闭包捕获的是**首次组合那一个** —— 它永远停在"还没搜索"的空列表上,
+    // 于是"等数据到位"的那几处永远等不到 (2026-09-20 实测: itemCount 始终 0, 而页面上明明有卡片).
+    val currentItems by rememberUpdatedState(items)
 
     // Web 控制台的「结果」标签读这份列表 (见 RemoteSearchResults): 快照由 HTTP 线程在需要时读, 不进本面板的
     // 组合; 手机上「加载更多」= 访问最后一项, 分页库照常追加下一页 (出错时重试), 投到本面板的主线程 scope
@@ -1452,7 +1471,7 @@ private fun TvSearchResultsPane(
                 searchRestoreLogger.info { "[restore] NoTarget (lastFocusedCard=$last)" }
                 return@restore RailExitRestoreResult.NoTarget
             }
-            val count = items.itemCount
+            val count = currentItems.itemCount
             if (count > 0) {
                 searchRestoreLogger.info { "[restore] Done -> card $last (itemCount=$count)" }
                 gridFocus.focusItem(minOf(last, count - 1))
@@ -1473,7 +1492,7 @@ private fun TvSearchResultsPane(
             restoreScope.launch {
                 try {
                     val ready = withTimeoutOrNull(RESTORE_DATA_TIMEOUT) {
-                        snapshotFlow { items.itemCount }.first { it > 0 }
+                        snapshotFlow { currentItems.itemCount }.first { it > 0 }
                     }
                     if (ready == null) {
                         searchRestoreLogger.info { "[restore] await timed out, handing focus back to fallback" }
@@ -1495,11 +1514,17 @@ private fun TvSearchResultsPane(
         val target = if (restoreCardIndex >= 0) restoreCardIndex else 0
         onRestoreConsumed()
         // Paging 数据/错误本身就是事件源; 首个终态到达后一次性分派落点.
-        snapshotFlow { items.itemCount to items.loadState.hasError }
-            .first { (count, hasError) -> count > 0 || hasError }
+        // 有上限: 数据迟迟不来时放弃恢复并收尾, 否则 restoreSettled 永远是 false,
+        // TvFocusRestoreClaim 把全局兜底永久挡在门外, 方向键彻底失效 (2026-09-20 实测到 6 秒没到).
+        val dataReady = withTimeoutOrNull(RESTORE_DATA_TIMEOUT) {
+            snapshotFlow { currentItems.itemCount to currentItems.loadState.hasError }
+                .first { (count, hasError) -> count > 0 || hasError }
+            true
+        } ?: false
         when {
-            items.itemCount > 0 -> gridFocus.focusItem(target)
-            items.loadState.hasError -> runCatching { errorCardFocusRequester.requestFocus() }
+            !dataReady -> {} // 超时: 不派落点, 交给全局兜底
+            currentItems.itemCount > 0 -> gridFocus.focusItem(target)
+            currentItems.loadState.hasError -> runCatching { errorCardFocusRequester.requestFocus() }
         }
         // 落点已派出 (pending 从这一刻起接手兜底), 恢复流程收尾
         restoreSettled = true
