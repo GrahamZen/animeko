@@ -11,6 +11,7 @@ package me.him188.ani.android.tv
 
 import android.content.pm.PackageManager
 import me.him188.ani.app.ui.foundation.tv.LocalTvOpenActionPanel
+import me.him188.ani.android.migration.SettingsMigration
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.runtime.Composable
@@ -327,11 +328,14 @@ fun InstallTvPageVariants(aniNavigator: AniNavigator, content: @Composable () ->
         // 「Web 控制台」二维码弹窗: 侧边栏 (主页 / 搜索页 / 详情页) 与头像菜单都只调 TvRemoteControl.showDialog
         TvRemoteControlDialogHost()
         // 打开应用时弹一次二维码 (设置-界面 / 弹窗里都能关), 见 TvRemoteControl.showDialogOnLaunch.
-        // 等地址期间可能已经不在首页了 (休眠后进程重建会恢复到离开时那个页), 那就不弹
+        // 等地址期间可能已经不在首页了 (休眠后进程重建会恢复到离开时那个页), 那就不弹;
+        // 换包迁移的界面 (搬运进度、卸载旧版提示) 开着或马上要出来时也不弹
+        val appContext = LocalContext.current.applicationContext
         LaunchedEffect(Unit) {
-            TvRemoteControl.showDialogOnLaunch {
-                runCatching { aniNavigator.backStack.lastOrNull() }.getOrNull() is NavRoutes.Main
-            }
+            TvRemoteControl.showDialogOnLaunch(
+                onHomePage = { runCatching { aniNavigator.backStack.lastOrNull() }.getOrNull() is NavRoutes.Main },
+                yieldTo = { SettingsMigration.isMigrationUiPending(appContext) },
+            )
         }
         if (showQuickMenu) {
             val context = LocalContext.current

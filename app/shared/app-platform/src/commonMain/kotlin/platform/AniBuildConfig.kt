@@ -32,6 +32,29 @@ interface AniBuildConfig {
 
     val distroChannel: String
 
+    /** 迁移跳板包要装的落地版安装包在 release 里的文件名前缀 (`<前缀>-<版本>-<架构>.apk`, 见 gradle.properties). */
+    val updateAssetPrefix: String
+        get() = "ani"
+
+    /** 放落地版的 GitHub 仓库, `owner/repo` (见 gradle.properties); 发版前走真机更新时可指到测试仓库. */
+    val updateRepository: String
+        get() = "GrahamZen/izuko-tv"
+
+    /**
+     * 本包是不是**跳板包**: 仍用旧 applicationId, 唯一的用处是把老用户引导到新应用的落地版 ([migrationLandingVersion]) 上.
+     * 它的"更新"固定是装落地版, 不找最新版 (见 `UpdateChecker`).
+     */
+    val isMigrationBridge: Boolean
+        get() = false
+
+    /** 本包是不是新应用的落地版. 旧版本线上恒为 `false`, 留着只为共用迁移那部分代码. */
+    val isMigrationLanding: Boolean
+        get() = false
+
+    /** 跳板包要装的落地版版本号 (不带 `v`). */
+    val migrationLandingVersion: String
+        get() = ""
+
     val sentryEnabled: Boolean
         get() = true
     val analyticsEnabled: Boolean

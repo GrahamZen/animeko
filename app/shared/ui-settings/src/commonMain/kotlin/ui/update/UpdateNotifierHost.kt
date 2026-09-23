@@ -71,13 +71,15 @@ fun BoxScope.UpdateNotifier(
 
     // Per-version dismiss state
     var dismissed by rememberSaveable(newVersion?.name) { mutableStateOf(false) }
+    // 跳板包点"自动更新"先出迁移说明, 见 MigrationGuideDialog
+    var migrationGuideVisible by remember(newVersion?.name) { mutableStateOf(false) }
 
     // TV: 下载完成后自动安装 (与设置页一致), 遥控器用户不必再按一次安装
     val autoInstall = LocalAniUiBehavior.current.autoInstallUpdates
     val downloaded = state is AppUpdateState.Downloaded
     LaunchedEffect(autoInstall, downloaded) {
         if (autoInstall && downloaded) {
-            viewModel.install(context)
+            viewModel.autoInstall(context)
         }
     }
 
@@ -90,7 +92,18 @@ fun BoxScope.UpdateNotifier(
         )
     }
 
-    val showCard = !dismissed && (state is AppUpdateState.HasUpdate || presentation.isDownloading)
+    // 下载之前先要安装授权, 见 AppUpdateViewModel.installPermissionRequest
+    val installPermissionRequest by viewModel.installPermissionRequest.collectAsStateWithLifecycle()
+    if (installPermissionRequest != null) {
+        InstallPermissionDialog(
+            onOpenSettings = { viewModel.requestInstallPermission(context) },
+            onDismissRequest = { viewModel.dismissInstallPermissionRequest() },
+        )
+    }
+
+    // 迁移说明开着时藏起卡片: 说明是半透明的居中面板, 右下角这张卡会透出来压在正文上.
+    // 关掉说明时卡片重新出现, 下面那条初始焦点效应随之重跑, 焦点回到"自动更新"
+    val showCard = !dismissed && !migrationGuideVisible && (state is AppUpdateState.HasUpdate || presentation.isDownloading)
     val hasUpdateCard = showCard && state is AppUpdateState.HasUpdate
 
     // TV: 气泡出现时把初始焦点送到"自动更新"按钮. 卡片动画尚未组合按钮时请求会悬挂,
@@ -101,6 +114,13 @@ fun BoxScope.UpdateNotifier(
             focus.request(UpdateNotifierFocus.AutoUpdate)
         }
     }
+    // 下载完成后焦点送到"安装"按钮: 电视上这时会自动拉起系统安装器, 那边失败或被取消回来时, 按一下确定就能重来.
+    // 不送的话焦点留在页面里, 遥控器很难走到右下角这张卡上
+    LaunchedEffect(autoInstall, downloaded) {
+        if (autoInstall && downloaded) {
+            focus.request(UpdateNotifierFocus.Install)
+        }
+    }
 
     // "查看详情": 先在应用内看完整更新内容 (气泡上只放得下前几条), 弹窗底部才是跳浏览器的按钮
     var detailsVisible by remember(newVersion?.name) { mutableStateOf(false) }
@@ -108,9 +128,13 @@ fun BoxScope.UpdateNotifier(
     // 无操作自动消失: 提示卡出现一段时间后自行关闭, 不永久挡住右下角内容.
     // 开始下载后 hasUpdateCard 变 false, 本效应取消 —— 下载进度卡不受影响.
     // 详情弹窗开着时不计时: 用户正在读那几十条更新, 背后把气泡撤掉的话关掉弹窗就没有入口了
-    // (再点"自动更新"要重新等一轮检查). 关掉弹窗后重新计满 20 秒.
-    LaunchedEffect(hasUpdateCard, detailsVisible, newVersion?.name) {
-        if (hasUpdateCard && !detailsVisible) {
+    // (再点"自动更新"要重新等一轮检查). 关掉弹窗后重新计满 20 秒. 安装授权的说明与迁移说明开着时同理.
+    // 迁移那张卡不自动消失: 跳板包存在的意义就是它. 关闭按钮与返回键照常能关掉它.
+    val autoDismiss = newVersion?.isMigration != true
+    LaunchedEffect(
+        hasUpdateCard, detailsVisible, installPermissionRequest, migrationGuideVisible, autoDismiss, newVersion?.name,
+    ) {
+        if (hasUpdateCard && !detailsVisible && installPermissionRequest == null && !migrationGuideVisible && autoDismiss) {
             delay(UPDATE_CARD_AUTO_DISMISS_MILLIS)
             dismissed = true
         }
@@ -122,6 +146,15 @@ fun BoxScope.UpdateNotifier(
             changes = version.detailedChanges,
             onOpenInBrowser = { uriHandler.openUri(releaseNotesUrl(version.name)) },
             onDismissRequest = { detailsVisible = false },
+        )
+    }
+    newVersion?.takeIf { migrationGuideVisible }?.let { version ->
+        MigrationGuideDialog(
+            onStart = {
+                migrationGuideVisible = false
+                viewModel.startDownload(version, uriHandler)
+            },
+            onDismissRequest = { migrationGuideVisible = false },
         )
     }
 
@@ -149,7 +182,7 @@ fun BoxScope.UpdateNotifier(
     // 既看不出焦点在哪, 也不知道怎么把它关掉. 锁上后出口只剩三个按钮和返回键, 全是一按之遥.
     // 只锁"有更新"这张卡 (与上面返回键同理): 下载中那张要挂几分钟, 锁住等于扣着整个应用不放.
     // 20 秒无操作自动消失仍然有效, 是这个模态的兜底时限; 届时焦点由 NavHost 的兜底监视
-    // (见 AniAppContent 的 navHostModifier) 送回页面, 不会丢在根上.
+    // (见 AniAppContent 的 navHostModifier) 送回页面, 不会丢在根上. 迁移卡没有这个时限, 出口是关闭按钮与返回键.
     val trapFocus = LocalAniUiBehavior.current.focusDrivenNavigation && hasUpdateCard
 
     AniAnimatedVisibility(
@@ -175,9 +208,17 @@ fun BoxScope.UpdateNotifier(
                     version = newVersion?.name ?: "",
                     changes = newVersion?.majorChanges ?: emptyList(),
                     showFeedbackGroupHint = newVersion?.hasFeedbackGroup == true,
+                    isMigration = newVersion?.isMigration == true,
                     onDetailsClick = { detailsVisible = true },
                     onAutoUpdateClick = {
-                        newVersion?.let { viewModel.startDownload(it, uriHandler) }
+                        newVersion?.let {
+                            when {
+                                // 没有安装授权先去授权 (授权那一刻系统会关掉应用), 重新打开再点才出迁移说明, 两个弹窗不连着出
+                                it.isMigration && viewModel.askInstallPermissionIfMissing(it) -> {}
+                                it.isMigration -> migrationGuideVisible = true
+                                else -> viewModel.startDownload(it, uriHandler)
+                            }
+                        }
                     },
                     onDismissRequest = { dismissed = true },
                     autoUpdateButtonModifier = Modifier.tvFocusAnchor(
@@ -199,13 +240,14 @@ fun BoxScope.UpdateNotifier(
                         dismissed = true
                     },
                     onRetryClick = { viewModel.restartDownload(uriHandler) },
+                    installButtonModifier = Modifier.tvFocusAnchor(focus, UpdateNotifierFocus.Install),
                 )
             }
         }
     }
 }
 
-private enum class UpdateNotifierFocus : TvFocusKey { AutoUpdate }
+private enum class UpdateNotifierFocus : TvFocusKey { AutoUpdate, Install }
 
 /**
  * 设置页中的更新提示卡片，带下载和安装按钮，永久显示直到手动关闭.
@@ -230,7 +272,7 @@ fun BoxScope.UpdateSettingsNotifier(
     val downloaded = state is AppUpdateState.Downloaded
     LaunchedEffect(autoInstall, downloaded) {
         if (autoInstall && downloaded) {
-            viewModel.install(context)
+            viewModel.autoInstall(context)
         }
     }
 
@@ -243,16 +285,34 @@ fun BoxScope.UpdateSettingsNotifier(
         )
     }
 
-    val showCard = !dismissed && (state is AppUpdateState.HasUpdate || presentation.isDownloading)
+    // 下载之前先要安装授权, 见 AppUpdateViewModel.installPermissionRequest
+    val installPermissionRequest by viewModel.installPermissionRequest.collectAsStateWithLifecycle()
+    if (installPermissionRequest != null) {
+        InstallPermissionDialog(
+            onOpenSettings = { viewModel.requestInstallPermission(context) },
+            onDismissRequest = { viewModel.dismissInstallPermissionRequest() },
+        )
+    }
 
     // 与入口气泡一致: "查看详情"先在应用内看全文 (设置页这张卡不会自动消失, 无需暂停计时)
     var detailsVisible by remember(newVersion?.name) { mutableStateOf(false) }
+    var migrationGuideVisible by remember(newVersion?.name) { mutableStateOf(false) }
+    val showCard = !dismissed && !migrationGuideVisible && (state is AppUpdateState.HasUpdate || presentation.isDownloading)
     newVersion?.takeIf { detailsVisible }?.let { version ->
         NewVersionDetailsDialog(
             version = version.name,
             changes = version.detailedChanges,
             onOpenInBrowser = { uriHandler.openUri(releaseNotesUrl(version.name)) },
             onDismissRequest = { detailsVisible = false },
+        )
+    }
+    newVersion?.takeIf { migrationGuideVisible }?.let { version ->
+        MigrationGuideDialog(
+            onStart = {
+                migrationGuideVisible = false
+                viewModel.startDownload(version, uriHandler)
+            },
+            onDismissRequest = { migrationGuideVisible = false },
         )
     }
 
@@ -269,9 +329,17 @@ fun BoxScope.UpdateSettingsNotifier(
                     version = newVersion?.name ?: "",
                     changes = newVersion?.majorChanges ?: emptyList(),
                     showFeedbackGroupHint = newVersion?.hasFeedbackGroup == true,
+                    isMigration = newVersion?.isMigration == true,
                     onDetailsClick = { detailsVisible = true },
                     onAutoUpdateClick = {
-                        newVersion?.let { viewModel.startDownload(it, uriHandler) }
+                        newVersion?.let {
+                            when {
+                                // 没有安装授权先去授权 (授权那一刻系统会关掉应用), 重新打开再点才出迁移说明, 两个弹窗不连着出
+                                it.isMigration && viewModel.askInstallPermissionIfMissing(it) -> {}
+                                it.isMigration -> migrationGuideVisible = true
+                                else -> viewModel.startDownload(it, uriHandler)
+                            }
+                        }
                     },
                     onDismissRequest = { dismissed = true },
                 )
