@@ -29,6 +29,13 @@ val analyticsKey = getPropertyOrNull("ani.analytics.key") ?: ""
 val overrideAniApiServer = getPropertyOrNull("ani.api.server")?.takeIf { it.isNotBlank() }
 
 val distroChannel = getPropertyOrNull("ani.distro.channel") ?: "default"
+// 迁移跳板包 (这条分支只出它, 构建时带 -Pani.android.migrationBridge=true): 它的"更新"固定是装新应用的落地版,
+// 见 gradle.properties 的 ani.migration.* 与 ani.update.asset.prefix.
+val migrationBridge = (getPropertyOrNull("ani.android.migrationBridge") ?: "false").toBooleanStrict()
+val migrationLandingVersion = getProperty("ani.migration.landing.version")
+val updateAssetPrefix = getProperty("ani.update.asset.prefix")
+// 放落地版的仓库. 发版前真机走一遍时用 -P 或 local.properties 的 ani.update.repository 指到测试仓库
+val updateRepository = getPropertyOrNull("ani.update.repository") ?: getProperty("ani.migration.repository")
 
 kotlin {
     android {
@@ -128,6 +135,11 @@ buildConfig {
         stringField("sentryDsn", sentryDsn)
         stringField("overrideAniApiServer", overrideAniApiServer ?: "")
         stringField("distroChannel", distroChannel)
+        stringField("updateAssetPrefix", updateAssetPrefix)
+        stringField("updateRepository", updateRepository)
+        booleanField("isMigrationBridge", migrationBridge)
+        booleanField("isMigrationLanding", false)
+        stringField("migrationLandingVersion", migrationLandingVersion)
 
         firebaseFields()
     }
@@ -142,6 +154,11 @@ buildConfig {
         stringField("sentryDsn", sentryDsn)
         stringField("overrideAniApiServer", overrideAniApiServer ?: "")
         stringField("distroChannel", distroChannel)
+        stringField("updateAssetPrefix", updateAssetPrefix)
+        stringField("updateRepository", updateRepository)
+        booleanField("isMigrationBridge", migrationBridge)
+        booleanField("isMigrationLanding", false)
+        stringField("migrationLandingVersion", migrationLandingVersion)
 
         booleanField("analyticsEnabled", enableFirebase)
     }

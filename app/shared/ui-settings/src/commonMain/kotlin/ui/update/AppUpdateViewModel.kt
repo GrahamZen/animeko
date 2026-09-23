@@ -16,6 +16,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
@@ -37,6 +39,7 @@ import me.him188.ani.app.tools.update.UpdateInstallationRunner
 import me.him188.ani.app.tools.update.UpdateInstallationState
 import me.him188.ani.app.tools.update.UpdateInstaller
 import me.him188.ani.app.ui.foundation.AbstractViewModel
+import me.him188.ani.utils.io.SystemPath
 import me.him188.ani.utils.io.createDirectories
 import me.him188.ani.utils.io.exists
 import me.him188.ani.utils.io.inSystem
@@ -47,6 +50,7 @@ import me.him188.ani.utils.platform.annotations.TestOnly
 import me.him188.ani.utils.platform.currentTimeMillis
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
+import kotlin.concurrent.Volatile
 import kotlin.coroutines.cancellation.CancellationException
 
 /**
@@ -79,6 +83,13 @@ class AppUpdateViewModel : AbstractViewModel(), KoinComponent {
     // Track that work separately so the UI can show installation state and cancel it safely.
     private val installationTasker = MonoTasker(backgroundScope)
     private val checkUpdateErrorFlow = MutableStateFlow<LoadError?>(null)
+
+    private val installPermissionRequestFlow = MutableStateFlow<NewVersion?>(null)
+
+    /**
+     * 等着安装授权才开始下载的版本 (见 [UpdateInstaller.canInstallNow]), 界面据此问用户要不要去授权.
+     */
+    val installPermissionRequest: StateFlow<NewVersion?> = installPermissionRequestFlow.asStateFlow()
 
     val presentationFlow = combine(
         latestVersionFlow,
@@ -151,11 +162,16 @@ class AppUpdateViewModel : AbstractViewModel(), KoinComponent {
         uriHandler: UriHandler?
     ) {
         autoCheckTasker.launch {
+            // 落地版只是迁移的中转: 等接管彻底结束 (数据、缓存、卸载旧版的提示), 然后必须更新到最新版,
+            // 不看"自动检查 / 自动下载"的设置. 更早装上最新版会把没搬完的东西丢在半路 —— 最新版不带迁移代码
+            val landing = currentAniBuildConfig.isMigrationLanding
+            if (landing) MigrationLandingGate.awaitMigrationDone()
             val updateSettings = updateSettings.first()
 
             checkUpdateErrorFlow.value = null
             val ver = try {
-                if (!updateSettings.autoCheckUpdate) {
+                // 跳板包存在的意义就是把人带到新应用上, 关着检查的话它就只是个不会再更新的旧版
+                if (!updateSettings.autoCheckUpdate && !currentAniBuildConfig.isMigrationBridge && !landing) {
                     logger.info { "autoCheckUpdate disabled" }
                     return@launch
                 }
@@ -174,7 +190,8 @@ class AppUpdateViewModel : AbstractViewModel(), KoinComponent {
 
             latestVersionFlow.update { ver }
 
-            if (ver != null && updateSettings.autoDownloadUpdate) {
+            // 迁移不自动下载: 下完电视上会直接弹系统安装框, 用户还没看到说明就被问"要不要安装另一个应用"
+            if (ver != null && (updateSettings.autoDownloadUpdate || landing) && !ver.isMigration) {
                 logger.info { "autoDownloadUpdate is true, starting download" }
                 startDownload(ver, uriHandler)
             }
@@ -182,9 +199,11 @@ class AppUpdateViewModel : AbstractViewModel(), KoinComponent {
     }
 
     fun startDownload(ver: NewVersion, uriHandler: UriHandler?) {
+        autoInstalledFile = null // 重新下载的包要能再自动装一次
         downloadTasker.launch {
             val settings = updateSettings.first()
-            if (!settings.inAppDownload) {
+            // 迁移 (跳板装落地版、落地版装最新版) 固定在应用内下载: 电视上交给浏览器基本走不通, 而这一步卡住就迁不过去了
+            if (!settings.inAppDownload && !ver.isMigration && !currentAniBuildConfig.isMigrationLanding) {
                 if (uriHandler == null) {
                     logger.warn { "uriHandler is null, cannot navigate to browser (may happen for auto check)" }
                     return@launch
@@ -194,6 +213,13 @@ class AppUpdateViewModel : AbstractViewModel(), KoinComponent {
                 } ?: run {
                     logger.warn { "No download URL found, ignoring" }
                 }
+                return@launch
+            }
+
+            // 下载之前先要到安装授权: 授权那一刻 Android 11 会杀掉本应用, 下完再授权的话重新打开还得再下一遍
+            if (!updateInstaller.canInstallNow()) {
+                logger.info { "Install permission missing, asking before downloading ${ver.name}" }
+                installPermissionRequestFlow.value = ver
                 return@launch
             }
 
@@ -226,6 +252,27 @@ class AppUpdateViewModel : AbstractViewModel(), KoinComponent {
         }
     }
 
+    /**
+     * 还没有安装授权时先问用户要 (见 [installPermissionRequest]) 并返回 `true`; 已有授权返回 `false`.
+     * 迁移在点「自动更新」时就先问: 授权那一刻系统会关掉应用, 迁移说明留到重新打开之后再看.
+     */
+    fun askInstallPermissionIfMissing(ver: NewVersion): Boolean {
+        if (updateInstaller.canInstallNow()) return false
+        logger.info { "Install permission missing, asking before the migration guide for ${ver.name}" }
+        installPermissionRequestFlow.value = ver
+        return true
+    }
+
+    /** 打开系统的授权页. 授权时 Android 11 会杀掉本应用; 重新打开后照常检查更新, 那时再下载. */
+    fun requestInstallPermission(context: ContextMP) {
+        installPermissionRequestFlow.value = null
+        updateInstaller.requestInstallPermission(context)
+    }
+
+    fun dismissInstallPermissionRequest() {
+        installPermissionRequestFlow.value = null
+    }
+
     fun restartDownload(uriHandler: UriHandler) {
         latestVersionFlow.value?.let { startDownload(it, uriHandler) }
     }
@@ -240,6 +287,27 @@ class AppUpdateViewModel : AbstractViewModel(), KoinComponent {
                 context = context,
             )
         }
+    }
+
+    /** 最近一次自动安装的文件, 见 [autoInstall]. */
+    @Volatile
+    private var autoInstalledFile: SystemPath? = null
+
+    /**
+     * 下载完成后自动安装 (TV), 同一个下载好的文件只装一次.
+     *
+     * [install] 期间界面状态会经过 [AppUpdateState.Installing] 再回到 [AppUpdateState.Downloaded], 界面按"已下载"
+     * 触发的话会一遍遍重装; 没有「安装未知应用」授权时每一遍都打开一个授权设置页, 叠成好几层.
+     * 用户手动点「安装」走 [install], 不受影响.
+     */
+    fun autoInstall(context: ContextMP) {
+        val state = presentationFlow.value.state as? AppUpdateState.Downloaded ?: return
+        if (state.file == autoInstalledFile) {
+            logger.info { "autoInstall: ${state.file} 已经自动装过, 不再拉起安装器" }
+            return
+        }
+        autoInstalledFile = state.file
+        install(context)
     }
 
     fun dismissInstallationFailure() {
@@ -300,6 +368,12 @@ class NewVersion(
      */
     val downloadUrlAlternatives: List<String>,
     val publishedAt: String,
+    /**
+     * 这次"更新"是从跳板包迁到新包名的应用 (见 `AniBuildConfig.isMigrationBridge`): 装上的是另一个应用,
+     * 旧的这个不会被替换. 界面要先讲清楚再动手, 所以不自动下载 (见 [AppUpdateViewModel.startCheckLatestVersion]),
+     * 点"自动更新"时先出迁移说明.
+     */
+    val isMigration: Boolean = false,
 ) {
     val majorChanges = changelogs.asSequence().flatMap { changelog ->
         changelog.changes.lineSequence()

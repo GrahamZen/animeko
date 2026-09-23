@@ -41,6 +41,15 @@ android {
         // 数据也各自独立, 想要"全新安装"的冷启动场景直接 pm clear 那个包, 不碰正式包的登录与设置.
         // 默认空 = 正式包不受影响.
         applicationId = "me.him188.ani" + (getPropertyOrNull("ani.android.appIdSuffix") ?: "")
+        // 迁移跳板包 (-Pani.android.migrationBridge=true, 仍是旧 applicationId): 迁移过程中新旧两个应用会同时装着,
+        // 桌面上同名的话用户分不清该留哪个、卸哪个
+        val bridge = (getPropertyOrNull("ani.android.migrationBridge") ?: "false").toBooleanStrict()
+        manifestPlaceholders["appLabel"] = if (bridge) "@string/app_name_migration_bridge" else "@string/app_name"
+        // 迁移时新旧两个包要互相看得见 (AndroidManifest 的 <queries>): 按同一个后缀拼出两边的电视包名,
+        // 加了后缀的对比/测试包也能走通迁移
+        val migrationAppIdSuffix = getPropertyOrNull("ani.android.appIdSuffix") ?: ""
+        manifestPlaceholders["legacyTvPackage"] = "me.him188.ani$migrationAppIdSuffix.tv"
+        manifestPlaceholders["currentTvPackage"] = "io.github.grahamzen.anime$migrationAppIdSuffix.tv"
         minSdk = androidMinSdk
         targetSdk = getIntProperty("android.compile.sdk")
         versionCode = getIntProperty("android.version.code")

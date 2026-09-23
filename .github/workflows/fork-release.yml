@@ -18,6 +18,8 @@ jobs:
     outputs:
       uploadUrl: '${{ steps.step-4.outputs.upload_url }}'
       id: '${{ steps.step-4.outputs.id }}'
+      bridge: '${{ steps.line.outputs.bridge }}'
+      prefix: '${{ steps.line.outputs.prefix }}'
     steps:
       - id: 'step-0'
         uses: 'actions/checkout@v4'
@@ -30,6 +32,21 @@ jobs:
           value: '${{ steps.step-1.outputs.tag }}'
           index_of_str: 'v'
           default_return_value: '${{ steps.step-1.outputs.tag }}'
+      # 这条分支 (release/bridge) 只出迁移跳板包: 旧 applicationId, 文件名 ani-…, 已发布的老包像平常一样升级到它.
+      # 跳板包的 tag 在旧版本线上 (主版本号 >= 6); 新应用的 tag (1.x) 不该打在这里.
+      - id: 'line'
+        name: 'Decide Distribution Line'
+        run: |
+          set -euo pipefail
+          version='${{ steps.step-2.outputs.substring }}'
+          major="${version%%.*}"
+          if [ "$major" -lt 6 ]; then
+            echo "::error::这条分支只出跳板包 (6.x); 新应用的落地版从 release/migration 出, 最新版从 main 出"
+            exit 1
+          fi
+          echo "bridge=true" >> "$GITHUB_OUTPUT"
+          echo "prefix=ani" >> "$GITHUB_OUTPUT"
+          echo "version=$version bridge=true prefix=ani"
       - id: 'step-3'
         name: 'Generate Release Notes'
         run: |-
@@ -39,6 +56,7 @@ jobs:
           modified_content="${modified_content//\$GIT_TAG/${{ steps.step-1.outputs.tag }}}"
           modified_content="${modified_content//\$TAG_VERSION/${{ steps.step-2.outputs.substring }}}"
           modified_content="${modified_content//\$REPO_OWNER/${{ github.repository_owner }}}"
+          modified_content="${modified_content//\$ASSET_PREFIX/${{ steps.line.outputs.prefix }}}"
           echo "result<<EOF" >> $GITHUB_OUTPUT
           echo "$modified_content" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
@@ -51,7 +69,8 @@ jobs:
           tag_name: '${{ steps.step-1.outputs.tag }}'
           draft: 'true'
           prerelease: '${{ contains(steps.step-1.outputs.tag, ''-'') }}'
-          generate_release_notes: 'true'
+          # 跳板包的 tag 打在一个单独的提交上 (见 scripts/tag-migration-bridge.sh), 自动生成的提交列表只会是一堆无关的历史
+          generate_release_notes: '${{ steps.line.outputs.bridge != ''true'' }}'
         env:
           GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
   release_android:
@@ -166,10 +185,14 @@ jobs:
           fileName: 'android_signing_key'
           fileDir: './'
           encodedString: '${{ secrets.SIGNING_RELEASE_STOREFILE }}'
+      # 新旧两套包名都列上: 跳板包 (旧版本线的 tag) 仍用旧 applicationId, 缺了它的 client 构建直接失败.
       - id: 'step-16'
         name: 'Generate Mock google-services.json'
         run: |
-          echo '{"project_info":{"project_number":"0","project_id":"mock-project","storage_bucket":"mock-bucket"},"client":[{"client_info":{"mobilesdk_app_id":"1:123456789012:android:0000000000000000","android_client_info":{"package_name":"me.him188.ani"}},"api_key":[{"current_key":"mock_key"}]},{"client_info":{"mobilesdk_app_id":"1:123456789012:android:0000000000000001","android_client_info":{"package_name":"me.him188.ani.tv"}},"api_key":[{"current_key":"mock_key"}]}]}' > ./app/android/google-services.json
+          echo '{"project_info":{"project_number":"0","project_id":"mock-project","storage_bucket":"mock-bucket"},"client":[{"client_info":{"mobilesdk_app_id":"1:123456789012:android:0000000000000000","android_client_info":{"package_name":"io.github.grahamzen.anime"}},"api_key":[{"current_key":"mock_key"}]},{"client_info":{"mobilesdk_app_id":"1:123456789012:android:0000000000000001","android_client_info":{"package_name":"io.github.grahamzen.anime.tv"}},"api_key":[{"current_key":"mock_key"}]},{"client_info":{"mobilesdk_app_id":"1:123456789012:android:0000000000000002","android_client_info":{"package_name":"me.him188.ani"}},"api_key":[{"current_key":"mock_key"}]},{"client_info":{"mobilesdk_app_id":"1:123456789012:android:0000000000000003","android_client_info":{"package_name":"me.him188.ani.tv"}},"api_key":[{"current_key":"mock_key"}]}]}' > ./app/android/google-services.json
+      # 下面的构建与上传都带 -Pani.android.migrationBridge: 旧版本线的 tag (见 create-release 的 line 步骤)
+      # 出的是迁移跳板包 —— 旧 applicationId, 文件名 ani-…, 唯一的用处是把老用户引导到新包上
+      # (见 AniBuildConfig.isMigrationBridge). 一个 release 只放一套包.
       - id: 'step-17'
         name: 'Build Android Release APKs'
         env:
@@ -178,7 +201,7 @@ jobs:
           signing_release_keyAlias: '${{ secrets.SIGNING_RELEASE_KEYALIAS }}'
           signing_release_keyPassword: '${{ secrets.SIGNING_RELEASE_KEYPASSWORD }}'
         timeout-minutes: 180
-        run: './gradlew assembleDefaultTvRelease "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-Dorg.gradle.jvmargs=-Xmx8g -Dkotlin.daemon.jvm.options=-Xmx6g" "-Dkotlin.daemon.jvm.options=-Xmx6g"'
+        run: './gradlew assembleDefaultTvRelease "-Pani.android.migrationBridge=${{ needs.create-release.outputs.bridge }}" "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-Dorg.gradle.jvmargs=-Xmx8g -Dkotlin.daemon.jvm.options=-Xmx6g" "-Dkotlin.daemon.jvm.options=-Xmx6g"'
       - id: 'step-18'
         name: 'Upload Android Release APK arm64-v8a'
         uses: 'actions/upload-artifact@v4'
@@ -221,7 +244,7 @@ jobs:
           AWS_REGION: '${{ secrets.AWS_REGION }}'
           AWS_BUCKET: '${{ secrets.AWS_BUCKET }}'
         timeout-minutes: 180
-        run: './gradlew :ci-helper:uploadAndroidApk "--no-configuration-cache" "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-Dorg.gradle.jvmargs=-Xmx8g -Dkotlin.daemon.jvm.options=-Xmx6g" "-Dkotlin.daemon.jvm.options=-Xmx6g"'
+        run: './gradlew :ci-helper:uploadAndroidApk "-Pani.android.migrationBridge=${{ needs.create-release.outputs.bridge }}" "--no-configuration-cache" "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-Dorg.gradle.jvmargs=-Xmx8g -Dkotlin.daemon.jvm.options=-Xmx6g" "-Dkotlin.daemon.jvm.options=-Xmx6g"'
       # 兼容包 (Android 7.1 / API 25): 单独再构建一次, 与正式包完全隔离.
       # 必须排在正式包上传之后 —— 它会覆盖同样的输出路径.
       # minSdk 25 + core library desugaring 只在这一次构建里生效, 正式包一行字节码都不受影响.
@@ -233,7 +256,7 @@ jobs:
           signing_release_keyAlias: '${{ secrets.SIGNING_RELEASE_KEYALIAS }}'
           signing_release_keyPassword: '${{ secrets.SIGNING_RELEASE_KEYPASSWORD }}'
         timeout-minutes: 180
-        run: './gradlew assembleDefaultTvRelease "-Pani.android.legacy=true" "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-Dorg.gradle.jvmargs=-Xmx8g -Dkotlin.daemon.jvm.options=-Xmx6g" "-Dkotlin.daemon.jvm.options=-Xmx6g"'
+        run: './gradlew assembleDefaultTvRelease "-Pani.android.legacy=true" "-Pani.android.migrationBridge=${{ needs.create-release.outputs.bridge }}" "--scan" "-Porg.gradle.daemon.idletimeout=60000" "-Dfile.encoding=UTF-8" "-Dorg.gradle.jvmargs=-Xmx8g -Dkotlin.daemon.jvm.options=-Xmx6g" "-Dkotlin.daemon.jvm.options=-Xmx6g"'
       - id: 'step-24'
         name: 'Upload Android Legacy (API 25) APK for Release'
         env:

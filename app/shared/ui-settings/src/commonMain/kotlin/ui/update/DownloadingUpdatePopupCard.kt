@@ -42,6 +42,7 @@ import me.him188.ani.app.domain.foundation.LoadError
 import me.him188.ani.app.tools.update.FileDownloaderState
 import me.him188.ani.app.ui.foundation.ProvideCompositionLocalsForPreview
 import me.him188.ani.app.ui.lang.Lang
+import me.him188.ani.app.ui.lang.settings_update_migration_install
 import me.him188.ani.app.ui.lang.settings_update_popup_cancel
 import me.him188.ani.app.ui.lang.settings_update_popup_cancel_download
 import me.him188.ani.app.ui.lang.settings_update_popup_cancel_install
@@ -66,6 +67,8 @@ fun DownloadingUpdatePopupCard(
     onCancelClick: () -> Unit,
     onRetryClick: () -> Unit,
     modifier: Modifier = Modifier,
+    /** "安装"按钮的附加 modifier (TV 上挂焦点锚点, 下载完成后把焦点送过去). */
+    installButtonModifier: Modifier = Modifier,
 ) {
     var showConfirmCancel by rememberSaveable { mutableStateOf(false) }
     val onRequestCancel = {
@@ -130,13 +133,23 @@ fun DownloadingUpdatePopupCard(
         dismissButton = {
             NotificationPopupDefaults.DismissButton(onRequestCancel)
         },
-        subtitle = { Text(version.name) },
+        // 迁移装的是另一个应用: 写明是哪个, 否则跳板包 (6.x) 上只显示一个 1.x 的版本号
+        subtitle = {
+            Text(if (version.isMigration) "$MIGRATION_TARGET_APP_NAME ${version.name}" else version.name)
+        },
         actions = {
             if (!isInstalling && fileDownloaderStats.state is FileDownloaderState.Succeed) {
                 Button(
                     onClick = onInstallClick,
+                    modifier = installButtonModifier,
                 ) {
-                    Text(stringResource(Lang.settings_update_popup_restart_update))
+                    Text(
+                        stringResource(
+                            // 迁移不是"重启": 装上的是另一个应用, 旧的这个还在
+                            if (version.isMigration) Lang.settings_update_migration_install
+                            else Lang.settings_update_popup_restart_update,
+                        ),
+                    )
                 }
             }
         },
