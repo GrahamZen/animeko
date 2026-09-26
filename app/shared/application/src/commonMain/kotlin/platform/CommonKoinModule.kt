@@ -42,6 +42,7 @@ import me.him188.ani.app.data.network.BangumiReplyRelationService
 import me.him188.ani.app.data.network.DefaultWatchTogetherApiService
 import me.him188.ani.app.data.network.EpisodeService
 import me.him188.ani.app.data.network.EpisodeServiceImpl
+import me.him188.ani.app.data.network.GitHubDownloadMirrors
 import me.him188.ani.app.data.network.RecommendationRepository
 import me.him188.ani.app.data.network.RemoteSubjectService
 import me.him188.ani.app.data.network.SubjectService
@@ -199,6 +200,13 @@ private fun KoinApplication.otherModules(getContext: () -> Context, coroutineSco
     // 数据源发请求时用得到本机浏览器 UA; 数据源由工厂创建拿不到 Context, 在这里装进去
     DeviceBrowserUserAgentHolder.install { getContext().deviceBrowserUserAgent() }
 
+    single<GitHubDownloadMirrors> {
+        GitHubDownloadMirrors(
+            repository = currentAniBuildConfig.updateRepository,
+            client = { get<HttpClientProvider>().get() },
+            scope = coroutineScope,
+        )
+    }
     single<HttpClientProvider> {
         val sessionManager by inject<SessionManager>()
         DefaultHttpClientProvider(
