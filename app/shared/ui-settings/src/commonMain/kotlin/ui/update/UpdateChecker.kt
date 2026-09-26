@@ -19,6 +19,7 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.http.isSuccess
 import kotlinx.coroutines.CancellationException
+import kotlinx.datetime.TimeZone
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -50,6 +51,17 @@ internal val JSDELIVR_HOSTS = listOf("gcore.jsdelivr.net", "testingcf.jsdelivr.n
 
 /** ghfast.top: 公共的 GitHub 下载代理, release 资源 / raw / releases/latest 跳转都能代理, API 与 atom 不行 (403). */
 internal fun ghfastUrl(gitHubUrl: String) = "https://ghfast.top/$gitHubUrl"
+
+/**
+ * 系统时区是否在中国大陆. 那里常见 GitHub 接口能通、release 下载不通或极慢, 下载地址要把镜像排前面.
+ * 跳板包没有 Bangumi 线路之类的网络设置可看, 只能看时区; 港澳台的时区不算.
+ */
+internal fun isMainlandChinaTimeZone(zoneId: String = TimeZone.currentSystemDefault().id): Boolean =
+    zoneId in MAINLAND_CHINA_TIME_ZONES
+
+private val MAINLAND_CHINA_TIME_ZONES = setOf(
+    "Asia/Shanghai", "Asia/Chongqing", "Asia/Chungking", "Asia/Harbin", "Asia/Urumqi", "Asia/Kashgar", "PRC",
+)
 
 /** 镜像回落时拿不到资源列表, 按 fork-release.yml 的命名规则合成; 不存在的那个下载时 404, 下载器接着试下一个. */
 internal val RELEASE_APK_SUFFIXES = listOf(
@@ -248,9 +260,9 @@ class UpdateChecker(private val client: ScopedHttpClient) {
             changelogs = listOf(
                 Changelog(version = version, publishedAt = release?.publishedAt.orEmpty(), changes = release?.body.orEmpty()),
             ),
-            // API 通了 GitHub 下载多半也通, 原地址在前; 不通就镜像在前
+            // API 通、时区不在中国大陆时原地址在前; 否则镜像在前 (大陆常见接口通而下载不通或极慢)
             downloadUrlAlternatives = packages.flatMap {
-                if (release != null) listOf(it.browserDownloadUrl, ghfastUrl(it.browserDownloadUrl))
+                if (release != null && !isMainlandChinaTimeZone()) listOf(it.browserDownloadUrl, ghfastUrl(it.browserDownloadUrl))
                 else listOf(ghfastUrl(it.browserDownloadUrl), it.browserDownloadUrl)
             },
             publishedAt = release?.publishedAt.orEmpty(),
